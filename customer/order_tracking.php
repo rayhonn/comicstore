@@ -155,60 +155,63 @@ foreach ($steps as $i => $step) {
         <div class="bg-white rounded-2xl shadow-sm p-6 mb-6">
             <h3 class="font-bold text-gray-800 mb-6">Delivery Status</h3>
 
-            <div class="relative">
-                <?php foreach ($steps as $i => $step): ?>
-                <?php
+            <?php
+                $total_steps = count($steps);
+                $done_count = count(array_filter($steps, fn($s) => $s['done']));
+                $progress_pct = $total_steps > 1 ? (($done_count - 1) / ($total_steps - 1)) * 100 : 0;
+                $progress_pct = max(0, $progress_pct);
+            ?>
+
+            <!-- Icons Row -->
+            <div class="relative flex items-start justify-between mb-2">
+                <!-- Background line -->
+                <div class="absolute top-5 left-5 right-5 h-0.5 bg-gray-200 z-0"></div>
+                <!-- Progress line -->
+                <div class="absolute top-5 left-5 h-0.5 bg-green-400 z-0 transition-all duration-500"
+                    style="width: calc(<?= $progress_pct ?>% - 10px)"></div>
+
+                <?php foreach ($steps as $i => $step):
                     $is_done = $step['done'];
                     $is_current = ($i === $current_step && $is_done);
-                    $is_last = ($i === count($steps) - 1);
                 ?>
-                <div class="flex gap-4 <?= !$is_last ? 'mb-0' : '' ?>">
-                    <!-- Icon + Line -->
-                    <div class="flex flex-col items-center">
-                        <div class="w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0
-                            <?= $is_done 
-                                ? ($is_current && !in_array($order['order_status'], ['delivered']) 
-                                    ? 'bg-blue-100 ring-2 ring-blue-400 ring-offset-2' 
-                                    : 'bg-green-100') 
-                                : 'bg-gray-100' ?>">
-                            <?php if ($is_done && $order['order_status'] === 'delivered' && $step['key'] === 'delivered'): ?>
-                                <span>✅</span>
-                            <?php elseif ($is_current && !in_array($order['order_status'], ['delivered'])): ?>
-                                <span class="pulse-dot"><?= $step['icon'] ?></span>
-                            <?php elseif ($is_done): ?>
-                                <span><?= $step['icon'] ?></span>
-                            <?php else: ?>
-                                <span class="text-gray-300"><?= $step['icon'] ?></span>
-                            <?php endif; ?>
-                        </div>
-                        <?php if (!$is_last): ?>
-                        <div class="w-0.5 flex-1 my-1 min-h-[32px] rounded-full
-                            <?= $is_done ? 'bg-green-300' : 'bg-gray-200' ?>">
-                        </div>
+                <div class="flex flex-col items-center z-10 flex-1">
+                    <!-- Circle -->
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0
+                        <?= $is_done
+                            ? ($is_current && !in_array($order['order_status'], ['delivered'])
+                                ? 'bg-blue-100 ring-2 ring-blue-400 ring-offset-2'
+                                : 'bg-green-100')
+                            : 'bg-gray-100' ?>">
+                        <?php if ($is_done && $order['order_status'] === 'delivered' && $step['key'] === 'delivered'): ?>
+                            <span>✅</span>
+                        <?php elseif ($is_current && !in_array($order['order_status'], ['delivered'])): ?>
+                            <span class="pulse-dot"><?= $step['icon'] ?></span>
+                        <?php elseif ($is_done): ?>
+                            <span><?= $step['icon'] ?></span>
+                        <?php else: ?>
+                            <span class="text-gray-300"><?= $step['icon'] ?></span>
                         <?php endif; ?>
                     </div>
 
-                    <!-- Content -->
-                    <div class="pb-6 flex-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <p class="font-bold text-sm <?= $is_done ? 'text-gray-800' : 'text-gray-400' ?>">
-                                <?= $step['label'] ?>
-                            </p>
-                            <?php if ($is_current && !in_array($order['order_status'], ['delivered', 'cancelled'])): ?>
-                            <span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-semibold">Current</span>
-                            <?php elseif ($is_done): ?>
-                            <span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full font-semibold">Done</span>
-                            <?php endif; ?>
-                        </div>
-                        <p class="text-xs <?= $is_done ? 'text-gray-500' : 'text-gray-300' ?> mt-0.5">
-                            <?= htmlspecialchars($step['desc']) ?>
-                        </p>
-                        <?php if ($step['time']): ?>
-                        <p class="text-xs text-gray-400 mt-1">
-                            🕐 <?= date('d M Y, h:i A', strtotime($step['time'])) ?>
-                        </p>
-                        <?php endif; ?>
-                    </div>
+                    <!-- Label -->
+                    <p class="text-xs font-bold mt-2 text-center leading-tight <?= $is_done ? 'text-gray-800' : 'text-gray-400' ?>">
+                        <?= $step['label'] ?>
+                    </p>
+
+                    <!-- Badge -->
+                    <?php if ($is_current && !in_array($order['order_status'], ['delivered', 'cancelled'])): ?>
+                    <span class="bg-blue-100 text-blue-700 text-xs px-1.5 py-0.5 rounded-full font-semibold mt-1">Now</span>
+                    <?php elseif ($is_done): ?>
+                    <span class="bg-green-100 text-green-700 text-xs px-1.5 py-0.5 rounded-full font-semibold mt-1">Done</span>
+                    <?php endif; ?>
+
+                    <!-- Time -->
+                    <?php if ($step['time']): ?>
+                    <p class="text-xs text-gray-400 mt-1 text-center leading-tight">
+                        <?= date('d M', strtotime($step['time'])) ?><br>
+                        <?= date('h:i A', strtotime($step['time'])) ?>
+                    </p>
+                    <?php endif; ?>
                 </div>
                 <?php endforeach; ?>
             </div>
