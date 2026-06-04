@@ -14,33 +14,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_id'], $_POST['s
     $status = $_POST['status'];
     $tracking = trim($_POST['tracking_number'] ?? '');
 
+    // Staff tidak boleh cancel order
+    if ($status === 'cancelled') {
+        header('Location: orders.php');
+        exit;
+    }
+
     $update_sql = "UPDATE orders SET order_status = ?";
     $update_params = [$status];
 
-    if ($status === 'processing') { $update_sql .= ", order_processing_at = NOW()"; }
-    elseif ($status === 'shipped') {
+    if ($status === 'processing') {
+        $update_sql .= ", order_processing_at = NOW()";
+    } elseif ($status === 'shipped') {
         $update_sql .= ", order_shipped_at = NOW()";
-        if ($tracking) { $update_sql .= ", order_tracking_number = ?"; $update_params[] = $tracking; }
+        if ($tracking) {
+            $update_sql .= ", order_tracking_number = ?";
+            $update_params[] = $tracking;
+        } else {
+            // Auto-generate tracking number
+            $order_courier = $pdo->prepare("SELECT order_courier FROM orders WHERE order_id = ?");
+            $order_courier->execute([$order_id]);
+            $courier = $order_courier->fetchColumn();
+            $prefixes = [
+                'jnt' => 'JT', 'ninja_van' => 'NV', 'pos_laju' => 'EF',
+                'gdex' => 'GX', 'dhl' => 'DH'
+            ];
+            $prefix = $prefixes[$courier] ?? 'MY';
+            $auto_tracking = $prefix . date('Y') . strtoupper(substr(md5(uniqid()), 0, 10));
+            $update_sql .= ", order_tracking_number = ?";
+            $update_params[] = $auto_tracking;
+        }
+    } elseif ($status === 'delivered') {
+        $update_sql .= ", order_delivered_at = NOW()";
     }
-    elseif ($status === 'delivered') { $update_sql .= ", order_delivered_at = NOW()"; }
 
     $update_sql .= " WHERE order_id = ?";
     $update_params[] = $order_id;
     $pdo->prepare($update_sql)->execute($update_params);
 
-    $order_owner = $pdo->prepare("SELECT order_user_id FROM orders WHERE order_id = ?");
-    $order_owner->execute([$order_id]);
-    $order_owner = $order_owner->fetchColumn();
+    // Log the action
+    $pdo->prepare("INSERT INTO admin_logs (log_admin_id, log_action, log_target_type, log_target_id, log_details) VALUES (?, 'update_order_status', 'order', ?, ?)")
+        ->execute([$_SESSION['user_id'], $order_id, "Status changed to: " . $status]);
+
+    $order_info = $pdo->prepare("SELECT order_user_id FROM orders WHERE order_id = ?");
+    $order_info->execute([$order_id]);
+    $order_owner = $order_info->fetchColumn();
 
     $order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
-    $msgs = [
+    $status_messages = [
         'processing' => ['Order Update 📦', "Your order $order_num is now being processed."],
-        'shipped' => ['Order Shipped 🚚', "Your order $order_num has been shipped!"],
-        'delivered' => ['Order Delivered ✅', "Your order $order_num has been delivered."],
-        'cancelled' => ['Order Cancelled ❌', "Your order $order_num has been cancelled."],
+        'shipped'    => ['Order Shipped 🚚', "Your order $order_num has been shipped! It's on the way."],
+        'delivered'  => ['Order Delivered ✅', "Your order $order_num has been delivered. Enjoy your manga!"],
     ];
-    if (isset($msgs[$status])) {
-        sendNotification($pdo, $order_owner, $msgs[$status][0], $msgs[$status][1], 'order');
+
+    if (isset($status_messages[$status])) {
+        sendNotification($pdo, $order_owner, $status_messages[$status][0], $status_messages[$status][1], 'order');
     }
 
     header('Location: orders.php?success=1');
@@ -175,12 +203,17 @@ $counts['all'] = array_sum($counts);
                 <div class="px-6 py-4 border-t border-gray-50 bg-gray-50">
                     <form method="POST" class="flex items-center gap-3 flex-wrap">
                         <input type="hidden" name="order_id" value="<?= $order['order_id'] ?>">
+                        <?php
+                        $status_levels = ['pending' => 0, 'processing' => 1, 'shipped' => 2, 'delivered' => 3];
+                        $current_level = $status_levels[$order['order_status']] ?? 0;
+                        ?>
                         <select name="status" class="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-white">
-                            <option value="pending" <?= $order['order_status'] === 'pending' ? 'selected' : '' ?>>Pending</option>
-                            <option value="processing" <?= $order['order_status'] === 'processing' ? 'selected' : '' ?>>Processing</option>
-                            <option value="shipped" <?= $order['order_status'] === 'shipped' ? 'selected' : '' ?>>Shipped</option>
-                            <option value="delivered" <?= $order['order_status'] === 'delivered' ? 'selected' : '' ?>>Delivered</option>
-                            <option value="cancelled">Cancelled</option>
+                            <?php foreach ($status_levels as $s => $level): ?>
+                                <?php if ($level < $current_level) continue; ?>
+                                <option value="<?= $s ?>" <?= $order['order_status'] === $s ? 'selected' : '' ?>>
+                                    <?= ucfirst($s) ?>
+                                </option>
+                            <?php endforeach; ?>
                         </select>
                         <?php if ($order['order_has_physical']): ?>
                         <input type="text" name="tracking_number" value="<?= htmlspecialchars($order['order_tracking_number'] ?? '') ?>"
