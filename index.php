@@ -154,7 +154,7 @@ if (isset($_SESSION['user_id'])) {
     </nav>
 
     <!-- Hero Banner -->
-    <section class="bg-[#F5F0EB] py-20 md:py-32">
+    <section class="bg-[#F5F0EB] py-20">
         <div class="max-w-7xl mx-auto px-6">
             <div class="max-w-2xl">
                 <p class="text-red-600 text-sm font-semibold tracking-widest uppercase mb-4 animate-pulse">Malaysia's #1 Manga Store</p>
