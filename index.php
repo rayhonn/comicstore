@@ -114,7 +114,6 @@ if (isset($_SESSION['user_id'])) {
                     <a href="customer/profile.php" class="hidden lg:block text-gray-600 hover:text-red-600 transition-colors duration-200 font-medium">
                         Hi, <?= htmlspecialchars($_SESSION['user_first_name'] ?? $_SESSION['user_name']) ?>!
                     </a>
-                    <a href="logout.php" class="hidden lg:block text-gray-400 hover:text-red-600 transition-colors duration-200 text-xs">Logout</a>
                 <?php else: ?>
                     <a href="login.php" class="hidden lg:block text-gray-600 hover:text-red-600 transition-colors duration-200 font-medium">Login</a>
                     <a href="register.php" class="hidden lg:block bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors duration-200 font-semibold">Register</a>
@@ -143,7 +142,6 @@ if (isset($_SESSION['user_id'])) {
                             Hi, <?= htmlspecialchars($_SESSION['user_first_name'] ?? $_SESSION['user_name']) ?>!
                         </a>
                         <a href="customer/cart.php" class="block py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors">Cart <?= $cart_count > 0 ? "($cart_count)" : '' ?></a>
-                        <a href="logout.php" class="block py-2 text-sm font-medium text-gray-400 hover:text-red-600 transition-colors">Logout</a>
                     <?php else: ?>
                         <a href="login.php" class="block py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors">Login</a>
                         <a href="register.php" class="block py-2 text-sm font-semibold text-red-600">Register</a>
@@ -153,32 +151,168 @@ if (isset($_SESSION['user_id'])) {
         </div>
     </nav>
 
-    <!-- Hero Banner -->
-    <section class="bg-[#F5F0EB] py-20">
-        <div class="max-w-7xl mx-auto px-6">
-            <div class="max-w-2xl">
-                <p class="text-red-600 text-sm font-semibold tracking-widest uppercase mb-4 animate-pulse">Malaysia's #1 Manga Store</p>
-                <h1 class="text-5xl md:text-7xl font-black leading-none text-gray-900 mb-6">
-                    YOUR<br>
-                    ULTIMATE<br>
-                    <span class="text-red-600">MANGA</span><br>
-                    DESTINATION
-                </h1>
-                <p class="text-gray-500 text-lg mb-10 max-w-lg leading-relaxed">
-                    Discover thousands of manga volumes and e-books. Build your collection. Never miss a new release.
-                </p>
-                <div class="flex flex-wrap gap-4">
-                    <a href="customer/home.php"
-                       class="bg-red-600 hover:bg-red-700 hover:scale-105 text-white font-bold px-8 py-4 rounded-full text-sm tracking-widest uppercase transition-all duration-200 shadow-lg shadow-red-200">
-                        SHOP NOW
-                    </a>
-                    <a href="membership.php"
-                       class="border-2 border-gray-900 hover:bg-gray-900 hover:text-white hover:scale-105 text-gray-900 font-bold px-8 py-4 rounded-full text-sm tracking-widest uppercase transition-all duration-200">
-                        BECOME A MEMBER
-                    </a>
+    <!-- Hero Slideshow -->
+    <section class="relative overflow-hidden" style="height:680px;">
+
+        <!-- Slides -->
+        <div id="heroSlider" class="flex h-full" style="width:300%; transition: transform 0.8s cubic-bezier(0.77,0,0.175,1);">
+
+            <!-- Slide 1: Main Hero -->
+            <div class="relative flex-shrink-0 h-full" style="width:33.333%;">
+                <div class="absolute inset-0" style="background:url('assets/images/manga cover.avif') center/cover no-repeat;"></div>
+                <div class="absolute inset-0" style="background:linear-gradient(105deg, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.65) 50%, rgba(0,0,0,0.1) 100%);"></div>
+                <div class="relative h-full max-w-7xl mx-auto px-8 flex items-center">
+                    <div>
+                        <div class="flex items-center gap-2 mb-5">
+                            <div class="w-8 h-0.5 bg-red-500"></div>
+                            <p class="text-red-400 text-xs font-bold tracking-[0.25em] uppercase">Malaysia's #1 Manga Store</p>
+                        </div>
+                        <h1 class="font-black leading-[0.9] text-white mb-6" style="font-size:clamp(3.5rem,8vw,6rem);">
+                            YOUR<br>
+                            ULTIMATE<br>
+                            <span class="text-red-500">MANGA</span><br>
+                            DESTINATION
+                        </h1>
+                        <p class="text-white/50 text-base mb-10 max-w-md leading-relaxed">
+                            Discover thousands of manga volumes and e-books. Build your collection. Never miss a new release.
+                        </p>
+                        <div class="flex gap-4">
+                            <a href="customer/home.php"
+                                class="bg-red-600 hover:bg-red-500 text-white font-bold px-8 py-4 text-sm tracking-widest uppercase transition-all duration-200 hover:scale-105"
+                                style="clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))">
+                                SHOP NOW
+                            </a>
+                            <a href="membership.php"
+                                class="border border-white/30 hover:border-white/70 hover:bg-white/10 text-white font-bold px-8 py-4 text-sm tracking-widest uppercase transition-all duration-200">
+                                BECOME A MEMBER
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <!-- Decorative vertical text -->
+                <div class="absolute right-12 top-1/2 -translate-y-1/2 hidden lg:block" style="writing-mode:vertical-rl; letter-spacing:0.3em;">
+                    <span class="text-white/10 text-xs font-bold uppercase tracking-widest">MANGAVAULT 2026</span>
+                </div>
+            </div>
+
+            <!-- Slide 2: Hot Picks -->
+            <div class="relative flex-shrink-0 h-full" style="width:33.333%;">
+                <div class="absolute inset-0" style="background:url('assets/images/manga cover.avif') center/cover no-repeat;"></div>
+                <div class="absolute inset-0" style="background:linear-gradient(105deg, rgba(10,10,10,0.95) 0%, rgba(10,10,10,0.75) 55%, rgba(10,10,10,0.2) 100%);"></div>
+                <div class="relative h-full max-w-7xl mx-auto px-8 flex items-center gap-16">
+                    <!-- Left -->
+                    <div class="flex-shrink-0" style="width:280px;">
+                        <div class="inline-flex items-center gap-2 bg-amber-500/20 border border-amber-500/30 px-3 py-1.5 mb-5" style="clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px))">
+                            <span class="text-amber-400 text-xs font-bold tracking-wider uppercase">🔥 Hot This Month</span>
+                        </div>
+                        <h2 class="font-black leading-tight text-white mb-4" style="font-size:clamp(2rem,4vw,3rem);">
+                            BESTSELLING<br>
+                            <span class="text-amber-400">TITLES</span>
+                        </h2>
+                        <p class="text-white/40 text-sm mb-8 leading-relaxed">
+                            The most-loved manga this month. Don't miss out on what everyone's reading.
+                        </p>
+                        <a href="customer/home.php"
+                            class="inline-flex items-center gap-2 border border-amber-500/50 hover:bg-amber-500 hover:border-amber-500 text-amber-400 hover:text-black font-bold px-6 py-3 text-xs tracking-widest uppercase transition-all duration-300">
+                            VIEW ALL →
+                        </a>
+                    </div>
+                    <!-- Right: Books -->
+                    <div class="flex gap-5 items-end flex-1">
+                        <?php foreach (array_slice($rankings, 0, 3) as $i => $p): ?>
+                        <a href="customer/product_detail.php?id=<?= $p['product_id'] ?>"
+                            class="group flex flex-col items-center transition-all duration-300 hover:-translate-y-3"
+                            style="transform-origin: bottom center;">
+                            <!-- Book -->
+                            <div class="relative mb-3" style="<?= $i === 0 ? 'margin-bottom: 20px;' : '' ?>">
+                                <?php if ($p['product_cover_image']): ?>
+                                <img src="assets/images/<?= htmlspecialchars($p['product_cover_image']) ?>"
+                                    class="object-cover rounded shadow-2xl"
+                                    style="width:<?= $i === 0 ? '140px' : '110px' ?>; height:<?= $i === 0 ? '196px' : '154px' ?>; box-shadow: 0 20px 60px rgba(0,0,0,0.6);">
+                                <?php else: ?>
+                                <div class="rounded flex items-center justify-center font-black text-white shadow-2xl"
+                                    style="width:<?= $i === 0 ? '140px' : '110px' ?>; height:<?= $i === 0 ? '196px' : '154px' ?>; background:#1e2d4a; font-size:1.5rem;">
+                                    <?= strtoupper(substr($p['product_title'], 0, 2)) ?>
+                                </div>
+                                <?php endif; ?>
+                                <!-- Rank badge -->
+                                <div class="absolute -top-3 -right-3 w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shadow-lg"
+                                    style="background:<?= $i === 0 ? '#f59e0b' : ($i === 1 ? '#9ca3af' : '#cd7c42') ?>; color: <?= $i === 0 ? '#000' : '#fff' ?>;">
+                                    <?= $i + 1 ?>
+                                </div>
+                            </div>
+                            <p class="text-white/70 text-xs font-semibold text-center leading-tight" style="width:<?= $i === 0 ? '140px' : '110px' ?>; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                <?= htmlspecialchars($p['product_title']) ?>
+                            </p>
+                            <p class="text-amber-400 text-xs font-bold mt-0.5">RM <?= number_format($p['product_price'], 2) ?></p>
+                        </a>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 3: E-Book -->
+            <div class="relative flex-shrink-0 h-full" style="width:33.333%;">
+                <div class="absolute inset-0" style="background:url('assets/images/manga cover.avif') center/cover no-repeat;"></div>
+                <div class="absolute inset-0" style="background:linear-gradient(105deg, rgba(5,5,20,0.97) 0%, rgba(5,5,20,0.80) 55%, rgba(5,5,20,0.2) 100%);"></div>
+                <!-- Grid overlay -->
+                <div class="absolute inset-0 opacity-5" style="background-image: linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px); background-size: 40px 40px;"></div>
+                <div class="relative h-full max-w-7xl mx-auto px-8 flex items-center">
+                    <div>
+                        <div class="flex items-center gap-2 mb-5">
+                            <div class="w-8 h-0.5" style="background:#818cf8;"></div>
+                            <p class="text-xs font-bold tracking-[0.25em] uppercase" style="color:#818cf8;">📱 Digital Collection</p>
+                        </div>
+                        <h2 class="font-black leading-[0.9] text-white mb-6" style="font-size:clamp(3rem,7vw,5rem);">
+                            READ<br>
+                            <span style="color:#818cf8;">ANYWHERE</span><br>
+                            ANYTIME
+                        </h2>
+                        <p class="text-white/40 text-base mb-8 max-w-md leading-relaxed">
+                            Instant access to your favourite manga in digital format. No waiting, no shipping — just pure reading.
+                        </p>
+                        <!-- Stats row -->
+                        <div class="flex items-center gap-8 mb-10">
+                            <div>
+                                <p class="text-2xl font-black text-white">3×</p>
+                                <p class="text-white/30 text-xs tracking-wider uppercase">Downloads</p>
+                            </div>
+                            <div class="w-px h-8" style="background:rgba(255,255,255,0.1);"></div>
+                            <div>
+                                <p class="text-2xl font-black text-white">PDF</p>
+                                <p class="text-white/30 text-xs tracking-wider uppercase">Format</p>
+                            </div>
+                            <div class="w-px h-8" style="background:rgba(255,255,255,0.1);"></div>
+                            <div>
+                                <p class="text-2xl font-black text-white">~30%</p>
+                                <p class="text-white/30 text-xs tracking-wider uppercase">Cheaper</p>
+                            </div>
+                        </div>
+                        <a href="customer/home.php?type=ebook"
+                            class="inline-flex items-center gap-3 text-white font-bold px-8 py-4 text-sm tracking-widest uppercase transition-all duration-200 hover:scale-105"
+                            style="background:#4f46e5; clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))">
+                            BROWSE E-BOOKS →
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
+
+        <!-- Dots Navigation -->
+        <div class="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-3 z-10">
+            <button onclick="goToSlide(0)" id="dot-0" class="transition-all duration-300" style="width:32px; height:3px; background:white;"></button>
+            <button onclick="goToSlide(1)" id="dot-1" class="transition-all duration-300" style="width:8px; height:3px; background:rgba(255,255,255,0.3);"></button>
+            <button onclick="goToSlide(2)" id="dot-2" class="transition-all duration-300" style="width:8px; height:3px; background:rgba(255,255,255,0.3);"></button>
+        </div>
+
+        <!-- Slide counter -->
+        <div class="absolute bottom-8 right-8 text-white/30 text-xs font-bold tracking-widest z-10">
+            <span id="slideCounter">01</span> / 03
+        </div>
+
+        <!-- Arrows -->
+        <button onclick="prevSlide()" class="absolute left-5 top-1/2 -translate-y-1/2 z-10 w-11 h-11 flex items-center justify-center text-white/50 hover:text-white transition-all hover:bg-white/10 border border-white/10 hover:border-white/30" style="font-size:1.5rem;">‹</button>
+        <button onclick="nextSlide()" class="absolute right-5 top-1/2 -translate-y-1/2 z-10 w-11 h-11 flex items-center justify-center text-white/50 hover:text-white transition-all hover:bg-white/10 border border-white/10 hover:border-white/30" style="font-size:1.5rem;">›</button>
     </section>
 
     <!-- Weekly Rankings -->
@@ -362,6 +496,28 @@ if (isset($_SESSION['user_id'])) {
     </footer>
 
     <script>
+
+        let cur = 0;
+        const total = 3;
+        let timer = setInterval(nextSlide, 3500);
+
+        function goToSlide(n) {
+            cur = n;
+            document.getElementById('heroSlider').style.transform = `translateX(-${n * 33.333}%)`;
+            document.getElementById('slideCounter').textContent = String(n + 1).padStart(2, '0');
+            for (let i = 0; i < total; i++) {
+                const d = document.getElementById('dot-' + i);
+                d.style.width = i === n ? '32px' : '8px';
+                d.style.background = i === n ? 'white' : 'rgba(255,255,255,0.3)';
+            }
+        }
+        function nextSlide() { goToSlide((cur + 1) % total); }
+        function prevSlide() { goToSlide((cur - 1 + total) % total); }
+
+        const slider = document.getElementById('heroSlider');
+        slider.addEventListener('mouseenter', () => clearInterval(timer));
+        slider.addEventListener('mouseleave', () => { timer = setInterval(nextSlide, 3500); });
+
         // Hamburger menu
         const menuBtn = document.getElementById('menuBtn');
         const mobileMenu = document.getElementById('mobileMenu');
