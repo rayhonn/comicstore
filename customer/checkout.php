@@ -15,6 +15,16 @@ if (isset($_SESSION['payment_lock']) && $_SESSION['payment_lock']['user_id'] == 
         unset($_SESSION['payment_lock']);
     }
 }
+// Get selected items from cart
+$selected_raw = $_GET['selected_items'] ?? $_POST['selected_items'] ?? '';
+$selected_ids = array_filter(array_map('intval', explode(',', $selected_raw)));
+
+if (empty($selected_ids)) {
+    header('Location: cart.php');
+    exit;
+}
+
+$placeholders = implode(',', array_fill(0, count($selected_ids), '?'));
 $stmt = $pdo->prepare("
     SELECT ci.*, p.product_title, p.product_price, p.product_type,
     pp.physical_stock_quantity, pe.ebook_download_limit,
@@ -24,8 +34,9 @@ $stmt = $pdo->prepare("
     LEFT JOIN product_physical pp ON p.product_id = pp.physical_product_id
     LEFT JOIN product_ebook pe ON p.product_id = pe.ebook_product_id
     WHERE ci.cart_item_user_id = ?
+    AND ci.cart_item_id IN ($placeholders)
 ");
-$stmt->execute([$user_id]);
+$stmt->execute(array_merge([$user_id], $selected_ids));
 $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 if (count($items) === 0) {
@@ -279,6 +290,7 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
         <?php endif; ?>
 
         <form method="POST" id="checkoutForm">
+        <input type="hidden" name="selected_items" value="<?= htmlspecialchars($selected_raw) ?>">
         <div class="flex gap-6 items-start flex-col lg:flex-row">
 
             <!-- Left -->

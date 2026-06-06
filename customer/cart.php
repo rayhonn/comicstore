@@ -18,11 +18,6 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute([$user_id]);
 $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-$total = 0;
-foreach ($items as $item) {
-    $total += $item['product_price'] * $item['cart_item_quantity'];
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -63,21 +58,32 @@ foreach ($items as $item) {
                 <!-- Cart Items -->
                 <div class="flex-1 w-full">
                     <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-                        <div class="px-6 py-4 border-b border-gray-50">
+                        <!-- Header with Select All -->
+                        <div class="px-6 py-4 border-b border-gray-50 flex items-center gap-3">
+                            <input type="checkbox" id="selectAll" onchange="toggleAll(this)"
+                                   class="w-4 h-4 rounded accent-red-600 cursor-pointer">
                             <h2 class="font-bold text-gray-800">Cart Items <span class="text-gray-400 font-normal text-sm">(<?= count($items) ?>)</span></h2>
                         </div>
 
                         <?php foreach ($items as $item): ?>
-                        <div class="px-6 py-4 border-b border-gray-50 last:border-0 flex items-center gap-4">
+                        <div class="px-6 py-4 border-b border-gray-50 last:border-0 flex items-center gap-4 cart-row"
+                             data-id="<?= $item['cart_item_id'] ?>"
+                             data-price="<?= $item['product_price'] ?>"
+                             data-qty="<?= $item['cart_item_quantity'] ?>"
+                             data-type="<?= $item['product_type'] ?>">
+
+                            <!-- Checkbox -->
+                            <input type="checkbox" checked
+                                   class="item-checkbox w-4 h-4 rounded accent-red-600 cursor-pointer flex-shrink-0"
+                                   onchange="recalculate()">
+
                             <!-- Image -->
                             <a href="product_detail.php?id=<?= $item['product_id'] ?>" class="flex-shrink-0">
                                 <?php if ($item['product_cover_image']): ?>
                                     <img src="../assets/images/<?= htmlspecialchars($item['product_cover_image']) ?>"
                                          class="w-16 h-20 object-cover rounded-lg hover:opacity-80 transition-opacity">
                                 <?php else: ?>
-                                    <div class="w-16 h-20 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400 text-xs font-bold">
-                                        N/A
-                                    </div>
+                                    <div class="w-16 h-20 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400 text-xs font-bold">N/A</div>
                                 <?php endif; ?>
                             </a>
 
@@ -93,20 +99,18 @@ foreach ($items as $item) {
                             <!-- Quantity -->
                             <div class="flex-shrink-0">
                                 <?php if ($item['product_type'] === 'physical'): ?>
-                                    <form method="POST" action="cart_action.php" class="flex items-center gap-2">
-                                        <input type="hidden" name="action" value="update">
-                                        <input type="hidden" name="cart_item_id" value="<?= $item['cart_item_id'] ?>">
-                                        <div class="flex items-center border border-gray-200 rounded-lg overflow-hidden">
-                                            <button type="button" onclick="updateQty(this, -1)"
-                                                    class="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-50 transition-colors text-lg">−</button>
-                                            <input type="number" name="quantity" value="<?= $item['cart_item_quantity'] ?>"
-                                                   min="1" max="<?= $item['physical_stock_quantity'] ?>"
-                                                   class="w-10 h-8 text-center text-sm font-medium border-x border-gray-200 focus:outline-none"
-                                                   onchange="this.form.submit()">
-                                            <button type="button" onclick="updateQty(this, 1)"
-                                                    class="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-50 transition-colors text-lg">+</button>
-                                        </div>
-                                    </form>
+                                    <div class="flex items-center border border-gray-200 rounded-lg overflow-hidden">
+                                        <button type="button"
+                                                onclick="changeQty(<?= $item['cart_item_id'] ?>, -1, <?= $item['product_price'] ?>, <?= $item['physical_stock_quantity'] ?>)"
+                                                class="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-50 transition-colors text-lg">−</button>
+                                        <span id="qty-<?= $item['cart_item_id'] ?>"
+                                              class="w-10 h-8 flex items-center justify-center text-sm font-medium border-x border-gray-200">
+                                            <?= $item['cart_item_quantity'] ?>
+                                        </span>
+                                        <button type="button"
+                                                onclick="changeQty(<?= $item['cart_item_id'] ?>, 1, <?= $item['product_price'] ?>, <?= $item['physical_stock_quantity'] ?>)"
+                                                class="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-50 transition-colors text-lg">+</button>
+                                    </div>
                                 <?php else: ?>
                                     <span class="text-sm text-gray-500">×1</span>
                                 <?php endif; ?>
@@ -114,7 +118,9 @@ foreach ($items as $item) {
 
                             <!-- Subtotal -->
                             <div class="flex-shrink-0 text-right min-w-16">
-                                <p class="font-bold text-sm text-gray-800">RM <?= number_format($item['product_price'] * $item['cart_item_quantity'], 2) ?></p>
+                                <p id="subtotal-<?= $item['cart_item_id'] ?>" class="font-bold text-sm text-gray-800">
+                                    RM <?= number_format($item['product_price'] * $item['cart_item_quantity'], 2) ?>
+                                </p>
                             </div>
 
                             <!-- Remove -->
@@ -129,7 +135,6 @@ foreach ($items as $item) {
                         <?php endforeach; ?>
                     </div>
 
-                    <!-- Continue Shopping -->
                     <a href="home.php" class="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-red-600 transition-colors mt-4">
                         ← Continue Shopping
                     </a>
@@ -140,26 +145,27 @@ foreach ($items as $item) {
                     <div class="bg-white rounded-2xl shadow-sm p-6 sticky top-24">
                         <h3 class="font-bold text-gray-800 mb-4">Order Summary</h3>
 
-                        <div class="space-y-3 mb-4">
-                            <?php foreach ($items as $item): ?>
-                            <div class="flex justify-between text-sm">
-                                <span class="text-gray-500 truncate mr-2"><?= htmlspecialchars(substr($item['product_title'], 0, 25)) . (strlen($item['product_title']) > 25 ? '...' : '') ?> ×<?= $item['cart_item_quantity'] ?></span>
-                                <span class="font-medium text-gray-800 flex-shrink-0">RM <?= number_format($item['product_price'] * $item['cart_item_quantity'], 2) ?></span>
-                            </div>
-                            <?php endforeach; ?>
+                        <div id="summaryList" class="space-y-3 mb-4 text-sm text-gray-500">
+                            <!-- filled by JS -->
                         </div>
 
-                        <div class="border-t border-gray-100 pt-4 mb-6">
+                        <div class="border-t border-gray-100 pt-4 mb-4">
                             <div class="flex justify-between items-center">
                                 <span class="font-bold text-gray-800">Total</span>
-                                <span class="font-black text-xl text-red-600">RM <?= number_format($total, 2) ?></span>
+                                <span id="totalDisplay" class="font-black text-xl text-red-600">RM 0.00</span>
                             </div>
                         </div>
 
-                        <a href="checkout.php"
-                           class="block w-full text-center bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm transition-colors duration-200">
-                            Proceed to Checkout
-                        </a>
+                        <p id="noItemMsg" class="text-xs text-gray-400 text-center mb-3 hidden">Please select at least one item.</p>
+
+                        <!-- Hidden form for checkout with selected items -->
+                        <form id="checkoutForm" method="GET" action="checkout.php">
+                            <input type="hidden" name="selected_items" id="selectedItemsInput">
+                            <button type="button" onclick="proceedCheckout()"
+                                    class="block w-full text-center bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm transition-colors duration-200">
+                                Proceed to Checkout
+                            </button>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -173,27 +179,103 @@ foreach ($items as $item) {
                 <span class="text-3xl">⏳</span>
             </div>
             <h3 class="text-xl font-black text-gray-800 mb-2">Payment Pending</h3>
-            <p class="text-sm text-gray-500 leading-relaxed mb-6">
-                <?= htmlspecialchars($_SESSION['payment_lock_msg']) ?>
-            </p>
+            <p class="text-sm text-gray-500 leading-relaxed mb-6"><?= htmlspecialchars($_SESSION['payment_lock_msg']) ?></p>
             <button onclick="document.getElementById('paymentLockModal').classList.add('hidden')"
-                    class="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">
-                OK
-            </button>
+                    class="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">OK</button>
         </div>
     </div>
     <?php unset($_SESSION['payment_lock_msg']); endif; ?>
+
     <script>
-    function updateQty(btn, change) {
-        const input = btn.parentNode.querySelector('input[name="quantity"]');
-        const min = parseInt(input.min) || 1;
-        const max = parseInt(input.max) || 999;
-        let val = parseInt(input.value) + change;
-        if (val < min) val = min;
-        if (val > max) val = max;
-        input.value = val;
-        input.form.submit();
+    // Item data from PHP
+    const itemData = {};
+    <?php foreach ($items as $item): ?>
+    itemData[<?= $item['cart_item_id'] ?>] = {
+        id: <?= $item['cart_item_id'] ?>,
+        title: <?= json_encode(substr($item['product_title'], 0, 25) . (strlen($item['product_title']) > 25 ? '...' : '')) ?>,
+        price: <?= $item['product_price'] ?>,
+        qty: <?= $item['cart_item_quantity'] ?>,
+        maxQty: <?= $item['physical_stock_quantity'] ?? 1 ?>,
+        type: '<?= $item['product_type'] ?>'
+    };
+    <?php endforeach; ?>
+
+    function changeQty(cartItemId, change, price, maxQty) {
+        const data = itemData[cartItemId];
+        let newQty = data.qty + change;
+        if (newQty < 1) newQty = 1;
+        if (newQty > maxQty) newQty = maxQty;
+        data.qty = newQty;
+
+        // Update display
+        document.getElementById('qty-' + cartItemId).textContent = newQty;
+        document.getElementById('subtotal-' + cartItemId).textContent = 'RM ' + (price * newQty).toFixed(2);
+
+        // Update data-qty on row
+        document.querySelector('.cart-row[data-id="' + cartItemId + '"]').dataset.qty = newQty;
+
+        // Save to server (silent AJAX)
+        fetch('cart_action.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=update&cart_item_id=' + cartItemId + '&quantity=' + newQty
+        });
+
+        recalculate();
     }
+
+    function recalculate() {
+        const rows = document.querySelectorAll('.cart-row');
+        let total = 0;
+        let summaryHtml = '';
+        let selectedIds = [];
+
+        rows.forEach(row => {
+            const checkbox = row.querySelector('.item-checkbox');
+            if (!checkbox.checked) return;
+
+            const id = row.dataset.id;
+            const data = itemData[id];
+            const subtotal = data.price * data.qty;
+            total += subtotal;
+            selectedIds.push(id);
+            summaryHtml += `<div class="flex justify-between">
+                <span class="truncate mr-2">${data.title} ×${data.qty}</span>
+                <span class="flex-shrink-0 font-medium text-gray-800">RM ${subtotal.toFixed(2)}</span>
+            </div>`;
+        });
+
+        document.getElementById('totalDisplay').textContent = 'RM ' + total.toFixed(2);
+        document.getElementById('summaryList').innerHTML = summaryHtml || '<p class="text-gray-400 text-xs">No items selected.</p>';
+        document.getElementById('selectedItemsInput').value = selectedIds.join(',');
+
+        // Show/hide no item message
+        document.getElementById('noItemMsg').classList.toggle('hidden', selectedIds.length > 0);
+
+        // Update select all checkbox
+        const allChecked = document.querySelectorAll('.item-checkbox:not(:checked)').length === 0;
+        document.getElementById('selectAll').checked = allChecked;
+        document.getElementById('selectAll').indeterminate = !allChecked && selectedIds.length > 0;
+    }
+
+    function toggleAll(masterCheckbox) {
+        document.querySelectorAll('.item-checkbox').forEach(cb => {
+            cb.checked = masterCheckbox.checked;
+        });
+        recalculate();
+    }
+
+    function proceedCheckout() {
+        const selected = document.getElementById('selectedItemsInput').value;
+        if (!selected) {
+            document.getElementById('noItemMsg').classList.remove('hidden');
+            return;
+        }
+        document.getElementById('checkoutForm').submit();
+    }
+
+    // Init on load
+    recalculate();
     </script>
 
 </body>
