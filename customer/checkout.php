@@ -191,11 +191,13 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
             $country = trim($_POST['address_country']);
             $phone = trim($_POST['address_phone']);
 
-            if (empty($recipient) || empty($street) || empty($city) || empty($phone)) {
+            $state = trim($_POST['address_state'] ?? '');
+
+            if (empty($recipient) || empty($street) || empty($city) || empty($state) || empty($postal) || empty($phone)) {
                 $error = "Please fill in all required shipping fields.";
             } else {
-                $pdo->prepare("INSERT INTO addresses (address_user_id, address_recipient_name, address_taman, address_street, address_city, address_postal_code, address_country, address_phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-                    ->execute([$user_id, $recipient, $taman, $street, $city, $postal, $country, $phone]);
+                $pdo->prepare("INSERT INTO addresses (address_user_id, address_recipient_name, address_taman, address_street, address_city, address_state, address_postal_code, address_country, address_phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    ->execute([$user_id, $recipient, $taman, $street, $city, $state, $postal, $country, $phone]);
                 $address_id = $pdo->lastInsertId();
             }
         }
@@ -270,6 +272,15 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
         html { scroll-behavior: smooth; }
         body { opacity: 0; animation: fadeIn 0.4s ease forwards; }
         @keyframes fadeIn { to { opacity: 1; } }
+        /* Smooth slide down for delivery steps */
+        .slide-down {
+            overflow: hidden;
+            animation: slideDown 0.3s ease forwards;
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-8px); max-height: 0; }
+            to   { opacity: 1; transform: translateY(0);    max-height: 600px; }
+        }
     </style>
 </head>
 <body class="bg-[#F5F0EB] min-h-screen">
@@ -316,8 +327,11 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
                                 <?php foreach ($addresses as $addr): ?>
                                     <option value="<?= $addr['address_id'] ?>">
                                         <?= htmlspecialchars($addr['address_recipient_name']) ?> —
-                                        <?= htmlspecialchars($addr['address_street']) ?>,
-                                        <?= htmlspecialchars($addr['address_city']) ?>
+                                        <?= htmlspecialchars($addr['address_street']) ?>
+                                        <?php if ($addr['address_taman']): ?>, <?= htmlspecialchars($addr['address_taman']) ?><?php endif; ?>,
+                                        <?= htmlspecialchars($addr['address_postal_code'] ?? '') ?>
+                                        <?= htmlspecialchars($addr['address_state'] ?? '') ?>,
+                                        <?= htmlspecialchars($addr['address_country'] ?? '') ?>
                                         <?= $addr['address_is_default'] ? '(Default)' : '' ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -359,21 +373,48 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
                             <input type="text" name="address_street" placeholder="e.g. No. 12, Jalan ABC"
                                    class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
                         </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">City *</label>
-                                <input type="text" name="address_city"
-                                       class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
+                                <input type="text" name="address_city" required
+                                        class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-gray-500 mb-1">Postal Code</label>
-                                <input type="text" name="address_postal_code"
-                                       class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
+                                <label class="block text-xs font-medium text-gray-500 mb-1">State *</label>
+                                <select name="address_state" required onchange="autoPostcode(this.value)"
+                                        class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors bg-white">
+                                    <option value="">Select state</option>
+                                    <option>Johor</option>
+                                    <option>Kedah</option>
+                                    <option>Kelantan</option>
+                                    <option>Melaka</option>
+                                    <option>Negeri Sembilan</option>
+                                    <option>Pahang</option>
+                                    <option>Perak</option>
+                                    <option>Perlis</option>
+                                    <option>Pulau Pinang</option>
+                                    <option>Sabah</option>
+                                    <option>Sarawak</option>
+                                    <option>Selangor</option>
+                                    <option>Terengganu</option>
+                                    <option>Wilayah Persekutuan Kuala Lumpur</option>
+                                    <option>Wilayah Persekutuan Labuan</option>
+                                    <option>Wilayah Persekutuan Putrajaya</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-500 mb-1">Postal Code *</label>
+                                <input type="text" name="address_postal_code" required
+                                        maxlength="5" placeholder="e.g. 80300"
+                                        oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                                        class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">Country</label>
-                                <input type="text" name="address_country" value="Malaysia"
-                                       class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
+                                <input type="text" name="address_country" value="Malaysia" readonly
+                                        class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-400 cursor-not-allowed">
                             </div>
                         </div>
                         <label class="flex items-center gap-2 text-sm text-gray-600">
@@ -400,11 +441,10 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
                     </h3>
 
                     <!-- Step 1: Zone -->
-                    <div class="mb-6">
-                        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Step 1 — Select Delivery Zone</p>
+                    <div class="mb-5">
+                        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Step 1 — Delivery Zone</p>
                         <div class="grid grid-cols-2 gap-3">
-                            <button type="button" onclick="selectZone('peninsular')"
-                                    id="zone_peninsular"
+                            <button type="button" onclick="selectZone('peninsular')" id="zone_peninsular"
                                     class="flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left">
                                 <span class="text-2xl">🇲🇾</span>
                                 <div>
@@ -412,8 +452,7 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
                                     <p class="text-xs text-gray-400">West Malaysia</p>
                                 </div>
                             </button>
-                            <button type="button" onclick="selectZone('east_malaysia')"
-                                    id="zone_east"
+                            <button type="button" onclick="selectZone('east_malaysia')" id="zone_east"
                                     class="flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left">
                                 <span class="text-2xl">🌴</span>
                                 <div>
@@ -424,40 +463,45 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
                         </div>
                     </div>
 
-                    <!-- Step 2: Courier (hidden until zone selected) -->
+                    <!-- Step 2: Speed (hidden until zone selected) -->
+                    <div id="speedSection" class="hidden mb-5">
+                        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Step 2 — Delivery Speed</p>
+                        <div class="grid grid-cols-2 gap-3">
+                            <button type="button" onclick="selectSpeed('standard')" id="speed_standard"
+                                    class="p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left">
+                                <p class="text-lg mb-1">🚚</p>
+                                <p class="font-bold text-sm text-gray-800">Standard</p>
+                                <p class="text-xs text-gray-400" id="speed_std_days">3-5 days</p>
+                                <p class="text-xs text-gray-400 mt-1">From <span id="speed_std_price" class="font-bold text-gray-700">RM —</span></p>
+                            </button>
+                            <button type="button" onclick="selectSpeed('express')" id="speed_express"
+                                    class="p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left">
+                                <p class="text-lg mb-1">⚡</p>
+                                <p class="font-bold text-sm text-gray-800">Express</p>
+                                <p class="text-xs text-gray-400" id="speed_exp_days">1-2 days</p>
+                                <p class="text-xs text-gray-400 mt-1">From <span id="speed_exp_price" class="font-bold text-gray-700">RM —</span></p>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Courier (hidden until speed selected) -->
                     <div id="courierSection" class="hidden">
-                        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Step 2 — Select Courier & Speed</p>
-                        <div class="space-y-3">
+                        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Step 3 — Select Courier</p>
+                        <div class="space-y-2">
                             <?php foreach ($couriers as $key => $c): ?>
-                            <div class="border-2 border-gray-100 rounded-xl overflow-hidden">
-                                <!-- Courier header -->
-                                <div class="flex items-center gap-3 px-4 py-3 bg-gray-50">
-                                    <span class="text-lg"><?= $c['logo'] ?></span>
-                                    <p class="font-bold text-sm text-gray-800"><?= $c['name'] ?></p>
+                            <button type="button"
+                                    onclick="selectCourier('<?= $key ?>')"
+                                    id="courier_<?= $key ?>"
+                                    class="courier-option w-full flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-xl"><?= $c['logo'] ?></span>
+                                    <p class="font-semibold text-sm text-gray-800"><?= $c['name'] ?></p>
                                 </div>
-                                <!-- Standard + Express options -->
-                                <div class="grid grid-cols-2 divide-x divide-gray-100">
-                                    <button type="button"
-                                            onclick="selectDelivery('<?= $key ?>', 'standard')"
-                                            id="delivery_<?= $key ?>_standard"
-                                            class="delivery-option p-3 hover:bg-red-50 transition-colors text-left">
-                                        <p class="text-xs font-semibold text-gray-600">🚚 Standard</p>
-                                        <p class="text-xs text-gray-400 mb-1" id="days_<?= $key ?>_standard">3-5 days</p>
-                                        <p class="font-black text-gray-800" id="price_<?= $key ?>_standard">RM <?= number_format($c['peninsular_std'], 2) ?></p>
-                                    </button>
-                                    <button type="button"
-                                            onclick="selectDelivery('<?= $key ?>', 'express')"
-                                            id="delivery_<?= $key ?>_express"
-                                            class="delivery-option p-3 hover:bg-red-50 transition-colors text-left">
-                                        <p class="text-xs font-semibold text-gray-600">⚡ Express</p>
-                                        <p class="text-xs text-gray-400 mb-1" id="days_<?= $key ?>_express">1-2 days</p>
-                                        <p class="font-black text-gray-800" id="price_<?= $key ?>_express">RM <?= number_format($c['peninsular_exp'], 2) ?></p>
-                                    </button>
-                                </div>
-                            </div>
+                                <p class="font-black text-gray-800" id="courier_price_<?= $key ?>">RM —</p>
+                            </button>
                             <?php endforeach; ?>
                         </div>
-                        <p id="courierError" class="text-red-500 text-xs mt-3 hidden">Please select a delivery option.</p>
+                        <p id="courierError" class="text-red-500 text-xs mt-3 hidden">Please select a courier.</p>
                     </div>
 
                     <input type="hidden" name="shipping_method" id="shippingMethodInput" value="">
@@ -865,33 +909,49 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
         document.getElementById('placeOrderModal').classList.remove('hidden');
     }
 
-const couriersData = <?= json_encode($couriers) ?>;
+    const couriersData = <?= json_encode($couriers) ?>;
     let currentZone = null;
+    let currentSpeed = null;
     let currentCourier = null;
-    let currentType = null;
 
     function selectZone(zone) {
         currentZone = zone;
+        currentSpeed = null;
         currentCourier = null;
-        currentType = null;
 
         document.getElementById('zone_peninsular').className = zone === 'peninsular'
-            ? 'flex items-center gap-3 p-4 border-2 border-red-500 bg-red-50 rounded-xl transition-colors text-left'
-            : 'flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left';
+            ? 'flex items-center gap-3 p-4 border-2 border-red-500 bg-red-50 rounded-xl transition-all duration-200 text-left'
+            : 'flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
         document.getElementById('zone_east').className = zone === 'east_malaysia'
-            ? 'flex items-center gap-3 p-4 border-2 border-red-500 bg-red-50 rounded-xl transition-colors text-left'
-            : 'flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left';
+            ? 'flex items-center gap-3 p-4 border-2 border-red-500 bg-red-50 rounded-xl transition-all duration-200 text-left'
+            : 'flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
 
         document.getElementById('shippingZoneInput').value = zone;
-        document.getElementById('courierSection').classList.remove('hidden');
 
-        updateAllPrices();
+        const zonePrefix = zone === 'east_malaysia' ? 'east' : 'peninsular';
+        const stdDays = zone === 'east_malaysia' ? '5-7 days' : '3-5 days';
+         const expDays = zone === 'east_malaysia' ? '3-4 days' : '1-2 days';
+        const minStd = Math.min(...Object.values(couriersData).map(c => c[zonePrefix + '_std']));
+        const minExp = Math.min(...Object.values(couriersData).map(c => c[zonePrefix + '_exp']));
 
-        document.querySelectorAll('.delivery-option').forEach(btn => {
-            btn.classList.remove('bg-red-600', 'text-white');
-            btn.classList.add('hover:bg-red-50');
-            btn.querySelectorAll('p').forEach(p => p.classList.remove('text-white'));
-        });
+        document.getElementById('speed_std_days').textContent = stdDays;
+        document.getElementById('speed_exp_days').textContent = expDays;
+        document.getElementById('speed_std_price').textContent = 'RM ' + minStd.toFixed(2);
+        document.getElementById('speed_exp_price').textContent = 'RM ' + minExp.toFixed(2);
+
+        document.getElementById('speed_standard').className = 'p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
+        document.getElementById('speed_express').className = 'p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
+        document.getElementById('courierSection').classList.add('hidden');
+
+        const speedSection = document.getElementById('speedSection');
+        speedSection.classList.remove('hidden');
+        speedSection.classList.add('slide-down');
+        setTimeout(() => speedSection.classList.remove('slide-down'), 350);
+
+        // Auto scroll to step 2
+        setTimeout(() => {
+            speedSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
 
         currentShipping = 0;
         document.getElementById('shippingFee').textContent = '—';
@@ -900,51 +960,98 @@ const couriersData = <?= json_encode($couriers) ?>;
         updateTotals();
     }
 
-    function selectDelivery(courier, type) {
-        currentCourier = courier;
-        currentType = type;
+    function selectSpeed(speed) {
+        // Toggle — re-click same speed to deselect
+        if (currentSpeed === speed) {
+            currentSpeed = null;
+            currentCourier = null;
 
-        document.querySelectorAll('.delivery-option').forEach(btn => {
-            btn.classList.remove('bg-red-600');
-            btn.classList.add('hover:bg-red-50');
-            btn.querySelectorAll('p').forEach(p => p.classList.remove('text-white'));
-        });
+            document.getElementById('speed_standard').className = 'p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
+            document.getElementById('speed_express').className = 'p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
 
-        const selected = document.getElementById(`delivery_${courier}_${type}`);
-        if (selected) {
-            selected.classList.add('bg-red-600');
-            selected.classList.remove('hover:bg-red-50');
-            selected.querySelectorAll('p').forEach(p => p.classList.add('text-white'));
+            document.getElementById('courierSection').classList.add('hidden');
+            currentShipping = 0;
+            document.getElementById('shippingFee').textContent = '—';
+            document.getElementById('shippingMethodInput').value = '';
+            document.getElementById('shippingCourierInput').value = '';
+            updateTotals();
+            return;
         }
 
-        document.getElementById('shippingMethodInput').value = `${courier}_${type}`;
-        document.getElementById('shippingCourierInput').value = courier;
+        currentSpeed = speed;
+        currentCourier = null;
+
+        document.getElementById('speed_standard').className = speed === 'standard'
+            ? 'p-4 border-2 border-red-500 bg-red-50 rounded-xl transition-all duration-200 text-left'
+            : 'p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
+        document.getElementById('speed_express').className = speed === 'express'
+            ? 'p-4 border-2 border-red-500 bg-red-50 rounded-xl transition-all duration-200 text-left'
+            : 'p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
 
         const zonePrefix = currentZone === 'east_malaysia' ? 'east' : 'peninsular';
-        const feeKey = `${zonePrefix}_${type === 'express' ? 'exp' : 'std'}`;
+        const feeKey = zonePrefix + '_' + (speed === 'express' ? 'exp' : 'std');
+        Object.keys(couriersData).forEach(key => {
+            const priceEl = document.getElementById('courier_price_' + key);
+            if (priceEl) priceEl.textContent = 'RM ' + couriersData[key][feeKey].toFixed(2);
+        });
+
+        document.querySelectorAll('.courier-option').forEach(btn => {
+            btn.className = 'courier-option w-full flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
+        });
+
+        const courierSection = document.getElementById('courierSection');
+        courierSection.classList.remove('hidden');
+        courierSection.classList.add('slide-down');
+        setTimeout(() => courierSection.classList.remove('slide-down'), 350);
+
+        // Auto scroll to step 3
+        setTimeout(() => {
+            courierSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+
+        currentShipping = 0;
+        document.getElementById('shippingFee').textContent = '—';
+        document.getElementById('shippingMethodInput').value = '';
+        document.getElementById('shippingCourierInput').value = '';
+        updateTotals();
+    }
+
+    function selectCourier(courier) {
+        currentCourier = courier;
+
+        // Update courier buttons
+        document.querySelectorAll('.courier-option').forEach(btn => {
+            btn.className = 'courier-option w-full flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left';
+        });
+        document.getElementById('courier_' + courier).className =
+            'courier-option w-full flex items-center justify-between p-4 border-2 border-red-500 bg-red-50 rounded-xl transition-colors text-left';
+
+        const zonePrefix = currentZone === 'east_malaysia' ? 'east' : 'peninsular';
+        const feeKey = zonePrefix + '_' + (currentSpeed === 'express' ? 'exp' : 'std');
         currentShipping = couriersData[courier][feeKey];
+
         document.getElementById('shippingFee').textContent = 'RM ' + currentShipping.toFixed(2);
+        document.getElementById('shippingMethodInput').value = courier + '_' + currentSpeed;
+        document.getElementById('shippingCourierInput').value = courier;
         document.getElementById('courierError').classList.add('hidden');
         updateTotals();
     }
 
-    function updateAllPrices() {
-        if (!currentZone) return;
-        const zonePrefix = currentZone === 'east_malaysia' ? 'east' : 'peninsular';
-        const stdDays = currentZone === 'east_malaysia' ? '5-7 days' : '3-5 days';
-        const expDays = currentZone === 'east_malaysia' ? '3-4 days' : '1-2 days';
+    const statePostcodePrefix = {
+        'Johor': '79', 'Kedah': '05', 'Kelantan': '15', 'Melaka': '75',
+        'Negeri Sembilan': '70', 'Pahang': '25', 'Perak': '30', 'Perlis': '02',
+        'Pulau Pinang': '10', 'Sabah': '88', 'Sarawak': '93', 'Selangor': '40',
+        'Terengganu': '20', 'Wilayah Persekutuan Kuala Lumpur': '50',
+        'Wilayah Persekutuan Labuan': '87', 'Wilayah Persekutuan Putrajaya': '62',
+    };
 
-        Object.keys(couriersData).forEach(key => {
-            const c = couriersData[key];
-            const stdEl = document.getElementById(`price_${key}_standard`);
-            const expEl = document.getElementById(`price_${key}_express`);
-            const stdDaysEl = document.getElementById(`days_${key}_standard`);
-            const expDaysEl = document.getElementById(`days_${key}_express`);
-            if (stdEl) stdEl.textContent = 'RM ' + c[`${zonePrefix}_std`].toFixed(2);
-            if (expEl) expEl.textContent = 'RM ' + c[`${zonePrefix}_exp`].toFixed(2);
-            if (stdDaysEl) stdDaysEl.textContent = stdDays;
-            if (expDaysEl) expDaysEl.textContent = expDays;
-        });
+    function autoPostcode(state) {
+        const postalInput = document.querySelector('input[name="address_postal_code"]');
+        const prefix = statePostcodePrefix[state] || '';
+        if (prefix && (!postalInput.value || postalInput.value.length <= 2)) {
+            postalInput.value = prefix;
+            postalInput.focus();
+        }
     }
     </script>
 

@@ -14,12 +14,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'add') {
         $recipient = trim($_POST['address_recipient_name']);
-        $taman = trim($_POST['address_taman'] ?? '');
-        $street = trim($_POST['address_street']);
-        $city = trim($_POST['address_city']);
-        $postal = trim($_POST['address_postal_code']);
-        $country = trim($_POST['address_country'] ?? 'Malaysia');
-        $phone = trim($_POST['address_phone']);
+        $taman     = trim($_POST['address_taman'] ?? '');
+        $street    = trim($_POST['address_street']);
+        $city      = trim($_POST['address_city']);
+        $state     = trim($_POST['address_state'] ?? '');
+        $postal    = trim($_POST['address_postal_code']);
+        $country   = trim($_POST['address_country'] ?? 'Malaysia');
+        $phone     = trim($_POST['address_phone']);
         $is_default = isset($_POST['is_default']) ? 1 : 0;
 
         if ($is_default) {
@@ -27,25 +28,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([$user_id]);
         }
 
-        $pdo->prepare("INSERT INTO addresses (address_user_id, address_recipient_name, address_taman, address_street, address_city, address_postal_code, address_country, address_phone, address_is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            ->execute([$user_id, $recipient, $taman, $street, $city, $postal, $country, $phone, $is_default]);
+        $pdo->prepare("INSERT INTO addresses (address_user_id, address_recipient_name, address_taman, address_street, address_city, address_state, address_postal_code, address_country, address_phone, address_is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            ->execute([$user_id, $recipient, $taman, $street, $city, $state, $postal, $country, $phone, $is_default]);
 
         $_SESSION['addr_success'] = 'Address added successfully!';
         header('Location: addresses.php');
         exit;
 
     } elseif ($action === 'edit') {
-        $addr_id = $_POST['address_id'];
+        $addr_id   = $_POST['address_id'];
         $recipient = trim($_POST['address_recipient_name']);
-        $taman = trim($_POST['address_taman'] ?? '');
-        $street = trim($_POST['address_street']);
-        $city = trim($_POST['address_city']);
-        $postal = trim($_POST['address_postal_code']);
-        $country = trim($_POST['address_country'] ?? 'Malaysia');
-        $phone = trim($_POST['address_phone']);
+        $taman     = trim($_POST['address_taman'] ?? '');
+        $street    = trim($_POST['address_street']);
+        $city      = trim($_POST['address_city']);
+        $state     = trim($_POST['address_state'] ?? '');
+        $postal    = trim($_POST['address_postal_code']);
+        $country   = trim($_POST['address_country'] ?? 'Malaysia');
+        $phone     = trim($_POST['address_phone']);
         $is_default = isset($_POST['is_default']) ? 1 : 0;
 
-        // Verify ownership
         $check = $pdo->prepare("SELECT address_id FROM addresses WHERE address_id = ? AND address_user_id = ?");
         $check->execute([$addr_id, $user_id]);
         if ($check->fetch()) {
@@ -53,8 +54,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("UPDATE addresses SET address_is_default = 0 WHERE address_user_id = ?")
                     ->execute([$user_id]);
             }
-            $pdo->prepare("UPDATE addresses SET address_recipient_name=?, address_taman=?, address_street=?, address_city=?, address_postal_code=?, address_country=?, address_phone=?, address_is_default=? WHERE address_id=?")
-                ->execute([$recipient, $taman, $street, $city, $postal, $country, $phone, $is_default, $addr_id]);
+            $pdo->prepare("UPDATE addresses SET address_recipient_name=?, address_taman=?, address_street=?, address_city=?, address_state=?, address_postal_code=?, address_country=?, address_phone=?, address_is_default=? WHERE address_id=?")
+                ->execute([$recipient, $taman, $street, $city, $state, $postal, $country, $phone, $is_default, $addr_id]);
         }
         $_SESSION['addr_success'] = 'Address updated successfully!';
         header('Location: addresses.php');
@@ -229,8 +230,8 @@ unset($_SESSION['addr_success']);
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div class="col-span-2">
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Taman / Apartment</label>
-                        <input type="text" name="address_taman" id="formTaman"
+                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Taman / Apartment *</label>
+                        <input type="text" name="address_taman" id="formTaman" required
                                placeholder="e.g. Taman Desa Jaya"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
@@ -243,18 +244,42 @@ unset($_SESSION['addr_success']);
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">City *</label>
                         <input type="text" name="address_city" id="formCity" required
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Postal Code</label>
-                        <input type="text" name="address_postal_code" id="formPostal"
-                               oninput="this.value = this.value.replace(/[^0-9]/g, '')" maxlength="5"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Postal Code *</label>
+                        <input type="text" name="address_postal_code" id="formPostal" required
+                                oninput="this.value = this.value.replace(/[^0-9]/g, '')" maxlength="5"
+                                placeholder="e.g. 80300"
+                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                    </div>
+                    <div class="col-span-2">
+                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">State *</label>
+                        <select name="address_state" id="formState" required onchange="autoPostcode(this.value)"
+                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                            <option value="">Select state</option>
+                            <option>Johor</option>
+                            <option>Kedah</option>
+                            <option>Kelantan</option>
+                            <option>Melaka</option>
+                            <option>Negeri Sembilan</option>
+                            <option>Pahang</option>
+                            <option>Perak</option>
+                            <option>Perlis</option>
+                            <option>Pulau Pinang</option>
+                            <option>Sabah</option>
+                            <option>Sarawak</option>
+                            <option>Selangor</option>
+                            <option>Terengganu</option>
+                            <option>Wilayah Persekutuan Kuala Lumpur</option>
+                            <option>Wilayah Persekutuan Labuan</option>
+                            <option>Wilayah Persekutuan Putrajaya</option>
+                        </select>
                     </div>
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Country</label>
-                        <input type="text" name="address_country" id="formCountry" value="Malaysia"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                        <input type="text" name="address_country" id="formCountry" value="Malaysia" readonly
+                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm bg-gray-100 text-gray-400 cursor-not-allowed">
                     </div>
                     <div class="col-span-2">
                         <label class="flex items-center gap-3 cursor-pointer">
@@ -314,6 +339,7 @@ unset($_SESSION['addr_success']);
         document.getElementById('formStreet').value = '';
         document.getElementById('formCity').value = '';
         document.getElementById('formPostal').value = '';
+        document.getElementById('formState').value = '';
         document.getElementById('formCountry').value = 'Malaysia';
         document.getElementById('formIsDefault').checked = false;
         document.getElementById('addressModal').classList.add('active');
@@ -329,6 +355,7 @@ unset($_SESSION['addr_success']);
         document.getElementById('formStreet').value = addr.address_street || '';
         document.getElementById('formCity').value = addr.address_city || '';
         document.getElementById('formPostal').value = addr.address_postal_code || '';
+        document.getElementById('formState').value = addr.address_state || '';
         document.getElementById('formCountry').value = addr.address_country || 'Malaysia';
         document.getElementById('formIsDefault').checked = addr.address_is_default == 1;
         document.getElementById('addressModal').classList.add('active');
@@ -355,6 +382,34 @@ unset($_SESSION['addr_success']);
     document.getElementById('deleteModal').addEventListener('click', function(e) {
         if (e.target === this) closeDeleteModal();
     });
+
+    const statePostcodePrefix = {
+        'Johor': '79',
+        'Kedah': '05',
+        'Kelantan': '15',
+        'Melaka': '75',
+        'Negeri Sembilan': '70',
+        'Pahang': '25',
+        'Perak': '30',
+        'Perlis': '02',
+        'Pulau Pinang': '10',
+        'Sabah': '88',
+        'Sarawak': '93',
+        'Selangor': '40',
+        'Terengganu': '20',
+        'Wilayah Persekutuan Kuala Lumpur': '50',
+        'Wilayah Persekutuan Labuan': '87',
+        'Wilayah Persekutuan Putrajaya': '62',
+    };
+
+    function autoPostcode(state) {
+        const postalInput = document.getElementById('formPostal');
+        const prefix = statePostcodePrefix[state] || '';
+        if (prefix && (!postalInput.value || postalInput.value.length <= 2)) {
+            postalInput.value = prefix;
+            postalInput.focus();
+        }
+    }
     </script>
 
 </body>
