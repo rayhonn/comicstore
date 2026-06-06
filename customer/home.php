@@ -149,7 +149,10 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
                 ?>
                 <div class="bg-white rounded-xl shadow-sm overflow-hidden hover:-translate-y-1 hover:shadow-md transition-all duration-200 flex flex-col">
                     <!-- Cover -->
-                    <a href="product_detail.php?id=<?= $detail_id ?>" class="relative block">
+                    <?php
+                    $is_new = strtotime($p['product_created_at']) >= strtotime('-7 days');
+                    ?>
+                    <a href="#" onclick="event.preventDefault();" class="relative block">
                         <?php if ($p['product_cover_image']): ?>
                             <img src="../assets/images/<?= htmlspecialchars($p['product_cover_image']) ?>"
                                 class="w-full h-48 object-cover">
@@ -158,15 +161,11 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
                                 <?= strtoupper(substr($p['product_title'], 0, 2)) ?>
                             </div>
                         <?php endif; ?>
-                        <!-- Version badges -->
-                        <div class="absolute bottom-2 left-2 flex gap-1">
-                            <?php if ($p['has_physical']): ?>
-                            <span class="bg-gray-900/80 text-white text-xs px-2 py-0.5 rounded-full font-semibold backdrop-blur-sm">📦 Physical</span>
-                            <?php endif; ?>
-                            <?php if ($p['has_ebook']): ?>
-                            <span class="bg-blue-600/80 text-white text-xs px-2 py-0.5 rounded-full font-semibold backdrop-blur-sm">📱 E-Book</span>
-                            <?php endif; ?>
+                        <?php if ($is_new): ?>
+                        <div class="absolute top-2 left-2">
+                            <span class="bg-red-600 text-white text-xs px-2 py-0.5 font-black tracking-wider uppercase rounded-sm">NEW</span>
                         </div>
+                        <?php endif; ?>
                     </a>
 
                     <!-- Info -->
@@ -195,7 +194,7 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
                                 </p>
                                 <?php endif; ?>
                                 <?php if ($p['has_ebook'] && $p['ebook_price']): ?>
-                                <p class="text-blue-600 font-bold text-xs">RM <?= number_format($p['ebook_price'], 2) ?>
+                                <p class="text-blue-600 font-bold text-sm">RM <?= number_format($p['ebook_price'], 2) ?>
                                     <span class="text-gray-400 font-normal">e-book</span>
                                 </p>
                                 <?php endif; ?>
