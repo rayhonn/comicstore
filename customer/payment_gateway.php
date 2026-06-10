@@ -1193,10 +1193,11 @@ $ewallet_gradients = [
         const href = document.getElementById('leaveWarningModal').dataset.href;
         fetch('cancel_pending_voucher.php', { method: 'POST' })
             .finally(() => {
+                // Keep payment lock active — don't clear it
                 if (href) {
                     window.location.href = href;
                 } else {
-                    history.back();
+                    window.location.href = 'checkout.php';
                 }
             });
     }

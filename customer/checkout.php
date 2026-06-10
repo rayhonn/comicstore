@@ -8,6 +8,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
 require_once '../includes/db.php';
 
 $user_id = $_SESSION['user_id'];
+
 // Clear stale payment lock
 if (isset($_SESSION['payment_lock']) && $_SESSION['payment_lock']['user_id'] == $user_id) {
     $diff = time() - $_SESSION['payment_lock']['locked_at'];
@@ -15,6 +16,7 @@ if (isset($_SESSION['payment_lock']) && $_SESSION['payment_lock']['user_id'] == 
         unset($_SESSION['payment_lock']);
     }
 }
+
 // Get selected items from cart
 $selected_raw = $_GET['selected_items'] ?? $_POST['selected_items'] ?? '';
 $selected_ids = array_filter(array_map('intval', explode(',', $selected_raw)));
@@ -56,15 +58,11 @@ $addresses->execute([$user_id]);
 $addresses = $addresses->fetchAll(PDO::FETCH_ASSOC);
 
 $error = '';
-$voucher = null;
-$discount_amount = 0;
-$voucher_code = '';
 
 // Handle voucher check (AJAX)
 if (isset($_POST['check_voucher'])) {
     $code = strtoupper(trim($_POST['voucher_code']));
     $cart_total = floatval($_POST['cart_total']);
-    
     $v = $pdo->prepare("
         SELECT v.* FROM vouchers v
         WHERE v.voucher_code = ? 
@@ -82,13 +80,11 @@ if (isset($_POST['check_voucher'])) {
     ");
     $v->execute([$code, $user_id]);
     $v = $v->fetch(PDO::FETCH_ASSOC);
-    
     if (!$v) {
         echo json_encode(['success' => false, 'message' => 'Invalid or expired voucher.']);
     } elseif ($cart_total < $v['voucher_min_order']) {
         echo json_encode(['success' => false, 'message' => 'Minimum order RM ' . number_format($v['voucher_min_order'], 2) . ' required.']);
     } else {
-        // Check if user already used this voucher
         $used = $pdo->prepare("SELECT usage_id FROM voucher_usage WHERE usage_voucher_id = ? AND usage_user_id = ?");
         $used->execute([$v['voucher_id'], $user_id]);
         if ($used->rowCount() > 0) {
@@ -96,42 +92,38 @@ if (isset($_POST['check_voucher'])) {
         } else {
             if ($v['voucher_type'] === 'percentage') {
                 $discount = $cart_total * ($v['voucher_value'] / 100);
-                if ($v['voucher_max_discount']) {
-                    $discount = min($discount, $v['voucher_max_discount']);
-                }
+                if ($v['voucher_max_discount']) $discount = min($discount, $v['voucher_max_discount']);
             } else {
                 $discount = $v['voucher_value'];
             }
             $discount = min($discount, $cart_total);
-            echo json_encode([
-                'success' => true,
-                'message' => 'Voucher applied!',
-                'discount' => round($discount, 2),
-                'voucher_id' => $v['voucher_id'],
-                'voucher_type' => $v['voucher_type'],
-                'voucher_value' => $v['voucher_value'],
-            ]);
+            echo json_encode(['success' => true, 'message' => 'Voucher applied!', 'discount' => round($discount, 2), 'voucher_id' => $v['voucher_id'], 'voucher_type' => $v['voucher_type'], 'voucher_value' => $v['voucher_value']]);
         }
     }
     exit;
 }
 
-// Check payment lock (5 minutes)
+// Calculate payment lock remaining time
+$payment_lock_remaining = 0;
+$payment_lock_locked_at = 0;
 if (isset($_SESSION['payment_lock']) && $_SESSION['payment_lock']['user_id'] == $user_id) {
-    $diff = (time() - $_SESSION['payment_lock']['locked_at']);
-    if ($diff < 300) {
-        $remaining = 300 - $diff;
-        $mins = floor($remaining / 60);
-        $secs = $remaining % 60;
-        $_SESSION['payment_lock_msg'] = "You have a pending payment. Please wait {$mins}m {$secs}s before placing a new order.";
-        header('Location: cart.php');
-        exit;
+    $locked_at = $_SESSION['payment_lock']['locked_at'];
+    $diff = time() - $locked_at;
+    if ($diff >= 0 && $diff < 300) {
+        $payment_lock_remaining = 300 - $diff;
+        $payment_lock_locked_at = $locked_at;
     } else {
         unset($_SESSION['payment_lock']);
     }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Block if payment lock active
+    if ($payment_lock_remaining > 0) {
+        header('Location: checkout.php?selected_items=' . urlencode($selected_raw));
+        exit;
+    }
+
     $address_id = null;
     $shipping_method = $_POST['shipping_method'] ?? 'standard';
     $couriers_data = [
@@ -148,51 +140,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $fee_key = $zone_key . '_' . $shipping_type;
     $shipping_fee = $has_physical ? ($couriers_data[$shipping_courier][$fee_key] ?? 4.90) : 0;
 
-    // Apply voucher
     $voucher_code_input = strtoupper(trim($_POST['voucher_code_applied'] ?? ''));
     $discount_amount = 0;
     $applied_voucher = null;
 
     if ($voucher_code_input) {
-    $v = $pdo->prepare("
-        SELECT * FROM vouchers 
-        WHERE voucher_code = ? 
-        AND voucher_is_active = 1
-        AND (voucher_start_date IS NULL OR voucher_start_date <= NOW())
-        AND (voucher_end_date IS NULL OR voucher_end_date >= NOW())
-    ");
-    $v->execute([$voucher_code_input]);
-    $applied_voucher = $v->fetch(PDO::FETCH_ASSOC);
-
-    if ($applied_voucher && $total >= $applied_voucher['voucher_min_order']) {
-        if ($applied_voucher['voucher_type'] === 'percentage') {
-            $discount_amount = $total * ($applied_voucher['voucher_value'] / 100);
-            if ($applied_voucher['voucher_max_discount']) {
-                $discount_amount = min($discount_amount, $applied_voucher['voucher_max_discount']);
+        $v = $pdo->prepare("SELECT * FROM vouchers WHERE voucher_code = ? AND voucher_is_active = 1 AND (voucher_start_date IS NULL OR voucher_start_date <= NOW()) AND (voucher_end_date IS NULL OR voucher_end_date >= NOW())");
+        $v->execute([$voucher_code_input]);
+        $applied_voucher = $v->fetch(PDO::FETCH_ASSOC);
+        if ($applied_voucher && $total >= $applied_voucher['voucher_min_order']) {
+            if ($applied_voucher['voucher_type'] === 'percentage') {
+                $discount_amount = $total * ($applied_voucher['voucher_value'] / 100);
+                if ($applied_voucher['voucher_max_discount']) $discount_amount = min($discount_amount, $applied_voucher['voucher_max_discount']);
+            } else {
+                $discount_amount = $applied_voucher['voucher_value'];
             }
-        } else {
-            $discount_amount = $applied_voucher['voucher_value'];
+            $discount_amount = min($discount_amount, $total);
         }
-        $discount_amount = min($discount_amount, $total);
     }
-}
 
-$final_total = max(0, $total - $discount_amount + $shipping_fee);
+    $final_total = max(0, $total - $discount_amount + $shipping_fee);
 
     if ($has_physical) {
         if ($_POST['address_option'] === 'saved' && !empty($_POST['address_id'])) {
             $address_id = $_POST['address_id'];
         } elseif ($_POST['address_option'] === 'new') {
             $recipient = trim($_POST['address_recipient_name']);
-            $taman = trim($_POST['address_taman'] ?? '');
-            $street = trim($_POST['address_street']);
-            $city = trim($_POST['address_city']);
-            $postal = trim($_POST['address_postal_code']);
-            $country = trim($_POST['address_country']);
-            $phone = trim($_POST['address_phone']);
-
-            $state = trim($_POST['address_state'] ?? '');
-
+            $taman     = trim($_POST['address_taman'] ?? '');
+            $street    = trim($_POST['address_street']);
+            $city      = trim($_POST['address_city']);
+            $state     = trim($_POST['address_state'] ?? '');
+            $postal    = trim($_POST['address_postal_code']);
+            $country   = trim($_POST['address_country']);
+            $phone     = trim($_POST['address_phone']);
             if (empty($recipient) || empty($street) || empty($city) || empty($state) || empty($postal) || empty($phone)) {
                 $error = "Please fill in all required shipping fields.";
             } else {
@@ -203,56 +183,29 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
         }
     }
 
-    // Check if user has a pending order within 5 minutes
-    $pending_voucher_check = $pdo->prepare("
-        SELECT uv_pending_at FROM user_vouchers 
-        WHERE uv_user_id = ? 
-        AND uv_status = 'pending'
-        AND uv_is_used = 0
-        AND uv_pending_at IS NOT NULL
-        AND uv_pending_at > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
-        LIMIT 1
-    ");
-    $pending_voucher_check->execute([$user_id]);
-    $pending_voucher = $pending_voucher_check->fetch(PDO::FETCH_ASSOC);
-
-    if ($pending_voucher) {
-        $pending_at = new DateTime($pending_voucher['uv_pending_at']);
-        $expires = $pending_at->modify('+5 minutes');
-        $now = new DateTime();
-        $diff = $expires->getTimestamp() - $now->getTimestamp();
-        $mins = floor($diff / 60);
-        $secs = $diff % 60;
-        $_SESSION['payment_lock_msg'] = "You have a pending payment. Please wait {$mins}m {$secs}s before placing a new order.";
-        header('Location: cart.php');
-        exit;
-    }
-
     if (empty($error)) {
         $_SESSION['pending_order'] = [
-            'user_id' => $user_id,
-            'total' => $final_total,
-            'has_physical' => $has_physical,
-            'address_id' => $address_id,
+            'user_id'         => $user_id,
+            'total'           => $final_total,
+            'has_physical'    => $has_physical,
+            'address_id'      => $address_id,
             'shipping_method' => $shipping_method,
-            'shipping_fee' => $shipping_fee,
-            'voucher_code' => $voucher_code_input ?: null,
+            'shipping_fee'    => $shipping_fee,
+            'voucher_code'    => $voucher_code_input ?: null,
             'discount_amount' => $discount_amount,
-            'voucher_id' => $applied_voucher['voucher_id'] ?? null,
-            'items' => $items,
-            'shipping_courier' => $shipping_courier,
-            'shipping_zone' => $shipping_zone,
+            'voucher_id'      => $applied_voucher['voucher_id'] ?? null,
+            'items'           => $items,
+            'shipping_courier'=> $shipping_courier,
+            'shipping_zone'   => $shipping_zone,
         ];
 
-        // Set voucher to pending immediately
         if (!empty($voucher_code_input) && $applied_voucher) {
             $pdo->prepare("UPDATE user_vouchers SET uv_status = 'pending', uv_pending_at = NOW() WHERE uv_voucher_id = ? AND uv_user_id = ? AND uv_is_used = 0")
                 ->execute([$applied_voucher['voucher_id'], $user_id]);
         }
 
-        // Set payment session lock
         $_SESSION['payment_lock'] = [
-            'user_id' => $user_id,
+            'user_id'   => $user_id,
             'locked_at' => time()
         ];
 
@@ -711,24 +664,6 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
         </div>
     </div>
 
-    <?php if (isset($_SESSION['payment_lock_msg'])): ?>
-    <div id="paymentLockModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-6">
-        <div class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center">
-            <div class="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span class="text-3xl">⏳</span>
-            </div>
-            <h3 class="text-xl font-black text-gray-800 mb-2">Payment Pending</h3>
-            <p class="text-sm text-gray-500 leading-relaxed mb-6">
-                <?= htmlspecialchars($_SESSION['payment_lock_msg']) ?>
-            </p>
-            <button onclick="document.getElementById('paymentLockModal').classList.add('hidden')"
-                    class="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">
-                OK
-            </button>
-        </div>
-    </div>
-    <?php unset($_SESSION['payment_lock_msg']); endif; ?>
-
     <!-- Delivery Warning Modal -->
     <div id="deliveryWarningModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-6">
         <div class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center">
@@ -744,7 +679,57 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
         </div>
     </div>
 
+    <!-- Payment Lock Modal -->
+    <div id="paymentLockModal2" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-6">
+        <div class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center">
+            <div class="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span class="text-3xl">⏳</span>
+            </div>
+            <h3 class="text-xl font-black text-gray-800 mb-2">Payment In Progress</h3>
+            <p class="text-sm text-gray-500 mb-4">You have a pending payment. Please wait before placing a new order.</p>
+            <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
+                <p class="text-2xl font-black text-yellow-600" id="lockCountdown">5:00</p>
+                <p class="text-xs text-yellow-500 mt-1">Time remaining</p>
+            </div>
+            <button onclick="document.getElementById('paymentLockModal2').classList.add('hidden'); clearInterval(lockTimer);"
+                    class="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">
+                Got It
+            </button>
+        </div>
+    </div>
+
     <script>
+    const lockLockedAt = <?= $payment_lock_locked_at ?> * 1000;
+    const lockTotalMs = 300 * 1000;
+    let lockTimer = null;
+
+    function showPaymentLockModal() {
+        const modal = document.getElementById('paymentLockModal2');
+        const countdown = document.getElementById('lockCountdown');
+        modal.classList.remove('hidden');
+
+        if (lockTimer) clearInterval(lockTimer);
+
+        function updateTimer() {
+            const elapsed = Date.now() - lockLockedAt;
+            const rem = Math.max(0, Math.floor((lockTotalMs - elapsed) / 1000));
+            const mins = Math.floor(rem / 60).toString().padStart(2, '0');
+            const secs = (rem % 60).toString().padStart(2, '0');
+            countdown.textContent = mins + ':' + secs;
+            if (rem <= 0) {
+                clearInterval(lockTimer);
+                modal.classList.add('hidden');
+            }
+        }
+
+        updateTimer();
+        lockTimer = setInterval(updateTimer, 1000);
+    }
+
+    <?php if ($payment_lock_remaining > 0): ?>
+    window.addEventListener('DOMContentLoaded', () => showPaymentLockModal());
+    <?php endif; ?>
+    
     const subtotal = <?= $total ?>;
     const hasPhysical = <?= $has_physical ? 'true' : 'false' ?>;
 
@@ -904,6 +889,14 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
     });
 
     function confirmPlaceOrder() {
+        // Check payment lock first
+        if (lockLockedAt > 0) {
+            const elapsed = Date.now() - lockLockedAt;
+            if (elapsed < lockTotalMs) {
+                showPaymentLockModal();
+                return;
+            }
+        }
     if (hasPhysical) {
         // Determine address option
         const addressRadio = document.querySelector('input[name="address_option"]:checked');

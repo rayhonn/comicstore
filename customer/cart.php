@@ -172,19 +172,7 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php endif; ?>
     </div>
 
-    <?php if (isset($_SESSION['payment_lock_msg'])): ?>
-    <div id="paymentLockModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-6">
-        <div class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center">
-            <div class="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span class="text-3xl">⏳</span>
-            </div>
-            <h3 class="text-xl font-black text-gray-800 mb-2">Payment Pending</h3>
-            <p class="text-sm text-gray-500 leading-relaxed mb-6"><?= htmlspecialchars($_SESSION['payment_lock_msg']) ?></p>
-            <button onclick="document.getElementById('paymentLockModal').classList.add('hidden')"
-                    class="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">OK</button>
-        </div>
-    </div>
-    <?php unset($_SESSION['payment_lock_msg']); endif; ?>
+
 
     <script>
     // Item data from PHP
