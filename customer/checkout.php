@@ -417,10 +417,6 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
                                         class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-400 cursor-not-allowed">
                             </div>
                         </div>
-                        <label class="flex items-center gap-2 text-sm text-gray-600">
-                            <input type="checkbox" name="save_address" class="accent-red-600">
-                            Save this address for future orders
-                        </label>
                     </div>
                 </div>
 
@@ -735,7 +731,7 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
             <p class="text-sm text-gray-500 leading-relaxed mb-6">Please select a delivery zone and courier before placing your order.</p>
             <button onclick="document.getElementById('deliveryWarningModal').classList.add('hidden')"
                     class="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">
-                OK, Let Me Choose
+                Got it
             </button>
         </div>
     </div>
@@ -900,13 +896,74 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
     });
 
     function confirmPlaceOrder() {
-        if (hasPhysical && !currentCourier) {
-            document.getElementById('deliveryWarningModal').classList.remove('hidden');
+    if (hasPhysical) {
+        // Determine address option
+        const addressRadio = document.querySelector('input[name="address_option"]:checked');
+        const addressOption = addressRadio ? addressRadio.value : 'new'; // default to 'new' if no radio (no saved addresses)
+
+        if (addressOption === 'new') {
+            const required = ['address_recipient_name', 'address_taman', 'address_street', 'address_city', 'address_state', 'address_postal_code', 'address_phone'];
+            for (const field of required) {
+                const el = document.querySelector(`[name="${field}"]`);
+                if (!el || !el.value.trim()) {
+                    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el?.focus();
+                    el?.classList.add('border-red-500');
+                    setTimeout(() => el?.classList.remove('border-red-500'), 2000);
+                    // Update warning modal
+                    const modal = document.getElementById('deliveryWarningModal');
+                    modal.querySelector('h3').textContent = 'Complete Your Address';
+                    modal.querySelector('p').textContent = 'Please fill in all required address fields before placing your order.';
+                    modal.querySelector('span.text-3xl').textContent = '📍';
+                    modal.classList.remove('hidden');
+                    return;
+                }
+            }
+        }
+
+        // Check zone
+        if (!currentZone) {
+            const modal = document.getElementById('deliveryWarningModal');
+            modal.querySelector('h3').textContent = 'Select Delivery Zone';
+            modal.querySelector('p').textContent = 'Please select a delivery zone before placing your order.';
+            modal.querySelector('span.text-3xl').textContent = '🗺️';
+            modal.classList.remove('hidden');
             return;
         }
-        const total = document.getElementById('btnTotal').textContent;
-        document.getElementById('modalTotal').textContent = total;
-        document.getElementById('placeOrderModal').classList.remove('hidden');
+
+        // Check speed
+        if (!currentSpeed) {
+            const modal = document.getElementById('deliveryWarningModal');
+            modal.querySelector('h3').textContent = 'Select Delivery Speed';
+            modal.querySelector('p').textContent = 'Please select Standard or Express before placing your order.';
+            modal.querySelector('span.text-3xl').textContent = '🚚';
+            modal.classList.remove('hidden');
+            return;
+        }
+
+        // Check courier
+        if (!currentCourier) {
+            const modal = document.getElementById('deliveryWarningModal');
+            modal.querySelector('h3').textContent = 'Select a Courier';
+            modal.querySelector('p').textContent = 'Please select a courier before placing your order.';
+            modal.querySelector('span.text-3xl').textContent = '📦';
+            modal.classList.remove('hidden');
+            return;
+        }
+    }
+
+    const total = document.getElementById('btnTotal').textContent;
+    document.getElementById('modalTotal').textContent = total;
+    document.getElementById('placeOrderModal').classList.remove('hidden');
+}
+
+    function showAddressWarning() {
+        // Reuse delivery warning modal with different message
+        const modal = document.getElementById('deliveryWarningModal');
+        modal.querySelector('h3').textContent = 'Complete Your Address';
+        modal.querySelector('p').textContent = 'Please fill in all required address fields before placing your order.';
+        modal.querySelector('span.text-3xl').textContent = '📍';
+        modal.classList.remove('hidden');
     }
 
     const couriersData = <?= json_encode($couriers) ?>;
@@ -915,6 +972,25 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
     let currentCourier = null;
 
     function selectZone(zone) {
+        // Toggle — re-click same zone to deselect
+        if (currentZone === zone) {
+            currentZone = null;
+            currentSpeed = null;
+            currentCourier = null;
+
+            document.getElementById('zone_peninsular').className = 'flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
+            document.getElementById('zone_east').className = 'flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
+            document.getElementById('speedSection').classList.add('hidden');
+            document.getElementById('courierSection').classList.add('hidden');
+            currentShipping = 0;
+            document.getElementById('shippingFee').textContent = '—';
+            document.getElementById('shippingMethodInput').value = '';
+            document.getElementById('shippingCourierInput').value = '';
+            document.getElementById('shippingZoneInput').value = '';
+            updateTotals();
+            return;
+        }
+
         currentZone = zone;
         currentSpeed = null;
         currentCourier = null;
@@ -930,7 +1006,7 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
 
         const zonePrefix = zone === 'east_malaysia' ? 'east' : 'peninsular';
         const stdDays = zone === 'east_malaysia' ? '5-7 days' : '3-5 days';
-         const expDays = zone === 'east_malaysia' ? '3-4 days' : '1-2 days';
+        const expDays = zone === 'east_malaysia' ? '3-4 days' : '1-2 days';
         const minStd = Math.min(...Object.values(couriersData).map(c => c[zonePrefix + '_std']));
         const minExp = Math.min(...Object.values(couriersData).map(c => c[zonePrefix + '_exp']));
 
@@ -948,7 +1024,6 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
         speedSection.classList.add('slide-down');
         setTimeout(() => speedSection.classList.remove('slide-down'), 350);
 
-        // Auto scroll to step 2
         setTimeout(() => {
             speedSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 100);
@@ -1017,14 +1092,28 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
     }
 
     function selectCourier(courier) {
+        // Toggle — re-click same courier to deselect
+        if (currentCourier === courier) {
+            currentCourier = null;
+
+            document.querySelectorAll('.courier-option').forEach(btn => {
+                btn.className = 'courier-option w-full flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
+            });
+            currentShipping = 0;
+            document.getElementById('shippingFee').textContent = '—';
+            document.getElementById('shippingMethodInput').value = '';
+            document.getElementById('shippingCourierInput').value = '';
+            updateTotals();
+            return;
+        }
+
         currentCourier = courier;
 
-        // Update courier buttons
         document.querySelectorAll('.courier-option').forEach(btn => {
-            btn.className = 'courier-option w-full flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left';
+            btn.className = 'courier-option w-full flex items-center justify-between p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
         });
         document.getElementById('courier_' + courier).className =
-            'courier-option w-full flex items-center justify-between p-4 border-2 border-red-500 bg-red-50 rounded-xl transition-colors text-left';
+            'courier-option w-full flex items-center justify-between p-4 border-2 border-red-500 bg-red-50 rounded-xl transition-all duration-200 text-left';
 
         const zonePrefix = currentZone === 'east_malaysia' ? 'east' : 'peninsular';
         const feeKey = zonePrefix + '_' + (currentSpeed === 'express' ? 'exp' : 'std');
