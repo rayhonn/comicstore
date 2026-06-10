@@ -513,12 +513,22 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                                             <span>Min spend: RM <?= number_format($v['voucher_min_order'], 2) ?></span>
                                             <?php endif; ?>
                                             <span>Claimed: <?= date('d M Y', strtotime($v['uv_claimed_at'])) ?></span>
-                                            <?php if (!empty($v['uv_expires_at'])): ?>
-                                            <span class="<?= $is_expired ? 'text-red-500' : '' ?>">
-                                                Valid until: <?= date('d M Y', strtotime($v['uv_expires_at'])) ?>
+                                            <?php
+                                            $expiry = null;
+                                            if ($v['uv_expires_at'] && $v['voucher_end_date']) {
+                                                $expiry = min(strtotime($v['uv_expires_at']), strtotime($v['voucher_end_date']));
+                                            } elseif ($v['uv_expires_at']) {
+                                                $expiry = strtotime($v['uv_expires_at']);
+                                            } elseif ($v['voucher_end_date']) {
+                                                $expiry = strtotime($v['voucher_end_date']);
+                                            }
+                                            ?>
+                                            <?php if ($expiry): ?>
+                                            <span class="<?= $expiry < time() ? 'text-red-500' : '' ?>">
+                                                Valid until: <?= date('d M Y', $expiry) ?>
                                             </span>
-                                            <?php elseif ($v['voucher_end_date']): ?>
-                                            <span>Valid until: <?= date('d M Y', strtotime($v['voucher_end_date'])) ?></span>
+                                            <?php else: ?>
+                                            <span class="text-gray-400 text-xs">No expiry</span>
                                             <?php endif; ?>
                                         </div>
                                     </div>

@@ -364,7 +364,7 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
                             </div>
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-500 mb-1">Taman / Apartment</label>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Taman / Apartment *</label>
                             <input type="text" name="address_taman" placeholder="e.g. Taman Desa Jaya"
                                    class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
                         </div>
@@ -566,7 +566,7 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
                         <!-- Voucher Dropdown -->
                         <?php
                         $avail_vouchers = $pdo->prepare("
-                            SELECT v.* FROM vouchers v
+                            SELECT v.*, uv.uv_expires_at FROM vouchers v
                             JOIN user_vouchers uv ON v.voucher_id = uv.uv_voucher_id
                             WHERE uv.uv_user_id = ?
                             AND uv.uv_is_used = 0
@@ -626,9 +626,17 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
                                             <p class="text-xs text-gray-400">
                                                 <span class="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600"><?= htmlspecialchars($av['voucher_code']) ?></span>
                                                 · <?= $min_label ?>
-                                                <?php if ($av['voucher_end_date']): ?>
-                                                · Until <?= date('d M', strtotime($av['voucher_end_date'])) ?>
-                                                <?php endif; ?>
+                                                <?php
+                                                $display_expiry = null;
+                                                if (!empty($av['uv_expires_at']) && $av['voucher_end_date']) {
+                                                    $display_expiry = min(strtotime($av['uv_expires_at']), strtotime($av['voucher_end_date']));
+                                                } elseif (!empty($av['uv_expires_at'])) {
+                                                    $display_expiry = strtotime($av['uv_expires_at']);
+                                                } elseif ($av['voucher_end_date']) {
+                                                    $display_expiry = strtotime($av['voucher_end_date']);
+                                                }
+                                                ?>
+                                                <?php if ($display_expiry): ?>· Until <?= date('d M', $display_expiry) ?><?php endif; ?>
                                             </p>
                                         </div>
                                         <svg class="w-4 h-4 text-gray-300 group-hover:text-red-500 transition-colors flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -783,7 +791,7 @@ $final_total = max(0, $total - $discount_amount + $shipping_fee);
         fetch('checkout.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'check_voucher=1&voucher_code=' + encodeURIComponent(code) + '&cart_total=' + subtotal
+            body: 'check_voucher=1&voucher_code=' + encodeURIComponent(code) + '&cart_total=' + subtotal + '&selected_items=<?= htmlspecialchars($selected_raw) ?>'
         })
         .then(r => r.json())
         .then(data => {
