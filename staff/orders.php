@@ -78,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_id'], $_POST['s
 $filter = $_GET['filter'] ?? 'all';
 $sql = "
     SELECT o.*, u.user_first_name, u.user_last_name, u.user_gmail,
-    a.address_recipient_name, a.address_street, a.address_city, a.address_postal_code, a.address_phone
+    a.address_recipient_name, a.address_taman, a.address_street, a.address_city, a.address_state, a.address_postal_code, a.address_country, a.address_phone
     FROM orders o
     JOIN users u ON o.order_user_id = u.user_id
     LEFT JOIN addresses a ON o.order_address_id = a.address_id
@@ -167,7 +167,13 @@ $counts['all'] = array_sum($counts);
                     <?php if ($order['order_has_physical'] && $order['address_recipient_name']): ?>
                     <div>
                         <p class="text-xs text-gray-400 mb-0.5">Ship To</p>
-                        <p class="font-semibold text-gray-700 text-xs"><?= htmlspecialchars($order['address_recipient_name']) ?>, <?= htmlspecialchars($order['address_city']) ?></p>
+                        <p class="font-semibold text-gray-700 text-xs"><?= htmlspecialchars($order['address_recipient_name']) ?></p>
+                        <?php if (!empty($order['address_taman'])): ?>
+                        <p class="text-xs text-gray-400"><?= htmlspecialchars($order['address_taman']) ?></p>
+                        <?php endif; ?>
+                        <p class="text-xs text-gray-400"><?= htmlspecialchars($order['address_street']) ?></p>
+                        <p class="text-xs text-gray-400"><?= htmlspecialchars($order['address_city']) ?>, <?= htmlspecialchars($order['address_state'] ?? '') ?> <?= htmlspecialchars($order['address_postal_code']) ?></p>
+                        <p class="text-xs text-gray-400"><?= htmlspecialchars($order['address_country'] ?? 'Malaysia') ?></p>
                     </div>
                     <div>
                         <p class="text-xs text-gray-400 mb-0.5">Shipping</p>
