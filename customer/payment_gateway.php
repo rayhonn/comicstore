@@ -15,6 +15,7 @@ if (!isset($_SESSION['pending_order'])) {
 }
 
 $order = $_SESSION['pending_order'];
+$lock_locked_at = $_SESSION['payment_lock']['locked_at'] ?? 0;
 $total = $order['total'];
 $user_id = $_SESSION['user_id'];
 
@@ -344,6 +345,26 @@ $ewallet_gradients = [
 <body class="bg-[#F5F0EB] min-h-screen">
 
     <?php include '../includes/customer_navbar.php'; ?>
+
+    <?php if ($lock_locked_at): ?>
+    <div id="paymentTimerBar" class="bg-yellow-50 border-b border-yellow-200 px-6 py-3">
+        <div class="max-w-6xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <span class="text-xl">⏳</span>
+                <div>
+                    <p class="text-sm font-semibold text-yellow-800">Complete payment within</p>
+                    <p class="text-xs text-yellow-600">Your order is reserved for 5 minutes</p>
+                </div>
+            </div>
+            <div class="text-2xl font-black text-yellow-700" id="gatewayCountdown">05:00</div>
+        </div>
+        <div class="max-w-6xl mx-auto mt-2">
+            <div class="h-1.5 bg-yellow-200 rounded-full overflow-hidden">
+                <div id="timerProgress" class="h-full bg-yellow-500 rounded-full transition-all duration-1000" style="width:100%"></div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <div class="max-w-6xl mx-auto px-6 py-8">
         <div class="text-center mb-6">
@@ -823,7 +844,63 @@ $ewallet_gradients = [
         </div>
     </div>
 
+    <!-- Timeout Modal -->
+    <div id="timeoutModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-6">
+        <div class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center">
+            <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span class="text-3xl">⏰</span>
+            </div>
+            <h3 class="text-xl font-black text-gray-800 mb-2">Payment Time Expired</h3>
+            <p class="text-sm text-gray-500 mb-2">Your 5-minute payment window has ended.</p>
+            <p class="text-xs text-gray-400 mb-6">Your order has been cancelled and your voucher (if any) will be restored automatically.</p>
+            <a href="home.php" onclick="paymentSubmitted=true;"
+                class="block w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">
+                Back to Home
+            </a>
+        </div>
+    </div>
+
     <script>
+    const gatewayLockedAt = <?= $lock_locked_at ?> * 1000;
+    const gatewayTotalMs = 300 * 1000;
+    let gatewayTimer = null;
+
+    function startGatewayTimer() {
+        if (!gatewayLockedAt) return;
+
+        function update() {
+            const elapsed = Date.now() - gatewayLockedAt;
+            const rem = Math.max(0, Math.floor((gatewayTotalMs - elapsed) / 1000));
+            const mins = Math.floor(rem / 60).toString().padStart(2, '0');
+            const secs = (rem % 60).toString().padStart(2, '0');
+
+            const countdownEl = document.getElementById('gatewayCountdown');
+            const progressEl = document.getElementById('timerProgress');
+
+            if (countdownEl) countdownEl.textContent = mins + ':' + secs;
+            if (progressEl) {
+                const pct = Math.max(0, ((gatewayTotalMs - elapsed) / gatewayTotalMs) * 100);
+                progressEl.style.width = pct + '%';
+                if (rem <= 60) {
+                    progressEl.classList.replace('bg-yellow-500', 'bg-red-500');
+                    if (countdownEl) {
+                        countdownEl.classList.replace('text-yellow-700', 'text-red-600');
+                    }
+                }
+            }
+
+            if (rem <= 0) {
+                clearInterval(gatewayTimer);
+                paymentSubmitted = true; // prevent beforeunload
+                document.getElementById('timeoutModal').classList.remove('hidden');
+            }
+        }
+
+        update();
+        gatewayTimer = setInterval(update, 1000);
+    }
+
+    startGatewayTimer();
     const savedMethodsData = <?= json_encode(array_map(function($sm) use ($ewallet_gradients) {
         return [
             'id' => $sm['pm_id'],

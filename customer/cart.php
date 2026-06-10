@@ -73,7 +73,7 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                              data-type="<?= $item['product_type'] ?>">
 
                             <!-- Checkbox -->
-                            <input type="checkbox" checked
+                            <input type="checkbox"
                                    class="item-checkbox w-4 h-4 rounded accent-red-600 cursor-pointer flex-shrink-0"
                                    onchange="recalculate()">
 
@@ -172,8 +172,20 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php endif; ?>
     </div>
 
-
-
+    <!-- No Item Selected Modal -->
+    <div id="noItemModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-6">
+        <div class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center">
+            <div class="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span class="text-3xl">🛒</span>
+            </div>
+            <h3 class="text-xl font-black text-gray-800 mb-2">No Items Selected</h3>
+            <p class="text-sm text-gray-500 mb-6">Please select at least one item before proceeding to checkout.</p>
+            <button onclick="document.getElementById('noItemModal').classList.add('hidden')"
+                    class="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">
+                OK, Let Me Choose
+            </button>
+        </div>
+    </div>
     <script>
     // Item data from PHP
     const itemData = {};
@@ -256,7 +268,7 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
     function proceedCheckout() {
         const selected = document.getElementById('selectedItemsInput').value;
         if (!selected) {
-            document.getElementById('noItemMsg').classList.remove('hidden');
+            document.getElementById('noItemModal').classList.remove('hidden');
             return;
         }
         document.getElementById('checkoutForm').submit();
