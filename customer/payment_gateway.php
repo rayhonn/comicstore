@@ -1289,13 +1289,6 @@ $ewallet_gradients = [
         }
     });
 
-    window.addEventListener('beforeunload', function(e) {
-        if (!paymentSubmitted) {
-            e.preventDefault();
-            e.returnValue = '';
-        }
-    });
-
     function proceedLeave() {
         paymentSubmitted = true;
         const href = document.getElementById('leaveWarningModal').dataset.href;

@@ -80,6 +80,25 @@ if (isset($_SESSION['user_id'])) {
             transition: width 0.2s ease;
         }
         .nav-link:hover::after { width: 100%; }
+
+        @keyframes bellRing {
+            0%   { transform: rotate(0deg); }
+            10%  { transform: rotate(15deg); }
+            20%  { transform: rotate(-13deg); }
+            30%  { transform: rotate(11deg); }
+            40%  { transform: rotate(-9deg); }
+            50%  { transform: rotate(7deg); }
+            60%  { transform: rotate(-5deg); }
+            70%  { transform: rotate(3deg); }
+            80%  { transform: rotate(-1deg); }
+            90%  { transform: rotate(1deg); }
+            100% { transform: rotate(0deg); }
+        }
+        .bell-ring {
+            animation: bellRing 1.2s ease infinite;
+            transform-origin: top center;
+            display: inline-block;
+        }
     </style>
 </head>
 <body class="bg-[#F5F0EB]">
@@ -103,6 +122,20 @@ if (isset($_SESSION['user_id'])) {
             <!-- Right Side -->
             <div class="flex items-center gap-4 text-sm">
                 <?php if (isset($_SESSION['user_id'])): ?>
+                    <?php
+                    $notif_count = 0;
+                    $stmt_notif = $pdo->prepare("SELECT COUNT(*) FROM notifications WHERE notif_user_id = ? AND notif_is_read = 0");
+                    $stmt_notif->execute([$_SESSION['user_id']]);
+                    $notif_count = $stmt_notif->fetchColumn() ?? 0;
+                    ?>
+                    <a href="customer/notifications.php" class="relative text-gray-600 hover:text-red-600 transition-colors duration-200">
+                        <svg class="w-6 h-6 <?= $notif_count > 0 ? 'bell-ring' : '' ?>" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                        </svg>
+                        <?php if ($notif_count > 0): ?>
+                            <span class="absolute -top-2 -right-2 bg-red-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center"><?= $notif_count ?></span>
+                        <?php endif; ?>
+                    </a>
                     <a href="customer/cart.php" class="relative text-gray-600 hover:text-red-600 transition-colors duration-200">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
