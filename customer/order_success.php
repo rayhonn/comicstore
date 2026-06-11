@@ -147,6 +147,16 @@ $items = $stmt2->fetchAll(PDO::FETCH_ASSOC);
         </div>
         <?php endif; ?>
 
+        <!-- Payment Method -->
+        <?php if (!empty($order['order_payment_method'])): ?>
+        <div class="bg-white rounded-2xl shadow-sm p-6 mb-6 slide-up-delay-2">
+            <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                <span>💳</span> Payment Method
+            </h3>
+            <p class="text-sm text-gray-600"><?= htmlspecialchars($order['order_payment_method']) ?></p>
+        </div>
+        <?php endif; ?>
+        
         <!-- Action Buttons -->
         <div class="flex gap-3 slide-up-delay-3 mb-3">
             <a href="invoice.php?order_id=<?= $order_id ?>"

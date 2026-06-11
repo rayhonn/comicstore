@@ -48,7 +48,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_payment'])) {
     }
 
     // Create order
-    $pdo->prepare("INSERT INTO orders (order_user_id, order_total_amount, order_has_physical, order_address_id, order_shipping_method,  order_shipping_fee, order_courier, order_delivery_zone, order_payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending_confirmation')")
+    $payment_method = $_POST['payment_method'] ?? 'unknown';
+    $pdo->prepare("INSERT INTO orders (order_user_id, order_total_amount, order_has_physical, order_address_id, order_shipping_method, order_shipping_fee, order_courier, order_delivery_zone, order_payment_method, order_payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_confirmation')")
         ->execute([
             $order['user_id'],
             $order['total'],
@@ -58,6 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_payment'])) {
             $order['shipping_fee'],
             $order['shipping_courier'] ?? null,
             $order['shipping_zone'] ?? 'peninsular',
+            $payment_method,
         ]);
     $order_id = $pdo->lastInsertId();
 
@@ -1203,6 +1205,24 @@ $ewallet_gradients = [
         };
     }
 
+    function getPaymentMethodLabel() {
+        const method = document.getElementById('paymentMethodInput').value;
+        if (method === 'card') return 'Credit / Debit Card';
+        if (method === 'banking') {
+            const bankName = document.getElementById('bankLoginName')?.textContent;
+            return bankName ? 'Online Banking — ' + bankName : 'Online Banking';
+        }
+        if (method === 'ewallet') {
+            const walletName = document.getElementById('walletBannerName')?.textContent;
+            return walletName ? 'E-Wallet — ' + walletName : 'E-Wallet';
+        }
+        if (method.startsWith('saved_')) {
+            const label = document.getElementById('savedMethodLabel')?.textContent;
+            return label || 'Saved Payment Method';
+        }
+        return method;
+    }
+
     function showProcessing() {
         document.getElementById('processingOverlay').classList.remove('hidden');
         const messages = ['Verifying your payment...', 'Connecting to payment server...', 'Confirming transaction...', 'Almost done...'];
@@ -1215,7 +1235,12 @@ $ewallet_gradients = [
                 setTimeout(() => { msgEl.textContent = messages[i]; msgEl.style.opacity = '1'; }, 200);
             }
         }, 800);
-        setTimeout(() => { clearInterval(interval); document.getElementById('paymentForm').submit(); }, 3500);
+        setTimeout(() => {
+            clearInterval(interval);
+            // Set detailed payment method before submit
+            document.getElementById('paymentMethodInput').value = getPaymentMethodLabel();
+            document.getElementById('paymentForm').submit();
+        }, 3500);
     }
 
     function movePIN(input, index, type) {

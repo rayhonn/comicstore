@@ -17,8 +17,8 @@ if (!$order_id) {
 // Get order - must belong to this user
 $order = $pdo->prepare("
     SELECT o.*, u.user_first_name, u.user_last_name, u.user_gmail, u.user_phone,
-    a.address_recipient_name, a.address_street, a.address_city,
-    a.address_postal_code, a.address_country, a.address_phone
+    a.address_recipient_name, a.address_taman, a.address_street, a.address_city,
+    a.address_state, a.address_postal_code, a.address_country, a.address_phone
     FROM orders o
     JOIN users u ON o.order_user_id = u.user_id
     LEFT JOIN addresses a ON o.order_address_id = a.address_id
@@ -141,8 +141,11 @@ $sc = $status_colors[$order['order_status']] ?? $status_colors['pending'];
                     <div>
                         <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Ship To</p>
                         <p class="font-bold text-gray-800"><?= htmlspecialchars($order['address_recipient_name']) ?></p>
-                        <p class="text-sm text-gray-500"><?php if (!empty($order['address_taman'])): ?><?= htmlspecialchars($order['address_taman']) ?>, <?php endif; ?><?= htmlspecialchars($order['address_street']) ?></p>
-                        <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_city']) ?> <?= htmlspecialchars($order['address_postal_code']) ?></p>
+                        <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_street']) ?></p>
+                        <?php if (!empty($order['address_taman'])): ?>
+                        <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_taman']) ?></p>
+                        <?php endif; ?>
+                        <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_city']) ?>, <?= htmlspecialchars($order['address_state'] ?? '') ?> <?= htmlspecialchars($order['address_postal_code']) ?></p>
                         <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_country']) ?></p>
                         <p class="text-sm text-gray-500">Tel: <?= htmlspecialchars($order['address_phone']) ?></p>
                     </div>
@@ -159,6 +162,13 @@ $sc = $status_colors[$order['order_status']] ?? $status_colors['pending'];
                         </p>
                     </div>
                 </div>
+
+                <?php if (!empty($order['order_payment_method'])): ?>
+                <div>
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Payment Method</p>
+                    <p class="font-semibold text-gray-700">💳 <?= htmlspecialchars($order['order_payment_method']) ?></p>
+                </div>
+                <?php endif; ?>
 
                 <!-- Divider -->
                 <div class="border-t-2 border-gray-50 mb-6"></div>
