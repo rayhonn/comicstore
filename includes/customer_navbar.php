@@ -1,4 +1,57 @@
 <?php
+// Auto-check expired pending_confirmation orders
+if (isset($_SESSION['user_id'])) {
+    $expired_orders = $pdo->prepare("
+        SELECT order_id, order_voucher_code, order_user_id
+        FROM orders
+        WHERE order_user_id = ?
+        AND order_payment_status = 'pending_confirmation'
+        AND order_confirm_expires_at < NOW()
+        LIMIT 1
+    ");
+    $expired_orders->execute([$_SESSION['user_id']]);
+    $expired_order = $expired_orders->fetch(PDO::FETCH_ASSOC);
+
+    if ($expired_order) {
+        // Cancel order
+        $pdo->prepare("UPDATE orders SET order_payment_status = 'cancelled', order_status = 'cancelled' WHERE order_id = ?")
+            ->execute([$expired_order['order_id']]);
+
+        // Restore stock
+        $items = $pdo->prepare("SELECT * FROM order_items WHERE order_item_order_id = ?");
+        $items->execute([$expired_order['order_id']]);
+        foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
+            if ($item['order_item_type'] === 'physical') {
+                $pdo->prepare("UPDATE product_physical SET physical_stock_quantity = physical_stock_quantity + ? WHERE physical_product_id = ?")
+                    ->execute([$item['order_item_quantity'], $item['order_item_product_id']]);
+            }
+        }
+
+        // Restore voucher
+        if (!empty($expired_order['order_voucher_code'])) {
+            $v = $pdo->prepare("SELECT voucher_id FROM vouchers WHERE voucher_code = ?");
+            $v->execute([$expired_order['order_voucher_code']]);
+            $v = $v->fetch(PDO::FETCH_ASSOC);
+            if ($v) {
+                $pdo->prepare("DELETE FROM voucher_usage WHERE usage_order_id = ?")
+                    ->execute([$expired_order['order_id']]);
+                $pdo->prepare("UPDATE vouchers SET voucher_used_count = GREATEST(0, voucher_used_count - 1) WHERE voucher_code = ?")
+                    ->execute([$expired_order['order_voucher_code']]);
+                $pdo->prepare("UPDATE user_vouchers SET uv_is_used = 0, uv_status = 'available', uv_pending_at = NULL, uv_used_at = NULL WHERE uv_voucher_id = ? AND uv_user_id = ?")
+                    ->execute([$v['voucher_id'], $_SESSION['user_id']]);
+            }
+        }
+
+        // Send notification
+        require_once '../includes/notifications.php';
+        $order_num = '#' . str_pad($expired_order['order_id'], 4, '0', STR_PAD_LEFT);
+        sendNotification($pdo, $_SESSION['user_id'],
+            '⏰ Payment Timeout',
+            "Your order $order_num has been cancelled due to payment timeout. Stock and vouchers have been restored.",
+            'order'
+        );
+    }
+}
 $cart_count = 0;
 if (isset($_SESSION['user_id'])) {
     $stmt = $pdo->prepare("SELECT SUM(cart_item_quantity) FROM cart_items WHERE cart_item_user_id = ?");

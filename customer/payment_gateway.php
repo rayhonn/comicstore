@@ -118,8 +118,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_payment'])) {
             ->execute([$order['voucher_code'], $order['discount_amount'], $order_id]);
     }
 
-    $pdo->prepare("DELETE FROM cart_items WHERE cart_item_user_id = ?")
-        ->execute([$order['user_id']]);
+    foreach ($order['items'] as $item) {
+        $pdo->prepare("DELETE FROM cart_items WHERE cart_item_id = ?")
+            ->execute([$item['cart_item_id']]);
+    }
     unset($_SESSION['pending_order']);
 
     // Email
@@ -891,8 +893,12 @@ $ewallet_gradients = [
 
             if (rem <= 0) {
                 clearInterval(gatewayTimer);
-                paymentSubmitted = true; // prevent beforeunload
-                document.getElementById('timeoutModal').classList.remove('hidden');
+                paymentSubmitted = true;
+                // Call backend to cancel order + send notification
+                fetch('cancel_expired_order.php', { method: 'POST' })
+                    .finally(() => {
+                        document.getElementById('timeoutModal').classList.remove('hidden');
+                    });
             }
         }
 

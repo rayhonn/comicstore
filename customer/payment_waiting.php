@@ -94,7 +94,11 @@ $order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
         if (timeLeft <= 0) {
             document.getElementById('countdown').textContent = '00:00';
             document.getElementById('countdown').classList.add('text-gray-400');
-            setTimeout(() => { window.location.href = 'orders.php?cancelled=1'; }, 1000);
+            // Call backend to cancel + notify
+            fetch('cancel_expired_order.php', { method: 'POST' })
+                .finally(() => {
+                    setTimeout(() => { window.location.href = 'orders.php?cancelled=1'; }, 1000);
+                });
             return;
         }
         const mins = Math.floor(timeLeft / 60).toString().padStart(2, '0');
