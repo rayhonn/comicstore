@@ -9,6 +9,14 @@ if (isset($_SESSION['user_id'])) {
     $stmt->execute([$_SESSION['user_id']]);
     $cart_count = $stmt->fetchColumn() ?? 0;
 }
+
+// Notification count
+$notif_count = 0;
+if (isset($_SESSION['user_id'])) {
+    $stmt_notif = $pdo->prepare("SELECT COUNT(*) FROM notifications WHERE notif_user_id = ? AND notif_is_read = 0");
+    $stmt_notif->execute([$_SESSION['user_id']]);
+    $notif_count = $stmt_notif->fetchColumn() ?? 0;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -19,6 +27,24 @@ if (isset($_SESSION['user_id'])) {
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         html { scroll-behavior: smooth; }
+        @keyframes bellRing {
+            0%   { transform: rotate(0deg); }
+            10%  { transform: rotate(15deg); }
+            20%  { transform: rotate(-13deg); }
+            30%  { transform: rotate(11deg); }
+            40%  { transform: rotate(-9deg); }
+            50%  { transform: rotate(7deg); }
+            60%  { transform: rotate(-5deg); }
+            70%  { transform: rotate(3deg); }
+            80%  { transform: rotate(-1deg); }
+            90%  { transform: rotate(1deg); }
+            100% { transform: rotate(0deg); }
+        }
+        .bell-ring {
+            animation: bellRing 1.2s ease infinite;
+            transform-origin: top center;
+            display: inline-block;
+        }
     </style>
 </head>
 <body class="bg-white">
@@ -38,6 +64,16 @@ if (isset($_SESSION['user_id'])) {
             </div>
             <div class="flex items-center gap-4 text-sm">
                 <?php if (isset($_SESSION['user_id'])): ?>
+                    <!-- Notifications -->
+                    <a href="customer/notifications.php" class="relative text-gray-600 hover:text-red-600 transition">
+                        <svg class="w-6 h-6 <?= $notif_count > 0 ? 'bell-ring' : '' ?>" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                        </svg>
+                        <?php if ($notif_count > 0): ?>
+                            <span class="absolute -top-2 -right-2 bg-red-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center"><?= $notif_count ?></span>
+                        <?php endif; ?>
+                    </a>
+                    <!-- Cart -->
                     <a href="customer/cart.php" class="relative text-gray-600 hover:text-red-600 transition">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
@@ -46,8 +82,9 @@ if (isset($_SESSION['user_id'])) {
                             <span class="absolute -top-2 -right-2 bg-red-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center"><?= $cart_count ?></span>
                         <?php endif; ?>
                     </a>
-                    <a href="customer/profile.php" class="text-gray-600 hover:text-red-600 transition">My Account</a>
-                    <a href="logout.php" class="text-gray-600 hover:text-red-600 transition">Logout</a>
+                    <a href="customer/dashboard.php" class="text-gray-600 hover:text-red-600 transition font-medium">
+                        Hi, <?= htmlspecialchars($_SESSION['user_first_name'] ?? $_SESSION['user_name'] ?? 'Guest') ?>!
+                    </a>
                 <?php else: ?>
                     <a href="login.php" class="text-gray-600 hover:text-red-600 transition">Login</a>
                     <a href="register.php" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition font-semibold text-sm">Register</a>
@@ -117,7 +154,6 @@ if (isset($_SESSION['user_id'])) {
                 </div>
                 <p class="text-blue-100/70 text-sm mb-2">The average MangaVault member saves <span class="text-blue-300 font-bold">RM100+</span> annually on shipping and discounts!</p>
                 <p class="text-blue-100/70 text-sm mb-8">Membership pays for itself with just a few orders throughout the year.</p>
-
                 <ul class="text-left space-y-3 mb-8">
                     <?php foreach ([
                         'Free shipping on orders above RM50',
@@ -133,15 +169,12 @@ if (isset($_SESSION['user_id'])) {
                     </li>
                     <?php endforeach; ?>
                 </ul>
-
                 <?php if (isset($_SESSION['user_id'])): ?>
-                    <a href="customer/membership.php"
-                       class="block w-full bg-blue-400 hover:bg-blue-300 text-[#1a3a5c] font-black py-4 rounded-2xl text-sm tracking-widest uppercase transition">
+                    <a href="customer/membership.php" class="block w-full bg-blue-400 hover:bg-blue-300 text-[#1a3a5c] font-black py-4 rounded-2xl text-sm tracking-widest uppercase transition">
                         JOIN NOW — RM50/YEAR
                     </a>
                 <?php else: ?>
-                    <a href="register.php"
-                       class="block w-full bg-blue-400 hover:bg-blue-300 text-[#1a3a5c] font-black py-4 rounded-2xl text-sm tracking-widest uppercase transition">
+                    <a href="register.php" class="block w-full bg-blue-400 hover:bg-blue-300 text-[#1a3a5c] font-black py-4 rounded-2xl text-sm tracking-widest uppercase transition">
                         REGISTER TO JOIN
                     </a>
                     <p class="text-blue-100/50 text-xs mt-3">Already have an account? <a href="login.php" class="text-blue-300 hover:underline">Login here</a></p>
@@ -172,38 +205,40 @@ if (isset($_SESSION['user_id'])) {
     </section>
 
     <!-- Footer -->
-    <footer class="bg-[#1e2d4a] text-white py-12">
+    <footer class="bg-[#F5F0EB] text-gray-800 py-12 border-t border-gray-200">
         <div class="max-w-7xl mx-auto px-6">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
-                <div>
-                    <h3 class="text-lg font-black mb-3">MANGA<span class="text-red-600">VAULT</span></h3>
-                    <p class="text-gray-400 text-sm">Malaysia's ultimate destination for manga and comic book lovers.</p>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
+                <div class="col-span-2 md:col-span-1">
+                    <h3 class="text-lg font-black mb-4">MANGA<span class="text-red-600">VAULT</span></h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">Malaysia's ultimate destination for manga and comic book lovers.</p>
                 </div>
                 <div>
-                    <h4 class="font-bold mb-3 text-sm uppercase tracking-wide">Shop</h4>
-                    <ul class="space-y-2 text-sm text-gray-400">
-                        <li><a href="customer/home.php" class="hover:text-red-500 transition">All Manga</a></li>
-                        <li><a href="customer/home.php?type=physical" class="hover:text-red-500 transition">Physical Books</a></li>
-                        <li><a href="customer/home.php?type=ebook" class="hover:text-red-500 transition">E-Books</a></li>
+                    <h4 class="font-bold mb-4 text-sm uppercase tracking-wide text-gray-800">Shop</h4>
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li><a href="customer/home.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">All Manga</a></li>
+                        <li><a href="customer/home.php?type=physical" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">Physical Books</a></li>
+                        <li><a href="customer/home.php?type=ebook" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">E-Books</a></li>
                     </ul>
                 </div>
                 <div>
-                    <h4 class="font-bold mb-3 text-sm uppercase tracking-wide">Help</h4>
-                    <ul class="space-y-2 text-sm text-gray-400">
-                        <li><a href="customer/orders.php" class="hover:text-red-500 transition">My Orders</a></li>
-                        <li><a href="customer/profile.php" class="hover:text-red-500 transition">My Account</a></li>
+                    <h4 class="font-bold mb-4 text-sm uppercase tracking-wide text-gray-800">Help</h4>
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li><a href="customer/orders.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">My Orders</a></li>
+                        <li><a href="customer/dashboard.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">My Account</a></li>
+                        <li><a href="customer/faq.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">FAQ</a></li>
+                        <li><a href="customer/about.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">About Us</a></li>
                     </ul>
                 </div>
                 <div>
-                    <h4 class="font-bold mb-3 text-sm uppercase tracking-wide">Follow Us</h4>
+                    <h4 class="font-bold mb-4 text-sm uppercase tracking-wide text-gray-800">Follow Us</h4>
                     <div class="flex gap-3">
-                        <a href="#" class="w-9 h-9 bg-white/10 rounded-full flex items-center justify-center hover:bg-red-600 transition text-sm">f</a>
-                        <a href="#" class="w-9 h-9 bg-white/10 rounded-full flex items-center justify-center hover:bg-red-600 transition text-sm">t</a>
-                        <a href="#" class="w-9 h-9 bg-white/10 rounded-full flex items-center justify-center hover:bg-red-600 transition text-sm">in</a>
+                        <a href="#" class="w-9 h-9 bg-gray-200 hover:bg-red-600 hover:text-white rounded-full flex items-center justify-center transition-all text-sm font-bold text-gray-600">f</a>
+                        <a href="#" class="w-9 h-9 bg-gray-200 hover:bg-red-600 hover:text-white rounded-full flex items-center justify-center transition-all text-sm font-bold text-gray-600">t</a>
+                        <a href="#" class="w-9 h-9 bg-gray-200 hover:bg-red-600 hover:text-white rounded-full flex items-center justify-center transition-all text-sm font-bold text-gray-600">in</a>
                     </div>
                 </div>
             </div>
-            <div class="border-t border-white/10 pt-6 text-center text-xs text-gray-500">
+            <div class="border-t border-gray-300 pt-6 text-center text-xs text-gray-500">
                 © 2026 MangaVault. All rights reserved.
             </div>
         </div>
