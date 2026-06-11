@@ -16,7 +16,8 @@ if (!$order_id) {
 
 // Get order details
 $stmt = $pdo->prepare("
-    SELECT o.*, a.address_recipient_name, a.address_street, a.address_city
+    SELECT o.*, a.address_recipient_name, a.address_taman, a.address_street, 
+    a.address_city, a.address_state, a.address_postal_code, a.address_country, a.address_phone
     FROM orders o
     LEFT JOIN addresses a ON o.order_address_id = a.address_id
     WHERE o.order_id = ? AND o.order_user_id = ?
@@ -133,19 +134,33 @@ $items = $stmt2->fetchAll(PDO::FETCH_ASSOC);
                 <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path></svg>
                 Shipping To
             </h3>
-            <p class="text-sm text-gray-600"><?= htmlspecialchars($order['address_recipient_name']) ?></p>
-            <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_street']) ?>, <?= htmlspecialchars($order['address_city']) ?></p>
+            <p class="text-sm font-semibold text-gray-700"><?= htmlspecialchars($order['address_recipient_name']) ?></p>
+            <?php if (!empty($order['address_taman'])): ?>
+            <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_taman']) ?></p>
+            <?php endif; ?>
+            <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_street']) ?></p>
+            <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_city']) ?>, <?= htmlspecialchars($order['address_state'] ?? '') ?> <?= htmlspecialchars($order['address_postal_code'] ?? '') ?></p>
+            <p class="text-sm text-gray-500"><?= htmlspecialchars($order['address_country'] ?? 'Malaysia') ?></p>
+            <?php if (!empty($order['address_phone'])): ?>
+            <p class="text-xs text-gray-400 mt-1">📞 <?= htmlspecialchars($order['address_phone']) ?></p>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
 
         <!-- Action Buttons -->
+        <div class="flex gap-3 slide-up-delay-3 mb-3">
+            <a href="invoice.php?order_id=<?= $order_id ?>"
+                class="flex-1 text-center bg-[#1e2d4a] hover:bg-[#162338] text-white font-bold py-3 rounded-xl text-sm transition-colors duration-200 flex items-center justify-center gap-2">
+                🧾 Download Invoice
+            </a>
+        </div>
         <div class="flex gap-3 slide-up-delay-3">
             <a href="orders.php"
-               class="flex-1 text-center bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm transition-colors duration-200">
+                class="flex-1 text-center bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm transition-colors duration-200">
                 View My Orders →
             </a>
             <a href="home.php"
-               class="flex-1 text-center bg-white hover:bg-gray-50 text-gray-700 font-bold py-3 rounded-xl text-sm transition-colors duration-200 border border-gray-200">
+                class="flex-1 text-center bg-white hover:bg-gray-50 text-gray-700 font-bold py-3 rounded-xl text-sm transition-colors duration-200 border border-gray-200">
                 Continue Shopping
             </a>
         </div>
