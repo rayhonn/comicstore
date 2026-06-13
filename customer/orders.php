@@ -215,11 +215,21 @@ if ($filter !== 'all') {
                                             $return_check->execute([$item['order_item_id']]);
                                             $return_req = $return_check->fetch();
                                             ?>
-                                            <?php if (!$return_req): ?>
+                                            <?php
+                                            $days_since_delivery = 999;
+                                            if (!empty($order['order_delivered_at'])) {
+                                                $delivered = new DateTime($order['order_delivered_at']);
+                                                $now = new DateTime();
+                                                $days_since_delivery = $now->diff($delivered)->days;
+                                            }
+                                            ?>
+                                            <?php if (!$return_req && $days_since_delivery <= 7): ?>
                                                 <a href="return_request.php?order_id=<?= $order['order_id'] ?>&item_id=<?= $item['order_item_id'] ?>"
-                                                   class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors duration-200 inline-block">
-                                                    Return
+                                                class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors duration-200 inline-block">
+                                                    ↩ Return
                                                 </a>
+                                            <?php elseif (!$return_req && $days_since_delivery > 7): ?>
+                                                <span class="text-xs text-gray-400">Return expired</span>
                                             <?php else: ?>
                                                 <span class="text-xs <?= $return_req['return_status'] === 'approved' ? 'text-green-600' : ($return_req['return_status'] === 'rejected' ? 'text-red-500' : 'text-orange-500') ?> font-medium capitalize">
                                                     Return <?= $return_req['return_status'] ?>

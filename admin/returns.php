@@ -47,8 +47,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['
     if ($ret_data) {
         $ret_num = '#' . str_pad($return_id, 4, '0', STR_PAD_LEFT);
         if ($action === 'approved') {
+            // Get refund amount
+            $refund_stmt = $pdo->prepare("SELECT oi.order_item_price, oi.order_item_quantity FROM return_requests rr JOIN order_items oi ON rr.     return_item_id = oi.order_item_id WHERE rr.return_id = ?");
+            $refund_stmt->execute([$return_id]);
+            $refund_item = $refund_stmt->fetch(PDO::FETCH_ASSOC);
+            $refund_amount = $refund_item ? number_format($refund_item['order_item_price'] * $refund_item['order_item_quantity'], 2) : '0.00';
+
             sendNotification($pdo, $ret_data['order_user_id'], 'Return Approved ✅',
-                "Your return request $ret_num for \"{$ret_data['product_title']}\" has been approved.", 'return');
+                "Your return request $ret_num for \"{$ret_data['product_title']}\" has been approved. A refund of RM $refund_amount will be processed to your original payment method within 5-7 working days.", 'return');
         } else {
             sendNotification($pdo, $ret_data['order_user_id'], 'Return Rejected ❌',
                 "Your return request $ret_num for \"{$ret_data['product_title']}\" has been rejected." . ($admin_note ? " Reason: $admin_note" : ''), 'return');
