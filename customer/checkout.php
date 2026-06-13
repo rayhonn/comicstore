@@ -222,6 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'address_id'      => $address_id,
             'shipping_method' => $shipping_method,
             'shipping_fee'    => $shipping_fee,
+            'original_shipping_fee' => $couriers_data[$shipping_courier][$fee_key] ?? $shipping_fee,
             'voucher_code'    => $voucher_code_input ?: null,
             'discount_amount' => $discount_amount,
             'voucher_id'      => $applied_voucher['voucher_id'] ?? null,

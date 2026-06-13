@@ -465,7 +465,32 @@ $ewallet_gradients = [
                             </div>
                             <div class="flex justify-between text-sm text-gray-500 mb-1">
                                 <span>Shipping</span>
-                                <span><?= $order['shipping_fee'] > 0 ? 'RM ' . number_format($order['shipping_fee'], 2) : 'Free' ?></span>
+                                <span>
+                                    <?php
+                                    $original_shipping_fee = null;
+                                    if ($order['shipping_fee'] == 0 && $order['has_physical']) {
+                                        // Get original fee from tier config to show strikethrough
+                                        $tier_info = $pdo->prepare("SELECT user_tier FROM users WHERE user_id = ?");
+                                        $tier_info->execute([$user_id]);
+                                        $tier_name = $tier_info->fetchColumn() ?? 'bronze';
+                                        $tier_cfg = $pdo->prepare("SELECT tier_free_shipping, tier_shipping_discount FROM tier_config WHERE tier_name = ?");
+                                        $tier_cfg->execute([$tier_name]);
+                                        $tier_cfg = $tier_cfg->fetch(PDO::FETCH_ASSOC);
+                                        if ($tier_cfg && ($tier_cfg['tier_free_shipping'] || $tier_cfg['tier_shipping_discount'] > 0)) {
+                                            $original_shipping_fee = $order['original_shipping_fee'] ?? null;
+                                        }
+                                    }
+                                    if ($order['shipping_fee'] == 0 && $order['has_physical'] && isset($order['original_shipping_fee'])):
+                                    ?>
+                                        <span class="line-through text-gray-400">RM <?= number_format($order['original_shipping_fee'], 2) ?></span>
+                                        <span class="text-green-600 font-bold ml-1">RM 0.00</span>
+                                    <?php elseif ($order['shipping_fee'] > 0 && $order['has_physical'] && isset($order['original_shipping_fee']) && $order                          ['original_shipping_fee'] > $order['shipping_fee']): ?>
+                                        <span class="line-through text-gray-400">RM <?= number_format($order['original_shipping_fee'], 2) ?></span>
+                                        <span class="text-green-600 font-bold ml-1">RM <?= number_format($order['shipping_fee'], 2) ?></span>
+                                    <?php else: ?>
+                                        <?= $order['shipping_fee'] > 0 ? 'RM ' . number_format($order['shipping_fee'], 2) : 'Free' ?>
+                                    <?php endif; ?>
+                                </span>
                             </div>
                             <?php if (!empty($order['voucher_code'])): ?>
                             <div class="flex justify-between text-sm text-green-600 mb-1">
