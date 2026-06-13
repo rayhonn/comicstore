@@ -59,6 +59,15 @@ $addresses = $addresses->fetchAll(PDO::FETCH_ASSOC);
 
 $error = '';
 
+// Load tier shipping benefit for JS (on page load)
+$user_tier_info = $pdo->prepare("SELECT user_tier FROM users WHERE user_id = ?");
+$user_tier_info->execute([$user_id]);
+$user_tier_name = $user_tier_info->fetchColumn() ?? 'bronze';
+
+$tier_shipping_stmt = $pdo->prepare("SELECT tier_free_shipping, tier_shipping_discount FROM tier_config WHERE tier_name = ?");
+$tier_shipping_stmt->execute([$user_tier_name]);
+$tier_shipping_row = $tier_shipping_stmt->fetch(PDO::FETCH_ASSOC) ?? ['tier_free_shipping' => 0, 'tier_shipping_discount' => 0];
+
 // Handle voucher check (AJAX)
 if (isset($_POST['check_voucher'])) {
     $code = strtoupper(trim($_POST['voucher_code']));
@@ -139,6 +148,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $zone_key = $shipping_zone === 'east_malaysia' ? 'east' : 'peninsular';
     $fee_key = $zone_key . '_' . $shipping_type;
     $shipping_fee = $has_physical ? ($couriers_data[$shipping_courier][$fee_key] ?? 4.90) : 0;
+
+    // Apply tier shipping benefit (standard only)
+    if ($has_physical && $shipping_fee > 0 && $shipping_type === 'std') {
+        $user_tier_info = $pdo->prepare("SELECT user_tier FROM users WHERE user_id = ?");
+        $user_tier_info->execute([$user_id]);
+        $user_tier_name = $user_tier_info->fetchColumn() ?? 'bronze';
+
+        $tier_shipping = $pdo->prepare("SELECT tier_free_shipping, tier_shipping_discount FROM tier_config WHERE tier_name = ?");
+        $tier_shipping->execute([$user_tier_name]);
+        $tier_shipping_row = $tier_shipping->fetch(PDO::FETCH_ASSOC);
+
+        if ($tier_shipping_row) {
+            if ($tier_shipping_row['tier_free_shipping']) {
+                $shipping_fee = 0;
+            } elseif ($tier_shipping_row['tier_shipping_discount'] > 0) {
+                $shipping_fee = max(0, $shipping_fee - $tier_shipping_row['tier_shipping_discount']);
+            }
+        }
+    } else {
+        $user_tier_name = 'bronze';
+        $tier_shipping_row = ['tier_free_shipping' => 0, 'tier_shipping_discount' => 0];
+    }
 
     $voucher_code_input = strtoupper(trim($_POST['voucher_code_applied'] ?? ''));
     $discount_amount = 0;
@@ -967,6 +998,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         modal.classList.remove('hidden');
     }
 
+    // Tier shipping benefit
+    const tierFreeShipping = <?= $tier_shipping_row['tier_free_shipping'] ? 'true' : 'false' ?>;
+    const tierShippingDiscount = <?= floatval($tier_shipping_row['tier_shipping_discount']) ?>;
+
     const couriersData = <?= json_encode($couriers) ?>;
     let currentZone = null;
     let currentSpeed = null;
@@ -1068,7 +1103,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         const feeKey = zonePrefix + '_' + (speed === 'express' ? 'exp' : 'std');
         Object.keys(couriersData).forEach(key => {
             const priceEl = document.getElementById('courier_price_' + key);
-            if (priceEl) priceEl.textContent = 'RM ' + couriersData[key][feeKey].toFixed(2);
+            if (!priceEl) return;
+            const baseFee = couriersData[key][feeKey];
+            if (speed === 'standard') {
+                if (tierFreeShipping) {
+                    priceEl.innerHTML = '<span class="line-through text-gray-400">RM ' + baseFee.toFixed(2) + '</span> <span class="text-green-600">RM 0.00</span>';
+                } else if (tierShippingDiscount > 0) {
+                    const discounted = Math.max(0, baseFee - tierShippingDiscount);
+                    priceEl.innerHTML = '<span class="line-through text-gray-400">RM ' + baseFee.toFixed(2) + '</span> <span class="text-green-600">RM ' + discounted.toFixed(2) + '</span>';
+                } else {
+                    priceEl.textContent = 'RM ' + baseFee.toFixed(2);
+                }
+            } else {
+                priceEl.textContent = 'RM ' + baseFee.toFixed(2);
+            }
         });
 
         document.querySelectorAll('.courier-option').forEach(btn => {
@@ -1118,9 +1166,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         const zonePrefix = currentZone === 'east_malaysia' ? 'east' : 'peninsular';
         const feeKey = zonePrefix + '_' + (currentSpeed === 'express' ? 'exp' : 'std');
-        currentShipping = couriersData[courier][feeKey];
+        const baseFee = couriersData[courier][feeKey];
 
-        document.getElementById('shippingFee').textContent = 'RM ' + currentShipping.toFixed(2);
+        if (currentSpeed === 'standard') {
+            if (tierFreeShipping) {
+                currentShipping = 0;
+            } else if (tierShippingDiscount > 0) {
+                currentShipping = Math.max(0, baseFee - tierShippingDiscount);
+            } else {
+                currentShipping = baseFee;
+            }
+        } else {
+            currentShipping = baseFee;
+        }
+
+        if (currentShipping === 0) {
+            document.getElementById('shippingFee').innerHTML = 
+            '<span class="line-through text-gray-400">RM ' + baseFee.toFixed(2) + '</span> <span class="text-green-600 font-bold">RM 0.00</span>';
+        } else if (tierShippingDiscount > 0 && currentSpeed === 'standard') {
+            document.getElementById('shippingFee').innerHTML = 
+            '<span class="line-through text-gray-400">RM ' + baseFee.toFixed(2) + '</span> <span class="text-green-600 font-bold">RM ' + currentShipping.toFixed(2) + '</span>';
+        } else {
+            document.getElementById('shippingFee').textContent = 'RM ' + currentShipping.toFixed(2);
+        }
         document.getElementById('shippingMethodInput').value = courier + '_' + currentSpeed;
         document.getElementById('shippingCourierInput').value = courier;
         document.getElementById('courierError').classList.add('hidden');
