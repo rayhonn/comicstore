@@ -159,12 +159,57 @@ try {
         }
     }
 
-    // Award points (1 point per RM1 spent)
-    $points_earned = floor($order['order_total_amount']);
+    // Get current tier & multiplier from database
+    $user_tier_data = $pdo->prepare("SELECT user_tier, user_lifetime_spending FROM users WHERE user_id = ?");
+    $user_tier_data->execute([$order['order_user_id']]);
+    $user_tier_row = $user_tier_data->fetch(PDO::FETCH_ASSOC);
+    $current_tier = $user_tier_row['user_tier'] ?? 'bronze';
+
+    $tier_cfg = $pdo->prepare("SELECT tier_points_multiplier FROM tier_config WHERE tier_name = ?");
+    $tier_cfg->execute([$current_tier]);
+    $multiplier = $tier_cfg->fetchColumn() ?? 1;
+
+    // Award points with tier multiplier
+    $points_earned = floor($order['order_total_amount'] * $multiplier);
     $pdo->prepare("UPDATE users SET user_points = user_points + ? WHERE user_id = ?")
         ->execute([$points_earned, $order['order_user_id']]);
     $pdo->prepare("INSERT INTO points_log (log_user_id, log_points, log_type, log_description, log_order_id) VALUES (?, ?, 'earn', ?, ?)")
         ->execute([$order['order_user_id'], $points_earned, "Earned from Order #" . str_pad($order['order_id'], 4, '0', STR_PAD_LEFT), $order['order_id']]);
+
+    // Update lifetime spending
+    $pdo->prepare("UPDATE users SET user_lifetime_spending = user_lifetime_spending + ? WHERE user_id = ?")
+        ->execute([$order['order_total_amount'], $order['order_user_id']]);
+
+    // Get new lifetime spending
+    $new_spending = $pdo->prepare("SELECT user_lifetime_spending FROM users WHERE user_id = ?");
+    $new_spending->execute([$order['order_user_id']]);
+    $new_spending = $new_spending->fetchColumn();
+
+    // Get tier thresholds from database
+    $all_tiers = $pdo->query("SELECT tier_name, tier_min_spending FROM tier_config ORDER BY tier_min_spending DESC")->fetchAll(PDO::FETCH_ASSOC);
+
+    $new_tier = 'bronze';
+    foreach ($all_tiers as $t) {
+        if ($new_spending >= $t['tier_min_spending']) {
+            $new_tier = $t['tier_name'];
+            break;
+        }
+    }
+
+    // Upgrade tier if changed
+    if ($new_tier !== $current_tier) {
+        $pdo->prepare("UPDATE users SET user_tier = ? WHERE user_id = ?")
+            ->execute([$new_tier, $order['order_user_id']]);
+
+        $tier_labels = ['silver' => 'Silver 🥈', 'gold' => 'Gold 🥇', 'platinum' => 'Platinum 💎'];
+        $tier_label = $tier_labels[$new_tier] ?? $new_tier;
+
+        sendNotification($pdo, $order['order_user_id'],
+            'Tier Upgraded! 🎉',
+            'Congratulations! You\'ve been upgraded to ' . $tier_label . ' tier. Enjoy your new benefits!',
+            'order'
+        );
+    }
     require_once '../includes/notifications.php';
     sendNotification($pdo, $order['order_user_id'],
             'Payment Confirmed! 🎉', 

@@ -116,7 +116,7 @@ if (isset($_SESSION['user_id'])) {
                 <a href="customer/home.php" class="nav-link text-gray-600 hover:text-red-600">Catalog</a>
                 <a href="#rankings" class="nav-link text-gray-600 hover:text-red-600">Rankings</a>
                 <a href="#new-releases" class="nav-link text-gray-600 hover:text-red-600">New Releases</a>
-                <a href="membership.php" class="nav-link text-gray-600 hover:text-red-600">Membership</a>
+                <a href="tier.php" class="nav-link text-gray-600 hover:text-red-600">Membership</a>
             </div>
 
             <!-- Right Side -->
@@ -215,7 +215,7 @@ if (isset($_SESSION['user_id'])) {
                                 style="clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))">
                                 SHOP NOW
                             </a>
-                            <a href="membership.php"
+                            <a href="tier.php"
                                 class="border border-white/30 hover:border-white/70 hover:bg-white/10 text-white font-bold px-8 py-4 text-sm tracking-widest uppercase transition-all duration-200">
                                 BECOME A MEMBER
                             </a>
@@ -479,7 +479,7 @@ if (isset($_SESSION['user_id'])) {
             <p class="text-blue-300 text-sm font-semibold tracking-widest uppercase mb-4">Exclusive Benefits</p>
             <h2 class="text-4xl font-black text-white mb-4">Become a <span class="text-blue-300">Member</span></h2>
             <p class="text-gray-300 mb-8 max-w-xl mx-auto leading-relaxed">Join MangaVault membership and unlock free shipping, exclusive discounts, early access to new releases and more!</p>
-            <a href="membership.php"
+            <a href="tier.php"
                class="bg-blue-400 hover:bg-blue-300 hover:scale-105 text-[#1e2d4a] font-black px-10 py-4 rounded-full text-sm tracking-widest uppercase transition-all duration-200 inline-block shadow-lg shadow-blue-900/30">
                 LEARN MORE & JOIN
             </a>
@@ -508,7 +508,7 @@ if (isset($_SESSION['user_id'])) {
                     <ul class="space-y-2 text-sm text-gray-600">
                         <li><a href="customer/orders.php" class="hover:text-red-600 hover:translate-x-1 transition-all duration-200 inline-block">My Orders</a></li>
                         <li><a href="customer/profile.php" class="hover:text-red-600 hover:translate-x-1 transition-all duration-200 inline-block">My Account</a></li>
-                        <li><a href="membership.php" class="hover:text-red-600 hover:translate-x-1 transition-all duration-200 inline-block">Membership</a></li>
+                        <li><a href="tier.php" class="hover:text-red-600 hover:translate-x-1 transition-all duration-200 inline-block">Tier</a></li>
                         <li><a href="customer/faq.php" class="hover:text-red-600 hover:translate-x-1 transition-all duration-200 inline-block">FAQ</a></li>
                         <li><a href="customer/about.php" class="hover:text-red-600 hover:translate-x-1 transition-all duration-200 inline-block">About Us</a></li>
                     </ul>

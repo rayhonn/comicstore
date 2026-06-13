@@ -225,7 +225,7 @@ $user = $user->fetch(PDO::FETCH_ASSOC);
                                 </div>
                                 <p class="text-xs font-semibold text-gray-600 group-hover:text-red-600 text-center">Returns</p>
                             </a>
-                            <a href="../membership.php" class="flex flex-col items-center gap-2 p-4 bg-gray-50 hover:bg-red-50 rounded-xl transition-colors duration-200 group">
+                            <a href="../tier.php" class="flex flex-col items-center gap-2 p-4 bg-gray-50 hover:bg-red-50 rounded-xl transition-colors duration-200 group">
                                 <div class="w-10 h-10 bg-white group-hover:bg-red-100 rounded-xl flex items-center justify-center shadow-sm transition-colors">
                                     <svg class="w-5 h-5 text-gray-600 group-hover:text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path></svg>
                                 </div>
