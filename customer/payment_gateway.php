@@ -78,14 +78,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay_now'])) {
     }
 
     if (!empty($order['voucher_code']) && $order['discount_amount'] > 0) {
-        $line_items[] = [
+        $line_items = [[
             'price_data' => [
                 'currency' => STRIPE_CURRENCY,
-                'product_data' => ['name' => 'Voucher Discount (' . $order['voucher_code'] . ')'],
-                'unit_amount' => -round($order['discount_amount'] * 100),
+                'product_data' => [
+                    'name' => 'MangaVault Order',
+                    'description' => 'Includes voucher discount (' . $order['voucher_code'] . ' -RM' . number_format($order['discount_amount'], 2) . ')',
+                ],
+                'unit_amount' => round($order['total'] * 100),
             ],
             'quantity' => 1,
-        ];
+        ]];
     }
 
     try {
