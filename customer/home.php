@@ -244,14 +244,12 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
         <!-- AI Recommendations Section -->
         <?php if (!$search && !$category_id && !$genre_id && !$type): ?>
         <div class="mt-12 mb-6" id="recommendations-section">
-            <div class="flex items-center justify-between mb-4">
-                <div>
-                    <h2 class="text-xl font-black text-gray-800">✨ Recommended For You</h2>
-                    <p class="text-xs text-gray-400 mt-0.5">Powered by Claude AI</p>
-                </div>
+            <div class="text-center mb-6">
+                <h2 class="text-xl font-black text-gray-800">✨ Recommended For You</h2>
+                <p class="text-xs text-gray-400 mt-0.5">Powered by Claude AI</p>
             </div>
-            <div id="recommendations-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                <?php for ($i = 0; $i < 6; $i++): ?>
+            <div id="recommendations-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <?php for ($i = 0; $i < 5; $i++): ?>
                 <div class="animate-pulse">
                     <div class="bg-gray-200 rounded-xl h-48 mb-2"></div>
                     <div class="bg-gray-200 rounded h-3 mb-1"></div>
@@ -425,13 +423,13 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
                 : '<span class="text-xs text-blue-600 font-semibold">E-Book</span>';
         
             return `
-            <a href="/comicstore/customer/product_detail.php?id=${p.product_id}" 
-                class="group bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1">
-                <div class="relative">
-                    ${p.product_cover_image 
-                        ? `<img src="/comicstore/assets/images/${p.product_cover_image}" 
-                                class="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300">`
-                        : `<div class="w-full h-48 bg-gray-100 flex items-center justify-center text-gray-400 text-xs">No Image</div>`
+            <a href="/comicstore/customer/product_detail.php?id=${p.product_id}"
+                class="group bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col">
+                <div class="relative flex-shrink-0" style="height:200px;">
+                    ${p.product_cover_image
+                        ? `<img src="/comicstore/assets/images/${p.product_cover_image}"
+                                class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
+                        : `<div class="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">No Image</div>`
                     }
                 </div>
                 <div class="p-3">

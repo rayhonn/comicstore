@@ -82,10 +82,10 @@ The user has no purchase history yet. Recommend 6 popular manga from this list b
 Available products:
 $products_text
 
-Return ONLY a JSON array of 6 product IDs like this (no explanation, no markdown, just pure JSON):
-[1, 5, 3, 8, 2, 7]
+Return ONLY a JSON array of 5 product IDs like this (no explanation, no markdown, just pure JSON):
+[1, 5, 3, 8, 2]
 
-Pick the 6 most popular ones based on total sold.";
+Pick the 5 most popular ones based on total sold.";
     } else {
         $history_text = '';
         foreach ($purchase_history as $h) {
@@ -100,10 +100,10 @@ $history_text
 Available products to recommend from:
 $products_text
 
-Based on the user's taste from their purchase history, recommend 6 products they haven't bought yet that match their interests.
+Based on the user's taste from their purchase history, recommend 5 products they haven't bought yet that match their interests.
 
-Return ONLY a JSON array of 6 product IDs like this (no explanation, no markdown, just pure JSON):
-[1, 5, 3, 8, 2, 7]";
+Return ONLY a JSON array of 5 product IDs like this (no explanation, no markdown, just pure JSON):
+[1, 5, 3, 8, 2]";
     }
 } else {
     $prompt = "You are a manga recommendation AI for MangaVault store.
