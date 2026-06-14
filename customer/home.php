@@ -240,6 +240,27 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>
+
+        <!-- AI Recommendations Section -->
+        <?php if (!$search && !$category_id && !$genre_id && !$type): ?>
+        <div class="mt-12 mb-6" id="recommendations-section">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-xl font-black text-gray-800">✨ Recommended For You</h2>
+                    <p class="text-xs text-gray-400 mt-0.5">Powered by Claude AI</p>
+                </div>
+            </div>
+            <div id="recommendations-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <?php for ($i = 0; $i < 6; $i++): ?>
+                <div class="animate-pulse">
+                    <div class="bg-gray-200 rounded-xl h-48 mb-2"></div>
+                    <div class="bg-gray-200 rounded h-3 mb-1"></div>
+                    <div class="bg-gray-200 rounded h-3 w-2/3"></div>
+                </div>
+                <?php endfor; ?>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <!-- Footer -->
@@ -380,6 +401,52 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeModal();
     });
+
+    // Load AI Recommendations
+    <?php if (!$search && !$category_id && !$genre_id && !$type): ?>
+    fetch('/comicstore/customer/get_recommendations.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'type=home'
+    })
+    .then(r => r.json())
+    .then(data => {
+        const grid = document.getElementById('recommendations-grid');
+        if (!data.products || data.products.length === 0) {
+            document.getElementById('recommendations-section').style.display = 'none';
+            return;
+        }
+        grid.innerHTML = data.products.map(p => {
+            const inStock = p.physical_stock_quantity > 0 || p.ebook_product_id;
+            const stockBadge = p.product_type === 'physical' 
+                ? (p.physical_stock_quantity > 0 
+                    ? '<span class="text-xs text-green-600 font-semibold">In Stock</span>'
+                    : '<span class="text-xs text-red-500 font-semibold">Out of Stock</span>')
+                : '<span class="text-xs text-blue-600 font-semibold">E-Book</span>';
+        
+            return `
+            <a href="/comicstore/customer/product_detail.php?id=${p.product_id}" 
+                class="group bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1">
+                <div class="relative">
+                    ${p.product_cover_image 
+                        ? `<img src="/comicstore/assets/images/${p.product_cover_image}" 
+                                class="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300">`
+                        : `<div class="w-full h-48 bg-gray-100 flex items-center justify-center text-gray-400 text-xs">No Image</div>`
+                    }
+                </div>
+                <div class="p-3">
+                    <p class="font-bold text-xs text-gray-800 truncate mb-1">${p.product_title}</p>
+                    <p class="text-xs text-gray-400 truncate mb-1">${p.genres || ''}</p>
+                    ${stockBadge}
+                    <p class="font-black text-red-600 text-sm mt-1">RM ${parseFloat(p.product_price).toFixed(2)}</p>
+                </div>
+            </a>`;
+        }).join('');
+    })
+    .catch(() => {
+        document.getElementById('recommendations-section').style.display = 'none';
+    });
+    <?php endif; ?>
 </script>
 
 </body>
