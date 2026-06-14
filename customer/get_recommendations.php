@@ -116,10 +116,10 @@ Category: {$current_product['category_name']}
 Available products to recommend from:
 $products_text
 
-Recommend 4 similar products based on same genres or category. Exclude the current product (ID: $product_id).
+Recommend 3 similar products based on same genres or category. Exclude the current product (ID: $product_id).
 
 Return ONLY a JSON array of 4 product IDs like this (no explanation, no markdown, just pure JSON):
-[1, 5, 3, 8]";
+[1, 5, 3]";
 }
 
 // Call Claude API

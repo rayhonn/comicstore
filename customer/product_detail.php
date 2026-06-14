@@ -411,6 +411,23 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             <?php endif; ?>
         </div>
 
+        <!-- AI You Might Also Like -->
+        <div class="bg-white rounded-2xl shadow-sm p-6 mb-8" id="also-like-section">
+            <div class="text-center mb-5">
+                <h3 class="font-bold text-gray-800 text-lg">✨ You Might Also Like</h3>
+                <p class="text-xs text-gray-400 mt-0.5">Powered by Claude AI</p>
+            </div>
+            <div id="also-like-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <?php for ($i = 0; $i < 3; $i++): ?>
+                <div class="animate-pulse">
+                    <div class="bg-gray-200 rounded-xl h-48 mb-2"></div>
+                    <div class="bg-gray-200 rounded h-3 mb-1"></div>
+                    <div class="bg-gray-200 rounded h-3 w-2/3"></div>
+                </div>
+                <?php endfor; ?>
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -440,6 +457,41 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             }
         });
     }
+
+    // Load AI "You Might Also Like"
+    fetch('/comicstore/customer/get_recommendations.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'type=product&product_id=<?= $id ?>'
+    })
+    .then(r => r.json())
+    .then(data => {
+        const grid = document.getElementById('also-like-grid');
+        if (!data.products || data.products.length === 0) {
+            document.getElementById('also-like-section').style.display = 'none';
+            return;
+        }
+        grid.innerHTML = data.products.map(p => `
+            <a href="/comicstore/customer/product_detail.php?id=${p.product_id}"
+                class="group bg-gray-50 rounded-xl overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col">
+                <div class="relative" style="height:180px; overflow:hidden;">
+                    ${p.product_cover_image
+                        ? `<img src="/comicstore/assets/images/${p.product_cover_image}"
+                                style="width:100%; height:100%; object-fit:cover;" class="group-hover:scale-105 transition-transform duration-300">`
+                        : `<div style="width:100%; height:100%; background:#f3f4f6; display:flex; align-items:center; justify-content:center; color:#9ca3af; font-size:12px;">No Image</div>`
+                    }
+                </div>
+                <div class="p-3">
+                    <p class="font-bold text-xs text-gray-800 truncate mb-1">${p.product_title}</p>
+                    <p class="text-xs text-gray-400 truncate mb-1">${p.genres || ''}</p>
+                    <p class="font-black text-red-600 text-sm">RM ${parseFloat(p.product_price).toFixed(2)}</p>
+                </div>
+            </a>`
+        ).join('');
+    })
+    .catch(() => {
+        document.getElementById('also-like-section').style.display = 'none';
+    });
     </script>
 </body>
 </html>
