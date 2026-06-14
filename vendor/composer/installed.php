@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => '__root__',
-        'pretty_version' => '1.0.0+no-version-set',
-        'version' => '1.0.0.0',
-        'reference' => null,
+        'pretty_version' => 'dev-main',
+        'version' => 'dev-main',
+        'reference' => '1fbfc88a1324a7b377e84a35859350fd63e15f34',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -11,9 +11,9 @@
     ),
     'versions' => array(
         '__root__' => array(
-            'pretty_version' => '1.0.0+no-version-set',
-            'version' => '1.0.0.0',
-            'reference' => null,
+            'pretty_version' => 'dev-main',
+            'version' => 'dev-main',
+            'reference' => '1fbfc88a1324a7b377e84a35859350fd63e15f34',
             'type' => 'library',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
@@ -61,6 +61,15 @@
             'reference' => 'e6bc62dd6ae83acc475f57912e27466019a1f2cf',
             'type' => 'library',
             'install_path' => __DIR__ . '/../pragmarx/google2fa',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
+        'stripe/stripe-php' => array(
+            'pretty_version' => 'v20.2.1',
+            'version' => '20.2.1.0',
+            'reference' => 'c628cfa0b3de4ef5110b2c2bfbf881a33a52fdd5',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../stripe/stripe-php',
             'aliases' => array(),
             'dev_requirement' => false,
         ),

@@ -6,7 +6,15 @@ namespace Composer\Autoload;
 
 class ComposerStaticInit2185d2f99bcd56787481d9357a5972d3
 {
+    public static $files = array (
+        'd92f49fe138fde4e7a3ec6f988960524' => __DIR__ . '/..' . '/stripe/stripe-php/lib/version_check.php',
+    );
+
     public static $prefixLengthsPsr4 = array (
+        'S' =>
+        array (
+            'Stripe\\' => 7,
+        ),
         'P' =>
         array (
             'PragmaRX\\Google2FA\\' => 19,
@@ -24,6 +32,10 @@ class ComposerStaticInit2185d2f99bcd56787481d9357a5972d3
     );
 
     public static $prefixDirsPsr4 = array (
+        'Stripe\\' =>
+        array (
+            0 => __DIR__ . '/..' . '/stripe/stripe-php/lib',
+        ),
         'PragmaRX\\Google2FA\\' =>
         array (
             0 => __DIR__ . '/..' . '/pragmarx/google2fa/src',
