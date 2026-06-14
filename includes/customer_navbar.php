@@ -153,6 +153,8 @@ if (isset($_SESSION['user_id'])) {
     <div id="navOverlay" class="fixed inset-0 bg-black/30 z-40 hidden lg:hidden" onclick="closeNavMenu()"></div>
 </nav>
 
+<?php include __DIR__ . '/chatbot_widget.php'; ?>
+
 <script>
 const navMenuBtn = document.getElementById('navMenuBtn');
 const navMobileMenu = document.getElementById('navMobileMenu');
