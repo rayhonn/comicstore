@@ -3,6 +3,7 @@
         "phpmailer/phpmailer": "^7.1",
         "pragmarx/google2fa": "^9.0",
         "bacon/bacon-qr-code": "^2.0",
-        "stripe/stripe-php": "^20.2"
+        "stripe/stripe-php": "^20.2",
+        "dompdf/dompdf": "^3.1"
     }
 }
