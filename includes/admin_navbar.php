@@ -73,10 +73,6 @@ $low_stock_count = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE phys
                         <a href="tiers.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'tiers.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
                             🏅 Tier Management
                         </a>
-                        <div class="border-t border-gray-100 my-1"></div>
-                        <a href="insights.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'insights.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
-                            🤖 AI Insights
-                        </a>
                     </div>
                 </div>
             </div>
