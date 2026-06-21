@@ -73,6 +73,22 @@ $low_stock_count = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE phys
                         <a href="tiers.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'tiers.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
                             🏅 Tier Management
                         </a>
+                        <div class="border-t border-gray-100 my-1"></div>
+                        <a href="suppliers.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'suppliers.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
+                            🏭 Suppliers
+                        </a>
+                        <a href="rfq.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'rfq.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
+                            📋 RFQ
+                        </a>
+                        <a href="purchase_orders.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'purchase_orders.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
+                            📦 Purchase Orders
+                        </a>
+                        <a href="supplier_invoices.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'supplier_invoices.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
+                            🧾 Supplier Invoices
+                        </a>
+                        <a href="supplier_returns.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'supplier_returns.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
+                            ↩️ Supplier Returns
+                        </a>
                     </div>
                 </div>
             </div>
