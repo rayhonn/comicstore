@@ -13,8 +13,14 @@ if (isset($_SESSION['flash_success'])) {
     unset($_SESSION['flash_success']);
 }
 
-// Handle mark as paid (with override reason if mismatch)
+// Handle mark as paid (with override reason if mismatch) — senior admin only
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_paid_confirm'])) {
+    if (($_SESSION['admin_level'] ?? '') !== 'senior_admin') {
+        $_SESSION['flash_success'] = 'Only senior admin can approve mismatched payments.';
+        header('Location: supplier_invoices.php');
+        exit;
+    }
+
     $invoice_id = $_POST['invoice_id'];
     $override_reason = trim($_POST['override_reason'] ?? '');
 
@@ -172,7 +178,7 @@ $available_pos = $pdo->query("
 
     <?php include '../includes/admin_navbar.php'; ?>
 
-    <div class="max-w-6xl mx-auto px-6 py-8">
+    <div class="max-w-6xl mx-auto px-5 py-8">
 
         <div class="mb-8">
             <h1 class="text-2xl font-black text-gray-800">🧾 Supplier Invoices</h1>
@@ -186,38 +192,43 @@ $available_pos = $pdo->query("
         <?php endif; ?>
 
         <?php
-        $mismatch_count = count(array_filter($invoices, fn($i) => $i['invoice_is_mismatch']));
+        $mismatch_count = count(array_filter($invoices, fn($i) => $i['invoice_is_mismatch'] && $i['invoice_status'] === 'unpaid'));
         if ($mismatch_count > 0): ?>
         <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-6">
-            ⚠️ <?= $mismatch_count ?> invoice(s) have amount mismatches with their PO. Please review before marking as paid.
+            ⚠️ <?= $mismatch_count ?> invoice(s) have amount mismatches with their PO.
+            <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
+            Please review before marking as paid.
+            <?php else: ?>
+            These require senior admin approval before payment can be processed.
+            <?php endif; ?>
         </div>
         <?php endif; ?>
 
-        <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div class="bg-white rounded-2xl shadow-sm overflow-hidden isolate">
             <?php if (count($invoices) === 0): ?>
             <div class="text-center py-16">
                 <div class="text-5xl mb-4">🧾</div>
                 <p class="text-gray-400">No invoices recorded yet.</p>
             </div>
             <?php else: ?>
-            <table class="w-full" style="min-width: 900px;">
+            <table class="w-full border-separate" style="border-spacing: 0;">
                 <thead>
-                    <tr class="bg-gray-50 border-b border-gray-100">
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Invoice #</th>
+                    <tr class="bg-gray-50 border-b border-gray-100 rounded-t-2xl overflow-hidden">
+                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase rounded-tl-2xl">Invoice #</th>
                         <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Supplier</th>
                         <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">PO</th>
                         <th class="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Amount</th>
                         <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Match</th>
                         <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Due Date</th>
                         <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Status</th>
-                        <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Action</th>
+                        <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase rounded-tr-2xl">Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($invoices as $inv): 
                         $is_overdue = $inv['invoice_status'] === 'unpaid' && $inv['invoice_due_date'] && strtotime($inv['invoice_due_date']) < time();
                     ?>
-                    <tr class="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                    <tr class="border-b border-gray-50 hover:bg-gray-50 transition-colors" style="overflow: hidden;">
                         <td class="px-5 py-4 whitespace-nowrap">
                             <p class="font-semibold text-sm text-gray-800 whitespace-nowrap"><?= htmlspecialchars($inv['invoice_number']) ?></p>
                             <?php if ($inv['invoice_status'] === 'rejected' && $inv['invoice_reject_reason']): ?>
@@ -262,12 +273,18 @@ $available_pos = $pdo->query("
                         </td>
                         <td class="px-5 py-4 text-center whitespace-nowrap">
                             <?php if ($inv['invoice_status'] === 'unpaid'): ?>
-                            <div class="flex flex-col items-center gap-1.5">
+                            <div class="flex flex-col items-center gap-2">
                                 <?php if ($inv['invoice_is_mismatch']): ?>
-                                <button onclick="openOverrideModal(<?= $inv['invoice_id'] ?>, '<?= htmlspecialchars($inv['invoice_number']) ?>', <?= $inv['invoice_amount'] ?>, <?= $inv['po_total_amount'] ?>)"
-                                        class="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center">
-                                    ✓ Mark as Paid
-                                </button>
+                                    <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
+                                    <button onclick="openOverrideModal(<?= $inv['invoice_id'] ?>, '<?= htmlspecialchars($inv['invoice_number']) ?>', <?= $inv['invoice_amount'] ?>, <?= $inv['po_total_amount'] ?>)"
+                                            class="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center">
+                                        ✓ Mark as Paid
+                                    </button>
+                                    <?php else: ?>
+                                    <span class="bg-gray-100 text-gray-400 text-xs font-semibold px-3 py-1.5 rounded-lg w-full text-center inline-block" title="Only senior admin can approve mismatched payments">
+                                        🔒 Needs Approval
+                                    </span>
+                                    <?php endif; ?>
                                 <?php else: ?>
                                 <a href="?mark_paid=<?= $inv['invoice_id'] ?>" onclick="return confirm('Mark this invoice as paid?')"
                                 class="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center">
@@ -283,7 +300,7 @@ $available_pos = $pdo->query("
                             <a href="?download_receipt=<?= $inv['invoice_id'] ?>"
                             class="text-xs text-blue-600 hover:underline font-semibold">📄 Download Receipt</a>
                             <?php else: ?>
-                            <span class="text-xs text-gray-400">Awaiting resubmission</span>
+                            <span class="text-xs text-gray-400">Rejected — Closed</span>
                             <?php endif; ?>
                         </td>
                     </tr>

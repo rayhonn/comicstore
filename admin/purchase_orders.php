@@ -19,7 +19,13 @@ if (isset($_GET['confirm'])) {
     exit;
 }
 if (isset($_GET['cancel'])) {
+    if (($_SESSION['admin_level'] ?? '') !== 'senior_admin') {
+        $_SESSION['flash_error'] = 'Only senior admin can cancel purchase orders.';
+        header('Location: purchase_orders.php');
+        exit;
+    }
     $pdo->prepare("UPDATE purchase_orders SET po_status = 'cancelled' WHERE po_id = ?")->execute([$_GET['cancel']]);
+    $_SESSION['flash_success'] = 'Purchase order cancelled.';
     header('Location: purchase_orders.php');
     exit;
 }
@@ -59,6 +65,12 @@ $pos = $pdo->query("
         </div>
         <?php endif; ?>
 
+        <?php if (isset($_SESSION['flash_error'])): ?>
+        <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-6">
+            🔒 <?= htmlspecialchars($_SESSION['flash_error']) ?>
+        </div>
+        <?php unset($_SESSION['flash_error']); ?>
+        <?php endif; ?>
         <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
             <?php if (count($pos) === 0): ?>
             <div class="text-center py-16">
@@ -108,7 +120,11 @@ $pos = $pdo->query("
                                 <?php endif; ?>
                                 <?php if (in_array($po['po_status'], ['sent', 'confirmed'])): ?>
                                 <span class="text-gray-300">|</span>
+                                <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
                                 <a href="?cancel=<?= $po['po_id'] ?>" onclick="return confirm('Cancel this PO?')" class="text-xs text-red-500 hover:underline font-semibold">Cancel</a>
+                                <?php else: ?>
+                                <span class="text-xs text-gray-300" title="Only senior admin can cancel orders">🔒 Cancel</span>
+                                <?php endif; ?>
                                 <?php endif; ?>
                                 <?php if ($po['po_status'] === 'confirmed'): ?>
                                 <span class="text-gray-300">|</span>
