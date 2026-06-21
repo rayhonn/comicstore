@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['user_name'] = $user['user_name'];
             $_SESSION['user_first_name'] = $user['user_first_name'];
             $_SESSION['role'] = $user['user_role'];
-
+            $_SESSION['admin_level'] = $user['user_admin_level'] ?? 'senior_admin';
             if ($user['user_role'] === 'admin') {
                 header('Location: dashboard.php');
             } else {
