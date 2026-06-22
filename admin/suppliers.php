@@ -161,12 +161,21 @@ $suppliers = $pdo->query("
                 <p class="text-gray-400">No suppliers yet. Add your first supplier to get started.</p>
             </div>
             <?php else: ?>
-            <table class="w-full">
+            <table class="w-full table-fixed">
+            <colgroup>
+                <col style="width: 22%;">
+                <col style="width: 14%;">
+                <col style="width: 12%;">
+                <col style="width: 18%;">
+                <col style="width: 12%;">
+                <col style="width: 10%;">
+                <col style="width: 12%;">
+            </colgroup>
                 <thead>
                     <tr class="bg-gray-50 border-b border-gray-100">
                         <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Supplier</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Contact Person</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Phone</th>
+                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Contact Person</th>
+                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Phone</th>
                         <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Email</th>
                         <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Rating</th>
                         <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Status</th>
@@ -176,12 +185,12 @@ $suppliers = $pdo->query("
                 <tbody>
                     <?php foreach ($suppliers as $s): ?>
                     <tr class="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td class="px-5 py-4">
-                            <p class="font-semibold text-sm text-gray-800"><?= htmlspecialchars($s['supplier_name']) ?></p>
-                            <p class="text-xs text-gray-400 truncate max-w-xs"><?= htmlspecialchars($s['supplier_address'] ?? '') ?></p>
+                        <td class="px-5 py-4 overflow-hidden">
+                            <p class="font-semibold text-sm text-gray-800 truncate"><?= htmlspecialchars($s['supplier_name']) ?></p>
+                            <p class="text-xs text-gray-400 truncate"><?= htmlspecialchars($s['supplier_address'] ?? '') ?></p>
                         </td>
-                        <td class="px-5 py-4 text-sm text-gray-600"><?= htmlspecialchars($s['supplier_contact_person'] ?? '—') ?></td>
-                        <td class="px-5 py-4 text-sm text-gray-600"><?= htmlspecialchars($s['supplier_phone'] ?? '—') ?></td>
+                        <td class="px-5 py-4 text-sm text-gray-600 whitespace-nowrap"><?= htmlspecialchars($s['supplier_contact_person'] ?? '—') ?></td>
+                        <td class="px-5 py-4 text-sm text-gray-600 whitespace-nowrap"><?= htmlspecialchars($s['supplier_phone'] ?? '—') ?></td>
                         <td class="px-5 py-4 text-sm text-gray-600"><?= htmlspecialchars($s['supplier_email'] ?? '—') ?></td>
                         <td class="px-5 py-4 text-center">
                             <?php if ($s['rating_count'] > 0): ?>

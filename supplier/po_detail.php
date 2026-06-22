@@ -26,7 +26,18 @@ $items = $pdo->prepare("
 $items->execute([$po_id]);
 $items = $items->fetchAll(PDO::FETCH_ASSOC);
 
-// Handle download PO PDF
+$gri = $pdo->prepare("
+    SELECT gri.*, p.product_title, pi.po_item_unit_price
+    FROM goods_received_items gri
+    JOIN goods_received gr ON gr.gr_id = gri.gri_gr_id
+    JOIN po_items pi ON pi.po_item_id = gri.gri_po_item_id
+    JOIN products p ON p.product_id = pi.po_item_product_id
+    WHERE gr.gr_po_id = ? AND gri.gri_rejected_quantity > 0
+");
+$gri->execute([$po_id]);
+$rejected_items = $gri->fetchAll(PDO::FETCH_ASSOC);
+$rejected_total = array_sum(array_map(fn($r) => $r['gri_rejected_quantity'] * $r['po_item_unit_price'], $rejected_items));
+
 if (isset($_GET['download_pdf'])) {
     require_once '../vendor/autoload.php';
 
@@ -88,8 +99,34 @@ if (isset($_GET['download_pdf'])) {
                 <td colspan='3' style='padding:12px; font-size:14px; font-weight:900;'>Total</td>
                 <td style='padding:12px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . number_format($po['po_total_amount'], 2) . "</td>
             </tr>
-        </table>
+        </table>";
 
+    if (count($rejected_items) > 0) {
+        $rejected_rows = '';
+        foreach ($rejected_items as $ri) {
+            $amt = $ri['gri_rejected_quantity'] * $ri['po_item_unit_price'];
+            $rejected_rows .= "<tr><td style='padding:8px 12px; font-size:11px;'>" . htmlspecialchars($ri['product_title']) . "</td><td style='padding:8px 12px; font-size:11px; text-align:center;'>" . $ri['gri_rejected_quantity'] . "</td><td style='padding:8px 12px; font-size:11px;'>" . htmlspecialchars($ri['gri_reject_reason'] ?? '—') . "</td><td style='padding:8px 12px; font-size:11px; text-align:right;'>RM " . number_format($amt, 2) . "</td></tr>";
+        }
+        $html .= "
+        <div style='background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:14px; margin-bottom:24px;'>
+            <p style='font-size:12px; color:#991b1b; margin:0 0 8px; font-weight:700;'>[!] Items Returned (Excluded from Payment)</p>
+            <table style='width:100%; border-collapse:collapse;'>
+                <tr style='background:#fee2e2;'>
+                    <td style='padding:6px 12px; font-size:10px; font-weight:700; color:#991b1b;'>Product</td>
+                    <td style='padding:6px 12px; font-size:10px; font-weight:700; color:#991b1b; text-align:center;'>Qty</td>
+                    <td style='padding:6px 12px; font-size:10px; font-weight:700; color:#991b1b;'>Reason</td>
+                    <td style='padding:6px 12px; font-size:10px; font-weight:700; color:#991b1b; text-align:right;'>Amount</td>
+                </tr>
+                $rejected_rows
+                <tr style='background:#fee2e2;'>
+                    <td colspan='3' style='padding:8px 12px; font-size:11px; font-weight:700; color:#991b1b;'>Total Excluded</td>
+                    <td style='padding:8px 12px; font-size:11px; font-weight:700; color:#991b1b; text-align:right;'>RM " . number_format($rejected_total, 2) . "</td>
+                </tr>
+            </table>
+        </div>";
+    }
+
+    $html .= "
         <div style='background:#fefce8; border:1px solid #fde68a; border-radius:8px; padding:14px; margin-bottom:24px;'>
             <p style='font-size:11px; color:#92400e; margin:0; font-weight:700;'>Terms & Conditions</p>
             <p style='font-size:11px; color:#b45309; margin:4px 0 0;'>1. Goods must match the specifications stated above.</p>
@@ -158,6 +195,33 @@ $status_colors = [
         <?php elseif ($po['po_status'] === 'completed'): ?>
         <div class="bg-green-50 border border-green-100 rounded-xl p-4 mb-6">
             <p class="text-sm text-green-700">✅ This order has been fully received by MangaVault. Thank you!</p>
+        </div>
+        <?php endif; ?>
+
+        <?php if (count($rejected_items) > 0): ?>
+        <div class="bg-red-50 border border-red-200 rounded-2xl p-5 mb-6">
+            <h3 class="font-bold text-red-700 mb-3">⚠️ Items Returned to You</h3>
+            <p class="text-sm text-red-600 mb-3">The following items were found to be damaged or did not meet quality standards. These have been excluded from the final payment amount.</p>
+            <div class="space-y-2 mb-3">
+                <?php foreach ($rejected_items as $ri): ?>
+                <div class="bg-white rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                        <p class="text-sm font-semibold text-gray-800"><?= htmlspecialchars($ri['product_title']) ?></p>
+                        <?php if ($ri['gri_reject_reason']): ?>
+                        <p class="text-xs text-red-500">Reason: <?= htmlspecialchars($ri['gri_reject_reason']) ?></p>
+                        <?php endif; ?>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-sm font-bold text-red-600"><?= $ri['gri_rejected_quantity'] ?> units</p>
+                        <p class="text-xs text-gray-400">RM <?= number_format($ri['gri_rejected_quantity'] * $ri['po_item_unit_price'], 2) ?></p>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <div class="flex justify-between items-center pt-3 border-t border-red-200">
+                <span class="text-sm font-semibold text-red-700">Total Excluded from Payment</span>
+                <span class="text-base font-black text-red-600">RM <?= number_format($rejected_total, 2) ?></span>
+            </div>
         </div>
         <?php endif; ?>
 
