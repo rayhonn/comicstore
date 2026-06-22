@@ -28,6 +28,26 @@ $items = $pdo->prepare("
 $items->execute([$po_id]);
 $items = $items->fetchAll(PDO::FETCH_ASSOC);
 
+// Get delivery order info if exists
+$do_info = $pdo->prepare("SELECT * FROM delivery_orders WHERE do_po_id = ?");
+$do_info->execute([$po_id]);
+$do_info = $do_info->fetch(PDO::FETCH_ASSOC);
+
+$do_items = [];
+if ($do_info) {
+    $doi = $pdo->prepare("
+        SELECT doi.*, p.product_title
+        FROM delivery_order_items doi
+        JOIN products p ON p.product_id = doi.doi_product_id
+        WHERE doi.doi_do_id = ?
+    ");
+    $doi->execute([$do_info['do_id']]);
+    $do_items_raw = $doi->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($do_items_raw as $d) {
+        $do_items[$d['doi_product_id']] = $d['doi_quantity'];
+    }
+}
+
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
@@ -166,6 +186,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
             <p class="text-sm text-blue-700">📌 Enter <strong>Good Qty</strong> for items in acceptable condition (added to stock) and <strong>Damaged/Rejected Qty</strong> for items with quality issues (will be returned to supplier and excluded from payment).</p>
         </div>
 
+        <?php if ($do_info): ?>
+        <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+            <p class="text-sm text-green-700 font-semibold mb-1">🚚 Delivery Order Found: <?= htmlspecialchars($do_info['do_number']) ?></p>
+            <p class="text-xs text-green-600">Delivery Date: <?= date('d M Y', strtotime($do_info['do_delivery_date'])) ?> · Supplier declared they shipped these quantities. Please verify against actual goods received.</p>
+        </div>
+        <?php endif; ?>
+
         <form method="POST">
             <input type="hidden" name="confirm_receive" value="1">
 
@@ -176,6 +203,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
                             <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Product</th>
                             <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Ordered</th>
                             <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Remaining</th>
+                            <?php if ($do_info): ?>
+                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">DO Declared</th>
+                            <?php endif; ?>
                             <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">✓ Good Qty</th>
                             <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">⚠️ Damaged/Rejected Qty</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Reason (if any)</th>

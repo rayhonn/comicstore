@@ -2,8 +2,10 @@
 session_start();
 require_once '../includes/db.php';
 
+$redirect_to = $_GET['redirect'] ?? 'dashboard.php';
+
 if (isset($_SESSION['user_id']) && in_array($_SESSION['role'], ['admin', 'staff'])) {
-    header('Location: ' . ($_SESSION['role'] === 'admin' ? 'dashboard.php' : '../staff/dashboard.php'));
+    header('Location: ' . ($_SESSION['role'] === 'admin' ? $redirect_to : '../staff/dashboard.php'));
     exit;
 }
 
@@ -29,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['role'] = $user['user_role'];
             $_SESSION['admin_level'] = $user['user_admin_level'] ?? 'senior_admin';
             if ($user['user_role'] === 'admin') {
-                header('Location: dashboard.php');
+                header('Location: ' . $redirect_to);
             } else {
                 header('Location: ../staff/dashboard.php');
             }
@@ -73,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <?php endif; ?>
 
-            <form method="POST" class="space-y-4">
+            <form method="POST" action="?redirect=<?= urlencode($redirect_to) ?>" class="space-y-4">
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Username or Email</label>
                     <input type="text" name="user_name" required

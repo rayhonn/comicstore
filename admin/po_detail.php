@@ -1,7 +1,7 @@
 <?php
 session_start();
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: ../login.php');
+    header('Location: login.php');
     exit;
 }
 require_once '../includes/db.php';
@@ -46,6 +46,16 @@ $rejected_total = array_sum(array_map(fn($r) => $r['gri_rejected_quantity'] * $r
 if (isset($_GET['download_pdf'])) {
     require_once '../vendor/autoload.php';
 
+    $host = $_SERVER['HTTP_HOST'];
+    $qr_url = "http://{$host}/comicstore/admin/po_detail.php?id=$po_id";
+    $renderer = new \BaconQrCode\Renderer\ImageRenderer(
+        new \BaconQrCode\Renderer\RendererStyle\RendererStyle(120),
+        new \BaconQrCode\Renderer\Image\SvgImageBackEnd()
+    );
+    $writer = new \BaconQrCode\Writer($renderer);
+    $qr_svg = $writer->writeString($qr_url);
+    $qr_base64 = 'data:image/svg+xml;base64,' . base64_encode($qr_svg);
+
     $html = "
     <!DOCTYPE html>
     <html>
@@ -64,7 +74,9 @@ if (isset($_GET['download_pdf'])) {
                 <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>Status: <strong style='text-transform:uppercase;'>" . htmlspecialchars($po['po_status']) . "</strong></p>
             </div>
             <div style='display:table-cell; width:50%; text-align:right; vertical-align:top;'>
-                <p style='font-size:11px; color:#9ca3af; margin:0;'>MangaVault Sdn Bhd</p>
+                <img src='$qr_base64' style='width:70px; height:70px; margin-bottom:6px;'>
+                <p style='font-size:9px; color:#9ca3af; margin:0;'>Scan to view this PO</p>
+                <p style='font-size:11px; color:#9ca3af; margin:4px 0 0;'>MangaVault Sdn Bhd</p>
                 <p style='font-size:11px; color:#9ca3af; margin:0;'>Kuala Lumpur, Malaysia</p>
             </div>
         </div>

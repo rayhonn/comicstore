@@ -268,9 +268,15 @@ $status_colors = [
 
         <div class="flex gap-3">
             <a href="?id=<?= $po_id ?>&download_pdf=1"
-               class="bg-gray-700 hover:bg-gray-800 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
+            class="bg-gray-700 hover:bg-gray-800 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
                 📄 Download PO (PDF)
             </a>
+            <?php if ($po['po_status'] === 'confirmed'): ?>
+            <a href="delivery_order.php?po_id=<?= $po_id ?>"
+            class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
+                🚚 Generate Delivery Order
+            </a>
+            <?php endif; ?>
         </div>
 
     </div>
