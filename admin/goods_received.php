@@ -151,7 +151,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
 
     $msg = "$gr_number recorded successfully. Stock has been updated.";
     if ($has_rejected_items) {
-        $return_number = null;
         $msg .= " A return record ($return_number) has been created for damaged/rejected items.";
     }
     $_SESSION['flash_success'] = $msg;

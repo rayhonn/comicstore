@@ -65,20 +65,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['apply_credit_note']))
     $invoice_id = $_POST['invoice_id'];
     $return_id = $_POST['return_id'];
 
-    $inv = $pdo->prepare("SELECT invoice_amount FROM supplier_invoices WHERE invoice_id = ?");
+    $inv = $pdo->prepare("SELECT invoice_amount, invoice_supplier_id FROM supplier_invoices WHERE invoice_id = ? AND invoice_status = 'unpaid'");
     $inv->execute([$invoice_id]);
-    $invoice_amount = $inv->fetchColumn();
+    $inv = $inv->fetch(PDO::FETCH_ASSOC);
 
-    $cn = $pdo->prepare("SELECT return_credit_note_amount FROM supplier_returns WHERE return_id = ? AND return_credit_note_used_invoice_id IS NULL");
-    $cn->execute([$return_id]);
-    $cn_amount = $cn->fetchColumn();
-
-    if ($cn_amount === false) {
-        $_SESSION['flash_success'] = 'This credit note is no longer available.';
+    if (!$inv) {
+        $_SESSION['flash_success'] = 'Invoice not found or already processed.';
         header('Location: supplier_invoices.php'); exit;
     }
 
-    $applied = min($cn_amount, $invoice_amount);
+    $cn = $pdo->prepare("
+        SELECT sr.return_credit_note_amount
+        FROM supplier_returns sr
+        JOIN purchase_orders po ON po.po_id = sr.return_po_id
+        WHERE sr.return_id = ? AND sr.return_credit_note_used_invoice_id IS NULL AND po.po_supplier_id = ?
+    ");
+    $cn->execute([$return_id, $inv['invoice_supplier_id']]);
+    $cn_amount = $cn->fetchColumn();
+
+    if ($cn_amount === false) {
+        $_SESSION['flash_success'] = 'This credit note is not available for this supplier.';
+        header('Location: supplier_invoices.php'); exit;
+    }
+
+    $applied = min($cn_amount, $inv['invoice_amount']);
 
     $pdo->prepare("UPDATE supplier_invoices SET invoice_credit_note_id = ?, invoice_credit_applied_amount = ? WHERE invoice_id = ?")
         ->execute([$return_id, $applied, $invoice_id]);
@@ -89,6 +99,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['apply_credit_note']))
     header('Location: supplier_invoices.php');
     exit;
 }
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_credit_note'])) {
+    $invoice_id = $_POST['invoice_id'];
+
+    $inv = $pdo->prepare("SELECT invoice_credit_note_id FROM supplier_invoices WHERE invoice_id = ? AND invoice_status = 'unpaid'");
+    $inv->execute([$invoice_id]);
+    $return_id = $inv->fetchColumn();
+
+    if (!$return_id) {
+        $_SESSION['flash_success'] = 'No credit note to remove, or invoice already paid.';
+        header('Location: supplier_invoices.php'); exit;
+    }
+
+    $pdo->prepare("UPDATE supplier_invoices SET invoice_credit_note_id = NULL, invoice_credit_applied_amount = 0 WHERE invoice_id = ?")
+        ->execute([$invoice_id]);
+    $pdo->prepare("UPDATE supplier_returns SET return_credit_note_used_invoice_id = NULL WHERE return_id = ?")
+        ->execute([$return_id]);
+
+    $_SESSION['flash_success'] = 'Credit note removed from this invoice and made available again.';
+    header('Location: supplier_invoices.php');
+    exit;
+}
+
 // Handle download receipt
 if (isset($_GET['download_receipt'])) {
     require_once '../vendor/autoload.php';
@@ -296,6 +329,13 @@ foreach ($available_credits as $c) {
                             <?php if ($inv['invoice_credit_applied_amount'] > 0): ?>
                             <p class="text-xs text-green-600">− RM <?= number_format($inv['invoice_credit_applied_amount'], 2) ?> credit</p>
                             <p class="text-xs text-gray-400">Net: RM <?= number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) ?></p>
+                            <?php if ($inv['invoice_status'] === 'unpaid'): ?>
+                            <form method="POST" class="inline">
+                                <input type="hidden" name="remove_credit_note" value="1">
+                                <input type="hidden" name="invoice_id" value="<?= $inv['invoice_id'] ?>">
+                                <button type="submit" class="text-xs text-red-400 hover:underline mt-0.5">✕ Undo</button>
+                            </form>
+                            <?php endif; ?>
                             <?php endif; ?>
                         </td>
                         <td class="px-5 py-4 text-center whitespace-nowrap">

@@ -4,6 +4,7 @@ $admin_current = basename($_SERVER['PHP_SELF']);
 // Pending counts
 $pending_orders_count = $pdo->query("SELECT COUNT(*) FROM orders WHERE order_status = 'pending' AND order_payment_status = 'confirmed'")->fetchColumn();
 $pending_returns_count = $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'pending'")->fetchColumn();
+$pending_supplier_returns_count = $pdo->query("SELECT COUNT(*) FROM supplier_returns WHERE return_status IN ('pending', 'escalated')")->fetchColumn();
 $pending_reviews_count = $pdo->query("SELECT COUNT(*) FROM product_reviews WHERE review_status = 'pending'")->fetchColumn();
 $low_stock_count = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE physical_stock_quantity <= physical_low_stock_threshold")->fetchColumn();
 ?>
@@ -86,8 +87,11 @@ $low_stock_count = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE phys
                         <a href="supplier_invoices.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'supplier_invoices.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
                             🧾 Supplier Invoices
                         </a>
-                        <a href="supplier_returns.php" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'supplier_returns.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
-                            ↩️ Supplier Returns
+                        <a href="supplier_returns.php" class="flex items-center justify-between gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'supplier_returns.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
+                            <span>↩️ Supplier Returns</span>
+                            <?php if ($pending_supplier_returns_count > 0): ?>
+                            <span class="bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center"><?= $pending_supplier_returns_count ?></span>
+                            <?php endif; ?>
                         </a>
                     </div>
                 </div>

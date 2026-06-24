@@ -129,7 +129,11 @@ if (isset($_SESSION['flash_success'])) {
                     <?php endforeach; ?>
                 </div>
 
+                <?php if ($ret['return_status'] === 'resolved' && $ret['return_resolution_type'] === 'dispute_rejected'): ?>
+                <p class="text-sm text-gray-600 mb-4">No deduction has been made — this was reversed after review.</p>
+                <?php else: ?>
                 <p class="text-sm text-gray-600 mb-4">This amount (<strong class="text-red-600">RM <?= number_format($ret['total_value'], 2) ?></strong>) has been deducted from your payment for this order.</p>
+                <?php endif; ?>
 
                 <?php if ($ret['return_supplier_response'] === 'pending'): ?>
                 <form method="POST">
