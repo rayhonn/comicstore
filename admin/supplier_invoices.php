@@ -61,16 +61,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_invoice'])) {
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['apply_credit_note'])) {
+    $invoice_id = $_POST['invoice_id'];
+    $return_id = $_POST['return_id'];
+
+    $inv = $pdo->prepare("SELECT invoice_amount FROM supplier_invoices WHERE invoice_id = ?");
+    $inv->execute([$invoice_id]);
+    $invoice_amount = $inv->fetchColumn();
+
+    $cn = $pdo->prepare("SELECT return_credit_note_amount FROM supplier_returns WHERE return_id = ? AND return_credit_note_used_invoice_id IS NULL");
+    $cn->execute([$return_id]);
+    $cn_amount = $cn->fetchColumn();
+
+    if ($cn_amount === false) {
+        $_SESSION['flash_success'] = 'This credit note is no longer available.';
+        header('Location: supplier_invoices.php'); exit;
+    }
+
+    $applied = min($cn_amount, $invoice_amount);
+
+    $pdo->prepare("UPDATE supplier_invoices SET invoice_credit_note_id = ?, invoice_credit_applied_amount = ? WHERE invoice_id = ?")
+        ->execute([$return_id, $applied, $invoice_id]);
+    $pdo->prepare("UPDATE supplier_returns SET return_credit_note_used_invoice_id = ? WHERE return_id = ?")
+        ->execute([$invoice_id, $return_id]);
+
+    $_SESSION['flash_success'] = "Credit note applied. RM " . number_format($applied, 2) . " deducted from this invoice.";
+    header('Location: supplier_invoices.php');
+    exit;
+}
 // Handle download receipt
 if (isset($_GET['download_receipt'])) {
     require_once '../vendor/autoload.php';
     $invoice_id = $_GET['download_receipt'];
 
     $inv = $pdo->prepare("
-        SELECT si.*, s.supplier_name, s.supplier_contact_person, s.supplier_address, s.supplier_email, po.po_number
+        SELECT si.*, s.supplier_name, s.supplier_contact_person, s.supplier_address, s.supplier_email, po.po_number, sr.return_credit_note_number
         FROM supplier_invoices si
         JOIN suppliers s ON s.supplier_id = si.invoice_supplier_id
         LEFT JOIN purchase_orders po ON po.po_id = si.invoice_po_id
+        LEFT JOIN supplier_returns sr ON sr.return_id = si.invoice_credit_note_id
         WHERE si.invoice_id = ? AND si.invoice_status = 'paid'
     ");
     $inv->execute([$invoice_id]);
@@ -123,12 +152,16 @@ if (isset($_GET['download_receipt'])) {
                 <td style='padding:10px 14px; font-size:12px; font-weight:700; text-align:right;'>Amount</td>
             </tr>
             <tr style='border-bottom:1px solid #e5e7eb;'>
-                <td style='padding:12px 14px; font-size:13px;'>Payment for Invoice " . htmlspecialchars($inv['invoice_number']) . "</td>
+                <td style='padding:12px 14px; font-size:13px;'>Invoice " . htmlspecialchars($inv['invoice_number']) . "</td>
                 <td style='padding:12px 14px; font-size:13px; text-align:right;'>RM " . number_format($inv['invoice_amount'], 2) . "</td>
-            </tr>
+            </tr>" . ($inv['invoice_credit_applied_amount'] > 0 ? "
+            <tr style='border-bottom:1px solid #e5e7eb;'>
+                <td style='padding:12px 14px; font-size:13px; color:#C0392B;'>Less: Credit Note " . htmlspecialchars($inv['return_credit_note_number']) . "</td>
+                <td style='padding:12px 14px; font-size:13px; text-align:right; color:#C0392B;'>- RM " . number_format($inv['invoice_credit_applied_amount'], 2) . "</td>
+            </tr>" : "") . "
             <tr style='background:#fef2f2;'>
                 <td style='padding:12px 14px; font-size:14px; font-weight:900;'>Total Paid</td>
-                <td style='padding:12px 14px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . number_format($inv['invoice_amount'], 2) . "</td>
+                <td style='padding:12px 14px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) . "</td>
             </tr>
         </table>
 
@@ -165,6 +198,19 @@ $available_pos = $pdo->query("
     AND po.po_id NOT IN (SELECT invoice_po_id FROM supplier_invoices WHERE invoice_po_id IS NOT NULL)
     ORDER BY po.po_created_at DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+$available_credits = $pdo->query("
+    SELECT sr.return_id, sr.return_number, sr.return_credit_note_number, sr.return_credit_note_amount, po.po_supplier_id
+    FROM supplier_returns sr
+    JOIN purchase_orders po ON po.po_id = sr.return_po_id
+    WHERE sr.return_credit_note_number IS NOT NULL
+    AND sr.return_credit_note_used_invoice_id IS NULL
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$credits_by_supplier = [];
+foreach ($available_credits as $c) {
+    $credits_by_supplier[$c['po_supplier_id']][] = $c;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -245,7 +291,13 @@ $available_pos = $pdo->query("
                         </td>
                         <td class="px-5 py-4 text-sm text-gray-600 whitespace-nowrap"><?= htmlspecialchars($inv['supplier_name']) ?></td>
                         <td class="px-5 py-4 text-sm text-gray-600 whitespace-nowrap"><?= htmlspecialchars($inv['po_number'] ?? '—') ?></td>
-                        <td class="px-5 py-4 text-right text-sm font-bold text-gray-800 whitespace-nowrap">RM <?= number_format($inv['invoice_amount'], 2) ?></td>
+                        <td class="px-5 py-4 text-right text-sm whitespace-nowrap">
+                            <p class="font-bold text-gray-800">RM <?= number_format($inv['invoice_amount'], 2) ?></p>
+                            <?php if ($inv['invoice_credit_applied_amount'] > 0): ?>
+                            <p class="text-xs text-green-600">− RM <?= number_format($inv['invoice_credit_applied_amount'], 2) ?> credit</p>
+                            <p class="text-xs text-gray-400">Net: RM <?= number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) ?></p>
+                            <?php endif; ?>
+                        </td>
                         <td class="px-5 py-4 text-center whitespace-nowrap">
                             <?php if ($inv['invoice_is_mismatch']): ?>
                             <span class="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full font-semibold inline-block" title="PO Total: RM <?= number_format($inv['po_total_amount'], 2) ?>">
@@ -274,6 +326,18 @@ $available_pos = $pdo->query("
                         <td class="px-5 py-4 text-center whitespace-nowrap">
                             <?php if ($inv['invoice_status'] === 'unpaid'): ?>
                             <div class="flex flex-col items-center gap-2">
+                                <?php if (!$inv['invoice_credit_note_id'] && !empty($credits_by_supplier[$inv['invoice_supplier_id']])): ?>
+                                    <?php foreach ($credits_by_supplier[$inv['invoice_supplier_id']] as $credit): ?>
+                                    <form method="POST" class="w-full">
+                                        <input type="hidden" name="apply_credit_note" value="1">
+                                        <input type="hidden" name="invoice_id" value="<?= $inv['invoice_id'] ?>">
+                                        <input type="hidden" name="return_id" value="<?= $credit['return_id'] ?>">
+                                        <button type="submit" class="w-full bg-yellow-50 hover:bg-yellow-100 text-yellow-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors whitespace-normal leading-tight">
+                                            💳 Apply Credit<br><?= htmlspecialchars($credit['return_credit_note_number']) ?> (RM <?= number_format($credit['return_credit_note_amount'], 2) ?>)
+                                        </button>
+                                    </form>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
                                 <?php if ($inv['invoice_is_mismatch']): ?>
                                     <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
                                     <button onclick="openOverrideModal(<?= $inv['invoice_id'] ?>, '<?= htmlspecialchars($inv['invoice_number']) ?>', <?= $inv['invoice_amount'] ?>, <?= $inv['po_total_amount'] ?>)"

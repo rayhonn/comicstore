@@ -64,10 +64,11 @@ if (isset($_GET['download_receipt'])) {
     $invoice_id = $_GET['download_receipt'];
 
     $inv = $pdo->prepare("
-        SELECT si.*, s.supplier_name, s.supplier_contact_person, s.supplier_address, s.supplier_email, po.po_number
+        SELECT si.*, s.supplier_name, s.supplier_contact_person, s.supplier_address, s.supplier_email, po.po_number, sr.return_credit_note_number
         FROM supplier_invoices si
         JOIN suppliers s ON s.supplier_id = si.invoice_supplier_id
         LEFT JOIN purchase_orders po ON po.po_id = si.invoice_po_id
+        LEFT JOIN supplier_returns sr ON sr.return_id = si.invoice_credit_note_id
         WHERE si.invoice_id = ? AND si.invoice_supplier_id = ? AND si.invoice_status = 'paid'
     ");
     $inv->execute([$invoice_id, $supplier_id]);
@@ -120,12 +121,16 @@ if (isset($_GET['download_receipt'])) {
                 <td style='padding:10px 14px; font-size:12px; font-weight:700; text-align:right;'>Amount</td>
             </tr>
             <tr style='border-bottom:1px solid #e5e7eb;'>
-                <td style='padding:12px 14px; font-size:13px;'>Payment for Invoice " . htmlspecialchars($inv['invoice_number']) . "</td>
+                <td style='padding:12px 14px; font-size:13px;'>Invoice " . htmlspecialchars($inv['invoice_number']) . "</td>
                 <td style='padding:12px 14px; font-size:13px; text-align:right;'>RM " . number_format($inv['invoice_amount'], 2) . "</td>
-            </tr>
+            </tr>" . ($inv['invoice_credit_applied_amount'] > 0 ? "
+            <tr style='border-bottom:1px solid #e5e7eb;'>
+                <td style='padding:12px 14px; font-size:13px; color:#C0392B;'>Less: Credit Note " . htmlspecialchars($inv['return_credit_note_number']) . "</td>
+                <td style='padding:12px 14px; font-size:13px; text-align:right; color:#C0392B;'>- RM " . number_format($inv['invoice_credit_applied_amount'], 2) . "</td>
+            </tr>" : "") . "
             <tr style='background:#fef2f2;'>
                 <td style='padding:12px 14px; font-size:14px; font-weight:900;'>Total Paid</td>
-                <td style='padding:12px 14px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . number_format($inv['invoice_amount'], 2) . "</td>
+                <td style='padding:12px 14px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) . "</td>
             </tr>
         </table>
 
@@ -146,9 +151,10 @@ if (isset($_GET['download_receipt'])) {
 }
 
 $invoices = $pdo->prepare("
-    SELECT si.*, po.po_number
+    SELECT si.*, po.po_number, sr.return_credit_note_number
     FROM supplier_invoices si
     LEFT JOIN purchase_orders po ON po.po_id = si.invoice_po_id
+    LEFT JOIN supplier_returns sr ON sr.return_id = si.invoice_credit_note_id
     WHERE si.invoice_supplier_id = ?
     ORDER BY si.invoice_created_at DESC
 ");
@@ -235,7 +241,13 @@ $available_pos = $available_pos->fetchAll(PDO::FETCH_ASSOC);
                             <?php endif; ?>
                         </td>
                         <td class="px-5 py-4 text-sm text-gray-600"><?= htmlspecialchars($inv['po_number'] ?? '—') ?></td>
-                        <td class="px-5 py-4 text-right text-sm font-bold text-gray-800">RM <?= number_format($inv['invoice_amount'], 2) ?></td>
+                        <td class="px-5 py-4 text-right text-sm">
+                            <p class="font-bold text-gray-800">RM <?= number_format($inv['invoice_amount'], 2) ?></p>
+                            <?php if ($inv['invoice_credit_applied_amount'] > 0): ?>
+                            <p class="text-xs text-orange-600">− RM <?= number_format($inv['invoice_credit_applied_amount'], 2) ?> credit applied (<?= htmlspecialchars($inv['return_credit_note_number']) ?>)</p>
+                            <p class="text-xs text-gray-400">Net Payable: RM <?= number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) ?></p>
+                            <?php endif; ?>
+                        </td>
                         <td class="px-5 py-4 text-sm <?= $is_overdue ? 'text-red-500 font-semibold' : 'text-gray-500' ?>">
                             <?= $inv['invoice_due_date'] ? date('d M Y', strtotime($inv['invoice_due_date'])) : '—' ?>
                             <?= $is_overdue ? ' ⚠️' : '' ?>

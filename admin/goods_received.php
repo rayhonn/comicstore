@@ -66,6 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
     $all_fully_received = true;
     $has_rejected_items = false;
     $return_items_data = [];
+    $return_number = null;
 
     foreach ($items as $item) {
         $po_item_id = $item['po_item_id'];
@@ -150,6 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
 
     $msg = "$gr_number recorded successfully. Stock has been updated.";
     if ($has_rejected_items) {
+        $return_number = null;
         $msg .= " A return record ($return_number) has been created for damaged/rejected items.";
     }
     $_SESSION['flash_success'] = $msg;

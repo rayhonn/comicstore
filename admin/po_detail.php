@@ -46,15 +46,7 @@ $rejected_total = array_sum(array_map(fn($r) => $r['gri_rejected_quantity'] * $r
 if (isset($_GET['download_pdf'])) {
     require_once '../vendor/autoload.php';
 
-    $host = $_SERVER['HTTP_HOST'];
-    $qr_url = "http://{$host}/comicstore/admin/po_detail.php?id=$po_id";
-    $renderer = new \BaconQrCode\Renderer\ImageRenderer(
-        new \BaconQrCode\Renderer\RendererStyle\RendererStyle(120),
-        new \BaconQrCode\Renderer\Image\SvgImageBackEnd()
-    );
-    $writer = new \BaconQrCode\Writer($renderer);
-    $qr_svg = $writer->writeString($qr_url);
-    $qr_base64 = 'data:image/svg+xml;base64,' . base64_encode($qr_svg);
+
 
     $html = "
     <!DOCTYPE html>
@@ -67,18 +59,10 @@ if (isset($_GET['download_pdf'])) {
             <p style='color:rgba(255,255,255,0.7); font-size:12px; margin:4px 0 0;'>Purchase Order</p>
         </div>
 
-        <div style='display:table; width:100%; margin-bottom:24px;'>
-            <div style='display:table-cell; width:50%;'>
-                <h2 style='font-size:18px; color:#111827; margin:0 0 4px;'>" . htmlspecialchars($po['po_number']) . "</h2>
-                <p style='font-size:12px; color:#6b7280; margin:0;'>Date: " . date('d F Y', strtotime($po['po_created_at'])) . "</p>
-                <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>Status: <strong style='text-transform:uppercase;'>" . htmlspecialchars($po['po_status']) . "</strong></p>
-            </div>
-            <div style='display:table-cell; width:50%; text-align:right; vertical-align:top;'>
-                <img src='$qr_base64' style='width:70px; height:70px; margin-bottom:6px;'>
-                <p style='font-size:9px; color:#9ca3af; margin:0;'>Scan to view this PO</p>
-                <p style='font-size:11px; color:#9ca3af; margin:4px 0 0;'>MangaVault Sdn Bhd</p>
-                <p style='font-size:11px; color:#9ca3af; margin:0;'>Kuala Lumpur, Malaysia</p>
-            </div>
+        <div style='margin-bottom:24px;'>
+            <h2 style='font-size:18px; color:#111827; margin:0 0 4px;'>" . htmlspecialchars($po['po_number']) . "</h2>
+            <p style='font-size:12px; color:#6b7280; margin:0;'>Date: " . date('d F Y', strtotime($po['po_created_at'])) . "</p>
+            <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>Status: <strong style='text-transform:uppercase;'>" . htmlspecialchars($po['po_status']) . "</strong></p>
         </div>
 
         <div style='background:#f9fafb; border-radius:8px; padding:16px; margin-bottom:24px;'>

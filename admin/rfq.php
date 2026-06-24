@@ -37,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_rfq'])) {
                 ->execute([$rfq_id, $sid]);
         }
 
-        $_SESSION['flash_success'] = "RFQ $rfq_number created successfully and sent to " . count($supplier_ids) . " supplier(s).";
+        $_SESSION['flash_success'] = "$rfq_number created successfully and sent to " . count($supplier_ids) . " supplier(s).";
         header('Location: rfq.php');
         exit;
     }

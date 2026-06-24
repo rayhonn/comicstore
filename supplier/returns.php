@@ -23,8 +23,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_response'])) {
     ");
     $check->execute([$return_id, $supplier_id]);
     if ($check->fetch()) {
-        $pdo->prepare("UPDATE supplier_returns SET return_supplier_response = ?, return_supplier_comment = ?, return_responded_at = NOW() WHERE return_id = ?")
-            ->execute([$response, $comment, $return_id]);
+        $next_status = $response === 'accepted' ? 'acknowledged' : 'escalated';
+        $pdo->prepare("UPDATE supplier_returns SET return_supplier_response = ?, return_supplier_comment = ?, return_responded_at = NOW(),  return_status = ? WHERE return_id = ?")
+            ->execute([$response, $comment, $next_status, $return_id]);
         $_SESSION['flash_success'] = 'Your response has been submitted.';
     }
     header('Location: returns.php');
@@ -153,6 +154,28 @@ if (isset($_SESSION['flash_success'])) {
                     <p class="text-sm text-gray-700"><?= htmlspecialchars($ret['return_supplier_comment'] ?: 'No comment provided.') ?></p>
                     <p class="text-xs text-gray-400 mt-1">Responded on <?= date('d M Y, h:i A', strtotime($ret['return_responded_at'])) ?></p>
                 </div>
+
+                <?php if ($ret['return_status'] === 'resolved'): ?>
+                <div class="bg-green-50 border border-green-200 rounded-xl p-3 mt-3">
+                    <p class="text-xs font-semibold text-green-700 mb-1">✅ Resolved by MangaVault</p>
+                    <?php if ($ret['return_resolution_type'] === 'credit_note'): ?>
+                    <p class="text-sm text-gray-700">A credit note <strong><?= htmlspecialchars($ret['return_credit_note_number']) ?></strong> for RM <?= number_format($ret['return_credit_note_amount'], 2) ?> has been issued — this will be deducted from your next invoice.</p>
+                    <?php elseif ($ret['return_resolution_type'] === 'replacement'): ?>
+                    <p class="text-sm text-gray-700">A replacement purchase order has been created for these items. Please check your Purchase Orders for the new PO.</p>
+                    <?php elseif ($ret['return_resolution_type'] === 'dispute_rejected'): ?>
+                    <p class="text-sm text-gray-700">Your dispute was accepted — MangaVault has reversed this return. No deduction will be made.</p>
+                    <?php elseif ($ret['return_resolution_type'] === 'dispute_upheld'): ?>
+                    <p class="text-sm text-gray-700">
+                        After review, MangaVault's original assessment stands.
+                        <?php if ($ret['return_credit_note_number']): ?>
+                        A credit note <strong><?= htmlspecialchars($ret['return_credit_note_number']) ?></strong> for RM <?= number_format($ret['return_credit_note_amount'], 2) ?> has been issued.
+                        <?php else: ?>
+                        A replacement order has been created — please check your Purchase Orders.
+                        <?php endif; ?>
+                    </p>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
                 <?php endif; ?>
             </div>
             <?php endforeach; ?>

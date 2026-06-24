@@ -41,6 +41,19 @@ $unpaid = $pdo->prepare("
 ");
 $unpaid->execute([$supplier_id]);
 [$unpaid_count, $unpaid_amount] = $unpaid->fetch(PDO::FETCH_NUM);
+
+// Available (unused) credit notes
+$credits = $pdo->prepare("
+    SELECT sr.return_credit_note_number, sr.return_credit_note_amount
+    FROM supplier_returns sr
+    JOIN purchase_orders po ON po.po_id = sr.return_po_id
+    WHERE po.po_supplier_id = ?
+    AND sr.return_credit_note_number IS NOT NULL
+    AND sr.return_credit_note_used_invoice_id IS NULL
+");
+$credits->execute([$supplier_id]);
+$credits = $credits->fetchAll(PDO::FETCH_ASSOC);
+$total_credit = array_sum(array_column($credits, 'return_credit_note_amount'));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -113,6 +126,26 @@ $unpaid->execute([$supplier_id]);
             </div>
             <?php endif; ?>
         </div>
+
+        <?php if (count($credits) > 0): ?>
+        <div class="bg-white rounded-2xl shadow-sm overflow-hidden mt-6">
+            <div class="px-6 py-4 border-b border-gray-50 flex justify-between items-center">
+                <h3 class="font-bold text-gray-800">💳 Available Credit Notes</h3>
+                <span class="text-xs text-orange-600 font-semibold">Total: RM <?= number_format($total_credit, 2) ?></span>
+            </div>
+            <div class="divide-y divide-gray-50">
+                <?php foreach ($credits as $c): ?>
+                <div class="px-6 py-4 flex items-center justify-between">
+                    <p class="text-sm font-semibold text-gray-700"><?= htmlspecialchars($c['return_credit_note_number']) ?></p>
+                    <p class="text-sm font-bold text-orange-600">RM <?= number_format($c['return_credit_note_amount'], 2) ?></p>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <div class="px-6 py-3 bg-orange-50">
+                <p class="text-xs text-orange-700">These will be automatically deducted from a future invoice payment.</p>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
 </body>
