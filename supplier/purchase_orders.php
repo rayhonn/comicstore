@@ -68,7 +68,12 @@ $pos = $pos->fetchAll(PDO::FETCH_ASSOC);
                         ];
                     ?>
                     <tr class="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td class="px-5 py-4 font-semibold text-sm text-gray-800"><?= htmlspecialchars($po['po_number']) ?></td>
+                        <td class="px-5 py-4">
+                        <p class="font-semibold text-sm text-gray-800"><?= htmlspecialchars($po['po_number']) ?></p>
+                        <?php if ($po['po_notes']): ?>
+                        <p class="text-xs text-purple-500 mt-0.5">📌 <?= htmlspecialchars($po['po_notes']) ?></p>
+                        <?php endif; ?>
+                    </td>
                         <td class="px-5 py-4 text-center text-sm text-gray-600"><?= $po['item_count'] ?></td>
                         <td class="px-5 py-4 text-right text-sm font-bold text-blue-600">RM <?= number_format($po['po_total_amount'], 2) ?></td>
                         <td class="px-5 py-4 text-center">

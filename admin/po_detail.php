@@ -192,6 +192,9 @@ $status_colors = [
             <div>
                 <h1 class="text-2xl font-black text-gray-800"><?= htmlspecialchars($po['po_number']) ?></h1>
                 <p class="text-gray-500 text-sm mt-1">Created <?= date('d M Y, h:i A', strtotime($po['po_created_at'])) ?></p>
+                <?php if ($po['po_notes']): ?>
+                <p class="text-xs text-purple-500 mt-1">📌 <?= htmlspecialchars($po['po_notes']) ?></p>
+                <?php endif; ?>
             </div>
             <span class="<?= $status_colors[$po['po_status']] ?> text-sm px-4 py-2 rounded-full font-semibold capitalize">
                 <?= $po['po_status'] ?>
