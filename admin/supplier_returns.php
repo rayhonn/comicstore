@@ -116,15 +116,34 @@ unset($r);
                     <?php endforeach; ?>
                 </div>
 
+                <?php if ($ret['return_supplier_response'] !== 'pending'): ?>
+                <div class="bg-gray-50 rounded-xl p-3 mb-3">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs font-semibold text-gray-500">Supplier Response:</span>
+                        <?php if ($ret['return_supplier_response'] === 'accepted'): ?>
+                        <span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-semibold">✓ Acknowledged</span>
+                        <?php else: ?>
+                        <span class="bg-orange-100 text-orange-700 text-xs px-2 py-0.5 rounded-full font-semibold">⚠️ Disputed</span>
+                        <?php endif; ?>
+                    </div>
+                    <p class="text-sm text-gray-700"><?= htmlspecialchars($ret['return_supplier_comment'] ?: 'No comment provided.') ?></p>
+                    <p class="text-xs text-gray-400 mt-1">Responded on <?= date('d M Y, h:i A', strtotime($ret['return_responded_at'])) ?></p>
+                </div>
+                <?php else: ?>
+                <div class="bg-yellow-50 border border-yellow-100 rounded-xl p-3 mb-3">
+                    <p class="text-xs text-yellow-700">⏳ Waiting for supplier to respond to this return.</p>
+                </div>
+                <?php endif; ?>
+
                 <div class="flex items-center justify-between">
                     <p class="text-sm text-gray-600">Total deducted from payment: <strong class="text-red-600">RM <?= number_format($ret['total_value'], 2) ?></strong></p>
                     <div class="flex gap-2">
-                        <?php if ($ret['return_status'] === 'pending'): ?>
+                        <?php if ($ret['return_status'] === 'pending' && $ret['return_supplier_response'] !== 'pending'): ?>
                         <a href="?mark_acknowledged=<?= $ret['return_id'] ?>" 
-                           class="text-xs text-blue-600 hover:underline font-semibold">Mark as Acknowledged</a>
+                        class="text-xs text-blue-600 hover:underline font-semibold">Mark as Acknowledged</a>
                         <?php elseif ($ret['return_status'] === 'acknowledged'): ?>
                         <a href="?mark_resolved=<?= $ret['return_id'] ?>" 
-                           class="text-xs text-green-600 hover:underline font-semibold">Mark as Resolved</a>
+                        class="text-xs text-green-600 hover:underline font-semibold">Mark as Resolved</a>
                         <?php endif; ?>
                     </div>
                 </div>

@@ -15,6 +15,7 @@ $supplier_current = basename($_SERVER['PHP_SELF']);
                     <a href="quotations.php" class="text-sm <?= $supplier_current === 'quotations.php' ? 'text-blue-400 font-semibold' : 'text-gray-300 hover:text-white' ?> transition-colors">My Quotations</a>
                     <a href="purchase_orders.php" class="text-sm <?= $supplier_current === 'purchase_orders.php' ? 'text-blue-400 font-semibold' : 'text-gray-300 hover:text-white' ?> transition-colors">Purchase Orders</a>
                     <a href="invoices.php" class="text-sm <?= $supplier_current === 'invoices.php' ? 'text-blue-400 font-semibold' : 'text-gray-300 hover:text-white' ?> transition-colors">Invoices</a>
+                    <a href="returns.php" class="text-sm <?= $supplier_current === 'returns.php' ? 'text-blue-400 font-semibold' : 'text-gray-300 hover:text-white' ?> transition-colors">Returns</a>
                 </div>
             </div>
             <div class="flex items-center gap-4">

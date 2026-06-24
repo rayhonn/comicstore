@@ -200,15 +200,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
                 <table class="w-full">
                     <thead>
                         <tr class="bg-gray-50">
-                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Product</th>
-                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Ordered</th>
-                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Remaining</th>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Product</th>
+                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Ordered</th>
+                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Remaining</th>
                             <?php if ($do_info): ?>
-                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">DO Declared</th>
+                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">DO Declared</th>
                             <?php endif; ?>
-                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">✓ Good Qty</th>
-                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">⚠️ Damaged/Rejected Qty</th>
-                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Reason (if any)</th>
+                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Good Qty</th>
+                            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Damaged Qty</th>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Reason</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -231,6 +231,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
                             </td>
                             <td class="px-5 py-4 text-center text-sm font-semibold text-gray-700"><?= $item['po_item_quantity'] ?></td>
                             <td class="px-5 py-4 text-center text-sm text-gray-500"><?= $remaining ?></td>
+                            <?php if ($do_info): ?>
+                            <td class="px-5 py-4 text-center text-sm font-semibold text-blue-600">
+                                <?= $do_items[$item['po_item_product_id']] ?? '—' ?>
+                            </td>
+                            <?php endif; ?>
                             <td class="px-5 py-4 text-center">
                                 <?php if ($remaining > 0): ?>
                                 <input type="number" name="received_qty[<?= $item['po_item_id'] ?>]" min="0" max="<?= $remaining ?>" value="<?= $remaining ?>"
