@@ -42,6 +42,15 @@ $gri->execute([$po_id]);
 $rejected_items = $gri->fetchAll(PDO::FETCH_ASSOC);
 $rejected_total = array_sum(array_map(fn($r) => $r['gri_rejected_quantity'] * $r['po_item_unit_price'], $rejected_items));
 
+$related_return = $pdo->prepare("
+    SELECT return_id, return_number, return_status, return_resolution_type
+    FROM supplier_returns
+    WHERE return_po_id = ?
+    ORDER BY return_id DESC LIMIT 1
+");
+$related_return->execute([$po_id]);
+$related_return = $related_return->fetch(PDO::FETCH_ASSOC);
+
 // Handle download PO PDF
 if (isset($_GET['download_pdf'])) {
     require_once '../vendor/autoload.php';
@@ -235,6 +244,14 @@ $status_colors = [
                 <span class="text-sm font-semibold text-red-700">Total Excluded from Payment</span>
                 <span class="text-base font-black text-red-600">RM <?= number_format($rejected_total, 2) ?></span>
             </div>
+            <?php if ($related_return): ?>
+            <div class="mt-3 pt-3 border-t border-red-200">
+            <a href="supplier_returns.php" class="text-xs text-red-700 hover:underline font-semibold">
+                    ↩️ View Return <?= htmlspecialchars($related_return['return_number']) ?> —
+                    <?= ['pending' => 'Awaiting Supplier Response', 'acknowledged' => 'Needs Resolution', 'escalated' => 'Disputed (Senior Admin)', 'resolved' => 'Resolved'][$related_return['return_status']] ?>
+                </a>
+            </div>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
 
