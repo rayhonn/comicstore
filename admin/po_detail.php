@@ -12,9 +12,12 @@ $po_id = $_GET['id'] ?? null;
 if (!$po_id) { header('Location: purchase_orders.php'); exit; }
 
 $po = $pdo->prepare("
-    SELECT po.*, s.supplier_name, s.supplier_contact_person, s.supplier_phone, s.supplier_email, s.supplier_address
+    SELECT po.*, s.supplier_name, s.supplier_contact_person, s.supplier_phone, s.supplier_email, s.supplier_address,
+    u1.user_name AS po_created_by_name, u2.user_name AS po_confirmed_by_name
     FROM purchase_orders po
     JOIN suppliers s ON s.supplier_id = po.po_supplier_id
+    LEFT JOIN users u1 ON u1.user_id = po.po_created_by
+    LEFT JOIN users u2 ON u2.user_id = po.po_confirmed_by
     WHERE po.po_id = ?
 ");
 $po->execute([$po_id]);
@@ -140,7 +143,22 @@ if (isset($_GET['download_pdf'])) {
             <p style='font-size:11px; color:#b45309; margin:2px 0 0;'>3. Any discrepancies must be reported within 7 days of delivery.</p>
         </div>
 
-        <div style='border-top:2px solid #f3f4f6; padding-top:16px; margin-top:40px;'>
+        <div style='display:table; width:100%; margin-top:40px; margin-bottom:24px;'>
+            <div style='display:table-cell; width:50%; padding-right:20px;'>
+                <p style='font-size:11px; color:#9ca3af; margin:0 0 40px;'>Issued By</p>
+                <p style='border-top:1px solid #111827; padding-top:6px; font-size:12px; font-weight:700; margin:0;'>" . htmlspecialchars($po['po_created_by_name'] ?? '—') . "</p>
+                <p style='font-size:10px; color:#6b7280; margin:2px 0 0;'>Admin Executive</p>
+                <p style='font-size:10px; color:#6b7280; margin:2px 0 0;'>" . date('d M Y', strtotime($po['po_created_at'])) . "</p>
+            </div>
+            <div style='display:table-cell; width:50%; padding-left:20px;'>
+                <p style='font-size:11px; color:#9ca3af; margin:0 0 40px;'>Approved By</p>
+                <p style='border-top:1px solid #111827; padding-top:6px; font-size:12px; font-weight:700; margin:0;'>" . htmlspecialchars($po['po_confirmed_by_name'] ?? '_______________') . "</p>
+                <p style='font-size:10px; color:#6b7280; margin:2px 0 0;'>Project Director</p>
+                <p style='font-size:10px; color:#6b7280; margin:2px 0 0;'>" . ($po['po_confirmed_by_name'] ? date('d M Y', strtotime($po['po_created_at'])) : '') . "</p>
+            </div>
+        </div>
+
+        <div style='border-top:2px solid #f3f4f6; padding-top:16px; margin-top:24px;'>
             <p style='font-size:11px; color:#9ca3af; margin:0;'>This is an official purchase order issued by MangaVault Sdn Bhd.</p>
             <p style='font-size:11px; color:#9ca3af; margin:4px 0 0;'>Generated on " . date('d F Y, h:i A') . "</p>
         </div>

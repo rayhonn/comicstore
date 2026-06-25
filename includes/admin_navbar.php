@@ -7,6 +7,7 @@ $pending_returns_count = $pdo->query("SELECT COUNT(*) FROM return_requests WHERE
 $pending_supplier_returns_count = $pdo->query("SELECT COUNT(*) FROM supplier_returns WHERE return_status IN ('pending', 'escalated')")->fetchColumn();
 $pending_reviews_count = $pdo->query("SELECT COUNT(*) FROM product_reviews WHERE review_status = 'pending'")->fetchColumn();
 $low_stock_count = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE physical_stock_quantity <= physical_low_stock_threshold")->fetchColumn();
+$pending_pr_count = $pdo->query("SELECT COUNT(*) FROM purchase_requisitions WHERE pr_status IN ('pending', 'approved')")->fetchColumn();
 ?>
 <nav class="bg-[#1e2d4a] text-white sticky top-0 z-50 shadow-lg">
     <div class="max-w-7xl mx-auto px-6 py-3 flex justify-between items-center">
@@ -91,6 +92,12 @@ $low_stock_count = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE phys
                             <span>↩️ Supplier Returns</span>
                             <?php if ($pending_supplier_returns_count > 0): ?>
                             <span class="bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center"><?= $pending_supplier_returns_count ?></span>
+                            <?php endif; ?>
+                        </a>
+                        <a href="pr.php" class="flex items-center justify-between gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 transition-colors <?= $admin_current === 'pr.php' ? 'bg-red-50 text-red-600 font-semibold' : '' ?>">
+                            <span>📝 Purchase Requisitions</span>
+                            <?php if ($pending_pr_count > 0): ?>
+                            <span class="bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center"><?= $pending_pr_count ?></span>
                             <?php endif; ?>
                         </a>
                     </div>

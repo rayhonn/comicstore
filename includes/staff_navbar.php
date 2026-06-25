@@ -4,6 +4,7 @@ $staff_current = basename($_SERVER['PHP_SELF']);
 $pending_orders = $pdo->query("SELECT COUNT(*) FROM orders WHERE order_status = 'pending' AND order_payment_status = 'confirmed'")->fetchColumn();
 $pending_returns = $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'pending'")->fetchColumn();
 $pending_reviews = $pdo->query("SELECT COUNT(*) FROM product_reviews WHERE review_status = 'pending'")->fetchColumn();
+$my_pending_prs = $pdo->query("SELECT COUNT(*) FROM purchase_requisitions WHERE pr_status = 'rejected' AND pr_reviewed_at > DATE_SUB(NOW(), INTERVAL 3 DAY)")->fetchColumn();
 ?>
 <nav class="bg-[#1e2d4a] text-white sticky top-0 z-50 shadow-lg">
     <div class="max-w-7xl mx-auto px-6 py-3 flex justify-between items-center">
@@ -33,6 +34,12 @@ $pending_reviews = $pdo->query("SELECT COUNT(*) FROM product_reviews WHERE revie
                 </a>
                 <a href="reviews.php" class="px-3 py-2 rounded-lg transition-colors <?= $staff_current === 'reviews.php' ? 'bg-white/20 text-white font-semibold' : 'text-white/70 hover:text-white hover:bg-white/10' ?>">
                     Reviews
+                </a>
+                <a href="pr.php" class="relative px-3 py-2 rounded-lg transition-colors <?= $staff_current === 'pr.php' ? 'bg-white/20 text-white font-semibold' : 'text-white/70 hover:text-white hover:bg-white/10' ?>">
+                    PR
+                    <?php if ($my_pending_prs > 0): ?>
+                    <span class="absolute -top-1 -right-1 bg-orange-500 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center">!</span>
+                    <?php endif; ?>
                 </a>
             </div>
         </div>

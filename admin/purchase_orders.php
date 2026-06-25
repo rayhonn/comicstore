@@ -14,7 +14,7 @@ if (isset($_SESSION['flash_success'])) {
 
 // Handle status update
 if (isset($_GET['confirm'])) {
-    $pdo->prepare("UPDATE purchase_orders SET po_status = 'confirmed' WHERE po_id = ?")->execute([$_GET['confirm']]);
+    $pdo->prepare("UPDATE purchase_orders SET po_status = 'confirmed', po_confirmed_by = ? WHERE po_id = ?")->execute([$_SESSION['user_id'], $_GET['confirm']]);
     header('Location: purchase_orders.php');
     exit;
 }

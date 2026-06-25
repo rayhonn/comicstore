@@ -6,6 +6,14 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 }
 require_once '../includes/db.php';
 
+$from_pr_id = $_GET['from_pr'] ?? null;
+$from_pr = null;
+if ($from_pr_id) {
+    $stmt = $pdo->prepare("SELECT pr.*, p.product_title, p.product_volume_number FROM purchase_requisitions pr JOIN products p ON p.product_id = pr.pr_product_id WHERE pr.pr_id = ? AND pr.pr_status = 'approved'");
+    $stmt->execute([$from_pr_id]);
+    $from_pr = $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
 $error = '';
 $success = '';
 
@@ -35,6 +43,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_rfq'])) {
         foreach ($supplier_ids as $sid) {
             $pdo->prepare("INSERT INTO rfq_suppliers (rfq_supplier_rfq_id, rfq_supplier_supplier_id) VALUES (?, ?)")
                 ->execute([$rfq_id, $sid]);
+        }
+
+        if (!empty($_POST['from_pr_id'])) {
+            $pdo->prepare("UPDATE purchase_requisitions SET pr_status = 'converted', pr_rfq_id = ? WHERE pr_id = ?")
+                ->execute([$rfq_id, $_POST['from_pr_id']]);
         }
 
         $_SESSION['flash_success'] = "$rfq_number created successfully and sent to " . count($supplier_ids) . " supplier(s).";
@@ -165,6 +178,7 @@ $suppliers = $pdo->query("SELECT * FROM suppliers WHERE supplier_status = 'activ
             </div>
             <form method="POST" id="rfqForm">
                 <input type="hidden" name="create_rfq" value="1">
+                <input type="hidden" name="from_pr_id" value="<?= $from_pr_id ?? '' ?>">
 
                 <div class="mb-5">
                     <div class="flex items-center justify-between mb-2">
@@ -333,6 +347,24 @@ $suppliers = $pdo->query("SELECT * FROM suppliers WHERE supplier_status = 'activ
             document.querySelectorAll('[id^="dropdown-"]').forEach(d => d.classList.add('hidden'));
         }
     });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('[id^="trigger-"]') && !e.target.closest('[id^="dropdown-"]')) {
+            document.querySelectorAll('[id^="dropdown-"]').forEach(d => d.classList.add('hidden'));
+        }
+    });
+
+    <?php if ($from_pr): ?>
+    window.addEventListener('DOMContentLoaded', function() {
+        openRfqModal();
+        document.getElementById('pid-1').value = <?= $from_pr['pr_product_id'] ?>;
+        document.getElementById('label-1').textContent = <?= json_encode($from_pr['product_title'] . ($from_pr['product_volume_number'] ? ' Vol.' . $from_pr['product_volume_number'] : '')) ?>;
+        document.getElementById('label-1').classList.remove('text-gray-400');
+        document.getElementById('label-1').classList.add('text-gray-800');
+        document.querySelector('input[name="quantity[]"]').value = <?= $from_pr['pr_suggested_quantity'] ?>;
+    });
+    <?php endif; ?>
     </script>
 
 </body>
