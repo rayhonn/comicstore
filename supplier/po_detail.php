@@ -15,6 +15,13 @@ $po->execute([$po_id, $supplier_id]);
 $po = $po->fetch(PDO::FETCH_ASSOC);
 if (!$po) { header('Location: purchase_orders.php'); exit; }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acknowledge_po'])) {
+    $pdo->prepare("UPDATE purchase_orders SET po_acknowledged_at = NOW() WHERE po_id = ? AND po_supplier_id = ?")
+        ->execute([$po_id, $supplier_id]);
+    header('Location: po_detail.php?id=' . $po_id);
+    exit;
+}
+
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
 $items = $pdo->prepare("
@@ -134,7 +141,22 @@ if (isset($_GET['download_pdf'])) {
             <p style='font-size:11px; color:#b45309; margin:2px 0 0;'>3. Any discrepancies must be reported within 7 days of delivery.</p>
         </div>
 
-        <div style='border-top:2px solid #f3f4f6; padding-top:16px; margin-top:40px;'>
+        <div style='display:table; width:100%; margin-top:40px; margin-bottom:24px;'>
+            <div style='display:table-cell; width:50%; padding-right:20px;'>
+                <p style='font-size:11px; color:#9ca3af; margin:0 0 40px;'>Issued By</p>
+                <p style='border-top:1px solid #111827; padding-top:6px; font-size:12px; font-weight:700; margin:0;'>MangaVault Sdn Bhd</p>
+                <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>Admin Executive</p>
+                <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>" . date('d M Y', strtotime($po['po_created_at'])) . "</p>
+            </div>
+            <div style='display:table-cell; width:50%; padding-left:20px;'>
+                <p style='font-size:11px; color:#9ca3af; margin:0 0 40px;'>Acknowledged By (Supplier)</p>
+                <p style='border-top:1px solid #111827; padding-top:6px; font-size:12px; font-weight:700; margin:0; min-height:14px;'>" . htmlspecialchars($po['po_acknowledged_at'] ? $supplier_info['supplier_contact_person'] : '') . "</p>
+                <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>" . htmlspecialchars($supplier_info['supplier_name']) . "</p>
+                <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>" . ($po['po_acknowledged_at'] ? date('d M Y', strtotime($po['po_acknowledged_at'])) : '') . "</p>
+            </div>
+        </div>
+
+        <div style='border-top:2px solid #f3f4f6; padding-top:16px; margin-top:24px;'>
             <p style='font-size:11px; color:#9ca3af; margin:0;'>This is an official purchase order issued by MangaVault Sdn Bhd.</p>
             <p style='font-size:11px; color:#9ca3af; margin:4px 0 0;'>Generated on " . date('d F Y, h:i A') . "</p>
         </div>
@@ -190,10 +212,26 @@ $status_colors = [
                 <?= $po['po_status'] ?>
             </span>
         </div>
+        
+        <?php if (isset($_GET['must_acknowledge'])): ?>
+        <div class="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-6">
+            <p class="text-sm text-orange-700">⚠️ Please acknowledge this PO before generating a delivery order.</p>
+        </div>
+        <?php endif; ?>
 
         <?php if ($po['po_status'] === 'confirmed'): ?>
         <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6">
-            <p class="text-sm text-blue-700">📦 This order has been confirmed. Please prepare and ship the items as scheduled.</p>
+            <p class="text-sm text-blue-700 mb-2">📦 This order has been confirmed. Please prepare and ship the items as scheduled.</p>
+            <?php if ($po['po_acknowledged_at']): ?>
+            <p class="text-xs text-blue-500">✓ You acknowledged this PO on <?= date('d M Y, h:i A', strtotime($po['po_acknowledged_at'])) ?></p>
+            <?php else: ?>
+            <form method="POST">
+                <input type="hidden" name="acknowledge_po" value="1">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors">
+                    ✓ Acknowledge This PO
+                </button>
+            </form>
+            <?php endif; ?>
         </div>
         <?php elseif ($po['po_status'] === 'completed'): ?>
         <div class="bg-green-50 border border-green-100 rounded-xl p-4 mb-6">
@@ -275,10 +313,16 @@ $status_colors = [
                 📄 Download PO (PDF)
             </a>
             <?php if ($po['po_status'] === 'confirmed'): ?>
-            <a href="delivery_order.php?po_id=<?= $po_id ?>"
-            class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
-                🚚 Generate Delivery Order
-            </a>
+                <?php if ($po['po_acknowledged_at']): ?>
+                <a href="delivery_order.php?po_id=<?= $po_id ?>"
+                class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
+                    🚚 Generate Delivery Order
+                </a>
+                <?php else: ?>
+                <span class="bg-gray-200 text-gray-400 font-bold px-6 py-2.5 rounded-xl text-sm cursor-not-allowed" title="Acknowledge this PO first">
+                    🚚 Generate Delivery Order
+                </span>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
 

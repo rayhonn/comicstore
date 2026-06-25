@@ -16,6 +16,11 @@ $po->execute([$po_id, $supplier_id]);
 $po = $po->fetch(PDO::FETCH_ASSOC);
 if (!$po) { header('Location: purchase_orders.php'); exit; }
 
+if (!$po['po_acknowledged_at']) {
+    header('Location: po_detail.php?id=' . $po_id . '&must_acknowledge=1');
+    exit;
+}
+
 $items = $pdo->prepare("
     SELECT pi.*, p.product_title, p.product_volume_number
     FROM po_items pi
