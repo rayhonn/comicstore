@@ -16,7 +16,7 @@ if (isset($_GET['download_pdf'])) {
         CONCAT_WS(' ', u2.user_first_name, u2.user_last_name) AS reviewed_by_name
         FROM purchase_requisitions pr
         JOIN products p ON p.product_id = pr.pr_product_id
-        JOIN users u1 ON u1.user_id = pr.pr_requested_by
+        LEFT JOIN users u1 ON u1.user_id = pr.pr_requested_by
         LEFT JOIN users u2 ON u2.user_id = pr.pr_reviewed_by
         WHERE pr.pr_id = ? AND pr.pr_requested_by = ?
     ");
@@ -121,6 +121,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_pr'])) {
     }
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_draft'])) {
+    $pr_id = $_POST['pr_id'];
+    $quantity = intval($_POST['quantity'] ?? 0);
+    $reason = trim($_POST['reason'] ?? '');
+
+    if ($quantity <= 0) {
+        $_SESSION['flash_success'] = 'Please enter a valid quantity.';
+        header('Location: pr.php'); exit;
+    }
+
+    $pdo->prepare("
+        UPDATE purchase_requisitions
+        SET pr_status = 'pending', pr_requested_by = ?, pr_suggested_quantity = ?, pr_reason = ?
+        WHERE pr_id = ? AND pr_status = 'draft'
+    ")->execute([$_SESSION['user_id'], $quantity, $reason, $pr_id]);
+
+    $_SESSION['flash_success'] = 'Draft claimed and submitted for admin approval.';
+    header('Location: pr.php');
+    exit;
+}
+
 if (isset($_SESSION['flash_success'])) {
     $success = $_SESSION['flash_success'];
     unset($_SESSION['flash_success']);
@@ -145,6 +166,15 @@ $my_prs = $pdo->prepare("
 ");
 $my_prs->execute([$_SESSION['user_id']]);
 $my_prs = $my_prs->fetchAll(PDO::FETCH_ASSOC);
+
+$drafts = $pdo->query("
+    SELECT pr.*, p.product_title, p.product_volume_number, p.product_cover_image, pp.physical_stock_quantity
+    FROM purchase_requisitions pr
+    JOIN products p ON p.product_id = pr.pr_product_id
+    LEFT JOIN product_physical pp ON pp.physical_product_id = p.product_id
+    WHERE pr.pr_status = 'draft'
+    ORDER BY pr.pr_created_at DESC
+")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -179,6 +209,26 @@ $my_prs = $my_prs->fetchAll(PDO::FETCH_ASSOC);
         <?php if ($error): ?>
         <div class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl mb-6">
             ❌ <?= htmlspecialchars($error) ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if (count($drafts) > 0): ?>
+        <div class="bg-purple-50 border border-purple-200 rounded-2xl p-5 mb-6">
+            <h3 class="font-bold text-purple-700 mb-3">🤖 System-Detected Low Stock — Needs Your Review</h3>
+            <div class="space-y-2">
+                <?php foreach ($drafts as $d): ?>
+                <div class="bg-white rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                        <p class="text-sm font-semibold text-gray-800"><?= htmlspecialchars($d['product_title']) ?></p>
+                        <p class="text-xs text-gray-400">Current stock: <?= $d['physical_stock_quantity'] ?? '—' ?> · Suggested: <?= $d['pr_suggested_quantity'] ?> units</p>
+                    </div>
+                    <button onclick='openClaimModal(<?= json_encode($d) ?>)'
+                            class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors">
+                        Review & Submit
+                    </button>
+                </div>
+                <?php endforeach; ?>
+            </div>
         </div>
         <?php endif; ?>
 
@@ -284,8 +334,52 @@ $my_prs = $my_prs->fetchAll(PDO::FETCH_ASSOC);
                     </button>
                 </div>
             </form>
+        </div>
+    </div>
 
-            <script>
+    <!-- Claim Draft Modal -->
+    <div id="claimModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-6 py-10 overflow-y-auto">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 my-auto">
+            <div class="flex items-center justify-between mb-5">
+                <h3 class="font-black text-gray-800 text-lg">Review System-Detected PR</h3>
+                <button onclick="document.getElementById('claimModal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="claim_draft" value="1">
+                <input type="hidden" name="pr_id" id="claim_pr_id">
+
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Product</label>
+                    <p id="claim_product_name" class="text-sm font-semibold text-gray-800 bg-gray-50 rounded-xl px-3 py-2.5"></p>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Quantity *</label>
+                    <input type="number" name="quantity" id="claim_quantity" min="1" required
+                           class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-purple-400">
+                </div>
+
+                <div class="mb-5">
+                    <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Reason</label>
+                    <textarea name="reason" id="claim_reason" rows="3"
+                              class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-purple-400 resize-none"></textarea>
+                </div>
+
+                <div class="flex gap-3">
+                    <button type="button" onclick="document.getElementById('claimModal').classList.add('hidden')"
+                            class="flex-1 border-2 border-gray-100 hover:bg-gray-50 text-gray-600 font-semibold py-2.5 rounded-xl text-sm transition-colors">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
+                        Submit PR
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
 const prAllProducts = <?= json_encode(array_map(function($p) {
     return [
         'id' => $p['product_id'],
@@ -341,6 +435,14 @@ function pickPrProduct(product) {
     document.getElementById('prDropdown').classList.add('hidden');
 }
 
+function openClaimModal(draft) {
+    document.getElementById('claim_pr_id').value = draft.pr_id;
+    document.getElementById('claim_product_name').textContent = draft.product_title;
+    document.getElementById('claim_quantity').value = draft.pr_suggested_quantity;
+    document.getElementById('claim_reason').value = draft.pr_reason;
+    document.getElementById('claimModal').classList.remove('hidden');
+}
+
 renderPrList(prAllProducts);
 
 document.addEventListener('click', function(e) {
@@ -349,8 +451,6 @@ document.addEventListener('click', function(e) {
     }
 });
 </script>
-        </div>
-    </div>
 
 </body>
 </html>

@@ -33,7 +33,7 @@ if (isset($_GET['download_pdf'])) {
         CONCAT_WS(' ', u2.user_first_name, u2.user_last_name) AS reviewed_by_name
         FROM purchase_requisitions pr
         JOIN products p ON p.product_id = pr.pr_product_id
-        JOIN users u1 ON u1.user_id = pr.pr_requested_by
+        LEFT JOIN users u1 ON u1.user_id = pr.pr_requested_by
         LEFT JOIN users u2 ON u2.user_id = pr.pr_reviewed_by
         WHERE pr.pr_id = ?
     ");
@@ -117,6 +117,38 @@ if (isset($_SESSION['flash_success'])) {
     unset($_SESSION['flash_success']);
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['scan_low_stock'])) {
+    $low_stock_products = $pdo->query("
+        SELECT p.product_id, pp.physical_stock_quantity, pp.physical_low_stock_threshold
+        FROM products p
+        JOIN product_physical pp ON pp.physical_product_id = p.product_id
+        WHERE pp.physical_stock_quantity <= pp.physical_low_stock_threshold
+        AND p.product_id NOT IN (
+            SELECT pr_product_id FROM purchase_requisitions WHERE pr_status IN ('draft', 'pending', 'approved')
+        )
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    $created = 0;
+    foreach ($low_stock_products as $lp) {
+        $last = $pdo->query("SELECT pr_id FROM purchase_requisitions ORDER BY pr_id DESC LIMIT 1")->fetchColumn();
+        $pr_number = 'PR-' . str_pad(($last ?? 0) + 1, 4, '0', STR_PAD_LEFT);
+        $suggested_qty = max(($lp['physical_low_stock_threshold'] * 2) - $lp['physical_stock_quantity'], $lp['physical_low_stock_threshold']);
+
+        $pdo->prepare("
+            INSERT INTO purchase_requisitions (pr_number, pr_product_id, pr_suggested_quantity, pr_reason, pr_status, pr_auto_generated)
+            VALUES (?, ?, ?, ?, 'draft', 1)
+        ")->execute([
+            $pr_number, $lp['product_id'], $suggested_qty,
+            "Auto-generated: stock at {$lp['physical_stock_quantity']}, below threshold of {$lp['physical_low_stock_threshold']}."
+        ]);
+        $created++;
+    }
+
+    $_SESSION['flash_success'] = $created > 0 ? "$created draft PR(s) generated for low-stock items." : "No new drafts needed — all low-stock items already have an open PR.";
+    header('Location: pr.php');
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['approve_pr'])) {
     $pr_id = $_POST['pr_id'];
 
@@ -143,14 +175,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['approve_pr'])) {
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_pr'])) {
+    $pr_id = $_POST['pr_id'];
+    $note = trim($_POST['review_note'] ?? '');
+    if ($note === '') {
+        $_SESSION['flash_success'] = 'A reason is required to reject a PR.';
+        header('Location: pr.php'); exit;
+    }
+    $pdo->prepare("UPDATE purchase_requisitions SET pr_status = 'rejected', pr_review_note = ?, pr_reviewed_by = ?, pr_reviewed_at = NOW() WHERE pr_id = ? AND pr_status = 'pending'")
+        ->execute([$note, $_SESSION['user_id'], $pr_id]);
+    $_SESSION['flash_success'] = 'PR rejected.';
+    header('Location: pr.php');
+    exit;
+}
+
 $prs = $pdo->query("
     SELECT pr.*, p.product_title, p.product_volume_number, pp.physical_stock_quantity,
     u1.user_name AS requested_by_name, u2.user_name AS reviewed_by_name
     FROM purchase_requisitions pr
     JOIN products p ON p.product_id = pr.pr_product_id
     LEFT JOIN product_physical pp ON pp.physical_product_id = p.product_id
-    JOIN users u1 ON u1.user_id = pr.pr_requested_by
+    LEFT JOIN users u1 ON u1.user_id = pr.pr_requested_by
     LEFT JOIN users u2 ON u2.user_id = pr.pr_reviewed_by
+    WHERE pr.pr_status != 'draft'
     ORDER BY pr.pr_created_at DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 ?>
@@ -168,9 +215,17 @@ $prs = $pdo->query("
 
     <div class="max-w-6xl mx-auto px-6 py-8">
 
-        <div class="mb-8">
-            <h1 class="text-2xl font-black text-gray-800">📝 Purchase Requisitions</h1>
-            <p class="text-gray-500 text-sm mt-1">Review restock requests submitted by staff</p>
+        <div class="mb-8 flex items-center justify-between">
+            <div>
+                <h1 class="text-2xl font-black text-gray-800">📝 Purchase Requisitions</h1>
+                <p class="text-gray-500 text-sm mt-1">Review restock requests submitted by staff</p>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="scan_low_stock" value="1">
+                <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors">
+                    🔄 Scan Low Stock & Generate Drafts
+                </button>
+            </form>
         </div>
 
         <?php if ($success): ?>
@@ -201,7 +256,7 @@ $prs = $pdo->query("
                 <div class="flex items-center justify-between mb-3">
                     <div>
                         <p class="font-bold text-gray-800"><?= htmlspecialchars($pr['pr_number']) ?></p>
-                        <p class="text-xs text-gray-400">Requested by <?= htmlspecialchars($pr['requested_by_name']) ?> · <?= date('d M Y', strtotime($pr['pr_created_at'])) ?></p>
+                        <p class="text-xs text-gray-400">Requested by <?= htmlspecialchars($pr['requested_by_name'] ?? '—') ?> · <?= date('d M Y', strtotime($pr['pr_created_at'])) ?></p>
                     </div>
                     <span class="<?= $status_colors[$pr['pr_status']] ?> text-xs px-3 py-1 rounded-full font-semibold capitalize">
                         <?= $pr['pr_status'] ?>
@@ -221,6 +276,10 @@ $prs = $pdo->query("
                         </div>
                         <p class="text-lg font-black text-red-600"><?= $pr['pr_suggested_quantity'] ?> units</p>
                     </div>
+                    <?php if ($pr['pr_reason']): ?>
+                    <p class="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-100">"<?= htmlspecialchars($pr['pr_reason']) ?>"</p>
+                    <?php endif; ?>
+                </div>
 
                 <?php if ($pr['pr_status'] === 'rejected' && $pr['pr_review_note']): ?>
                 <p class="text-xs text-red-500 mb-3">Rejected: <?= htmlspecialchars($pr['pr_review_note']) ?> — by <?= htmlspecialchars($pr['reviewed_by_name']) ?></p>
