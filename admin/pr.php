@@ -8,6 +8,94 @@ require_once '../includes/db.php';
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
+if (isset($_GET['download_pdf'])) {
+    require_once '../vendor/autoload.php';
+
+    $pr_id = $_GET['download_pdf'];
+    $pr = $pdo->prepare("
+        SELECT pr.*, p.product_title, p.product_volume_number,
+        CONCAT_WS(' ', u1.user_first_name, u1.user_last_name) AS requested_by_name,
+        CONCAT_WS(' ', u2.user_first_name, u2.user_last_name) AS reviewed_by_name
+        FROM purchase_requisitions pr
+        JOIN products p ON p.product_id = pr.pr_product_id
+        JOIN users u1 ON u1.user_id = pr.pr_requested_by
+        LEFT JOIN users u2 ON u2.user_id = pr.pr_reviewed_by
+        WHERE pr.pr_id = ?
+    ");
+    $pr->execute([$pr_id]);
+    $pr = $pr->fetch(PDO::FETCH_ASSOC);
+    if (!$pr) { header('Location: pr.php'); exit; }
+
+    $html = "
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset='UTF-8'></head>
+    <body style='font-family: Arial, sans-serif; margin:0; padding:30px; color:#111827;'>
+
+        <div style='background:#1e2d4a; padding:24px; border-radius:8px; margin-bottom:30px;'>
+            <h1 style='color:#ffffff; font-size:22px; margin:0; font-weight:900;'>MANGA<span style='color:#ef4444;'>VAULT</span></h1>
+            <p style='color:rgba(255,255,255,0.7); font-size:12px; margin:4px 0 0;'>Purchase Requisition</p>
+        </div>
+
+        <div style='margin-bottom:24px;'>
+            <h2 style='font-size:18px; color:#111827; margin:0 0 4px;'>" . htmlspecialchars($pr['pr_number']) . "</h2>
+            <p style='font-size:12px; color:#6b7280; margin:0;'>Date: " . date('d F Y', strtotime($pr['pr_created_at'])) . "</p>
+            <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>Status: <strong style='text-transform:uppercase;'>" . htmlspecialchars($pr['pr_status']) . "</strong></p>
+        </div>
+
+        <table style='width:100%; border-collapse:collapse; margin-bottom:24px;'>
+            <tr style='background:#1e2d4a; color:white;'>
+                <td style='padding:10px 12px; font-size:11px; font-weight:700;'>Item</td>
+                <td style='padding:10px 12px; font-size:11px; font-weight:700; text-align:center;'>Suggested Qty</td>
+            </tr>
+            <tr style='border-bottom:1px solid #e5e7eb;'>
+                <td style='padding:10px 12px; font-size:12px;'>" . htmlspecialchars($pr['product_title']) . ($pr['product_volume_number'] ? ' (Vol.' . $pr['product_volume_number'] . ')' : '') . "</td>
+                <td style='padding:10px 12px; font-size:12px; text-align:center;'>" . $pr['pr_suggested_quantity'] . "</td>
+            </tr>
+        </table>
+
+        <div style='background:#f9fafb; border-radius:8px; padding:16px; margin-bottom:24px;'>
+            <p style='font-size:11px; color:#9ca3af; margin:0 0 6px; text-transform:uppercase; font-weight:700;'>Reason</p>
+            <p style='font-size:13px; color:#374151; margin:0;'>" . htmlspecialchars($pr['pr_reason'] ?: '—') . "</p>
+        </div>" .
+
+        ($pr['pr_status'] === 'rejected' && $pr['pr_review_note'] ? "
+        <div style='background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:16px; margin-bottom:24px;'>
+            <p style='font-size:11px; color:#991b1b; margin:0 0 6px; text-transform:uppercase; font-weight:700;'>Rejection Reason</p>
+            <p style='font-size:13px; color:#374151; margin:0;'>" . htmlspecialchars($pr['pr_review_note']) . "</p>
+        </div>" : "") . "
+
+        <div style='display:table; width:100%; margin-top:40px; margin-bottom:24px;'>
+            <div style='display:table-cell; width:50%; padding-right:20px;'>
+                <p style='font-size:11px; color:#9ca3af; margin:0 0 40px;'>Requested By</p>
+                <p style='border-top:1px solid #111827; padding-top:6px; font-size:12px; font-weight:700; margin:0;'>" . htmlspecialchars($pr['requested_by_name'] ?: '—') . "</p>
+                <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>Staff</p>
+                <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>" . date('d M Y', strtotime($pr['pr_created_at'])) . "</p>
+            </div>
+            <div style='display:table-cell; width:50%; padding-left:20px;'>
+                <p style='font-size:11px; color:#9ca3af; margin:0 0 40px;'>Approved By</p>
+                <p style='border-top:1px solid #111827; padding-top:6px; font-size:12px; font-weight:700; margin:0; min-height:14px;'>" . htmlspecialchars($pr['pr_status'] !== 'pending' ? $pr['reviewed_by_name'] : '') . "</p>
+                <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>Admin</p>
+                <p style='font-size:12px; color:#6b7280; margin:2px 0 0;'>" . ($pr['pr_reviewed_at'] ? date('d M Y', strtotime($pr['pr_reviewed_at'])) : '') . "</p>
+            </div>
+        </div>
+
+        <div style='border-top:2px solid #f3f4f6; padding-top:16px; margin-top:24px;'>
+            <p style='font-size:11px; color:#9ca3af; margin:0;'>This is an internal purchase requisition issued by MangaVault Sdn Bhd.</p>
+            <p style='font-size:11px; color:#9ca3af; margin:4px 0 0;'>Generated on " . date('d F Y, h:i A') . "</p>
+        </div>
+
+    </body>
+    </html>";
+
+    $dompdf = new \Dompdf\Dompdf();
+    $dompdf->loadHtml($html);
+    $dompdf->setPaper('A4', 'portrait');
+    $dompdf->render();
+    $dompdf->stream("{$pr['pr_number']}.pdf", ['Attachment' => true]);
+    exit;
+}
+
 $success = '';
 if (isset($_SESSION['flash_success'])) {
     $success = $_SESSION['flash_success'];
@@ -135,7 +223,8 @@ $prs = $pdo->query("
                         📋 Convert to RFQ
                     </a>
                     <?php elseif ($pr['pr_status'] === 'converted'): ?>
-                    <a href="rfq.php" class="text-xs text-green-600 hover:underline font-semibold">View RFQ →</a>
+                    <a href="rfq.php" class="text-xs text-green-600 hover:underline font-semibold mr-2">View RFQ →</a>
+                    <a href="?download_pdf=<?= $pr['pr_id'] ?>" class="text-xs text-gray-500 hover:underline font-semibold">📄 PDF</a>
                     <?php endif; ?>
                 </div>
             </div>
