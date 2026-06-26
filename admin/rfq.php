@@ -78,7 +78,16 @@ $products = $pdo->query("
     ORDER BY product_title
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$suppliers = $pdo->query("SELECT * FROM suppliers WHERE supplier_status = 'active' ORDER BY supplier_name")->fetchAll(PDO::FETCH_ASSOC);
+$suppliers = $pdo->query("
+    SELECT s.*,
+    AVG(DATEDIFF(gr.gr_received_at, po.po_created_at)) as avg_lead_time
+    FROM suppliers s
+    LEFT JOIN purchase_orders po ON po.po_supplier_id = s.supplier_id
+    LEFT JOIN goods_received gr ON gr.gr_po_id = po.po_id AND gr.gr_status = 'completed'
+    WHERE s.supplier_status = 'active'
+    GROUP BY s.supplier_id
+    ORDER BY s.supplier_name
+")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -199,7 +208,12 @@ $suppliers = $pdo->query("SELECT * FROM suppliers WHERE supplier_status = 'activ
                         <?php foreach ($suppliers as $s): ?>
                         <label class="flex items-center gap-2 p-3 border-2 border-gray-100 rounded-xl cursor-pointer hover:border-red-300 transition-colors has-[:checked]:border-red-500 has-[:checked]:bg-red-50">
                             <input type="checkbox" name="supplier_ids[]" value="<?= $s['supplier_id'] ?>" class="accent-red-600">
-                            <span class="text-sm text-gray-700"><?= htmlspecialchars($s['supplier_name']) ?></span>
+                            <div class="min-w-0">
+                                <span class="text-sm text-gray-700"><?= htmlspecialchars($s['supplier_name']) ?></span>
+                                <?php if ($s['avg_lead_time'] !== null): ?>
+                                <span class="text-xs text-gray-400 block">~<?= round($s['avg_lead_time'], 1) ?> days lead time</span>
+                                <?php endif; ?>
+                            </div>
                         </label>
                         <?php endforeach; ?>
                     </div>

@@ -211,7 +211,7 @@ $prs = $pdo->query("
                 <div class="bg-gray-50 rounded-xl p-4 mb-3">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-sm font-semibold text-gray-800"><?= htmlspecialchars($pr['product_title']) ?><?= $pr['product_volume_number'] ? ' Vol.' . $pr['product_volume_number'] : '' ?></p>
+                            <p class="text-sm font-semibold text-gray-800"><?= htmlspecialchars($pr['product_title']) ?></p>
                             <p class="text-xs text-gray-400">Current stock: <?= $pr['physical_stock_quantity'] ?? '—' ?></p>
                             <?php if ($est_cost !== null): ?>
                             <p class="text-xs <?= $needs_senior ? 'text-orange-500 font-semibold' : 'text-gray-400' ?>">
