@@ -6,6 +6,21 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 }
 require_once '../includes/db.php';
 
+$is_senior = (($_SESSION['admin_level'] ?? '') === 'senior_admin');
+$PR_APPROVAL_THRESHOLD = 1000;
+
+function get_estimated_pr_cost($pdo, $product_id, $quantity) {
+    $last_price = $pdo->prepare("
+        SELECT po_item_unit_price FROM po_items
+        WHERE po_item_product_id = ?
+        ORDER BY po_item_id DESC LIMIT 1
+    ");
+    $last_price->execute([$product_id]);
+    $unit_price = $last_price->fetchColumn();
+    if ($unit_price === false) return null;
+    return $unit_price * $quantity;
+}
+
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
 if (isset($_GET['download_pdf'])) {
@@ -104,23 +119,26 @@ if (isset($_SESSION['flash_success'])) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['approve_pr'])) {
     $pr_id = $_POST['pr_id'];
+
+    $pr_check = $pdo->prepare("SELECT pr_product_id, pr_suggested_quantity FROM purchase_requisitions WHERE pr_id = ? AND pr_status = 'pending'");
+    $pr_check->execute([$pr_id]);
+    $pr_check = $pr_check->fetch(PDO::FETCH_ASSOC);
+
+    if (!$pr_check) {
+        $_SESSION['flash_success'] = 'PR not found or already reviewed.';
+        header('Location: pr.php'); exit;
+    }
+
+    $estimated_cost = get_estimated_pr_cost($pdo, $pr_check['pr_product_id'], $pr_check['pr_suggested_quantity']);
+
+    if ($estimated_cost !== null && $estimated_cost >= $PR_APPROVAL_THRESHOLD && !$is_senior) {
+        $_SESSION['flash_success'] = "This PR is estimated at RM " . number_format($estimated_cost, 2) . " — only senior admin can approve requisitions above RM " . number_format($PR_APPROVAL_THRESHOLD, 2) . ".";
+        header('Location: pr.php'); exit;
+    }
+
     $pdo->prepare("UPDATE purchase_requisitions SET pr_status = 'approved', pr_reviewed_by = ?, pr_reviewed_at = NOW() WHERE pr_id = ? AND pr_status = 'pending'")
         ->execute([$_SESSION['user_id'], $pr_id]);
     $_SESSION['flash_success'] = 'PR approved. You can now convert it to an RFQ.';
-    header('Location: pr.php');
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_pr'])) {
-    $pr_id = $_POST['pr_id'];
-    $note = trim($_POST['review_note'] ?? '');
-    if ($note === '') {
-        $_SESSION['flash_success'] = 'A reason is required to reject a PR.';
-        header('Location: pr.php'); exit;
-    }
-    $pdo->prepare("UPDATE purchase_requisitions SET pr_status = 'rejected', pr_review_note = ?, pr_reviewed_by = ?, pr_reviewed_at = NOW() WHERE pr_id = ? AND pr_status = 'pending'")
-        ->execute([$note, $_SESSION['user_id'], $pr_id]);
-    $_SESSION['flash_success'] = 'PR rejected.';
     header('Location: pr.php');
     exit;
 }
@@ -176,6 +194,8 @@ $prs = $pdo->query("
                     'converted' => 'bg-green-100 text-green-700',
                 ];
                 $modal_id = 'reject_modal_' . $pr['pr_id'];
+                $est_cost = get_estimated_pr_cost($pdo, $pr['pr_product_id'], $pr['pr_suggested_quantity']);
+                $needs_senior = $est_cost !== null && $est_cost >= $PR_APPROVAL_THRESHOLD;
             ?>
             <div class="bg-white rounded-2xl shadow-sm p-6">
                 <div class="flex items-center justify-between mb-3">
@@ -193,13 +213,14 @@ $prs = $pdo->query("
                         <div>
                             <p class="text-sm font-semibold text-gray-800"><?= htmlspecialchars($pr['product_title']) ?><?= $pr['product_volume_number'] ? ' Vol.' . $pr['product_volume_number'] : '' ?></p>
                             <p class="text-xs text-gray-400">Current stock: <?= $pr['physical_stock_quantity'] ?? '—' ?></p>
+                            <?php if ($est_cost !== null): ?>
+                            <p class="text-xs <?= $needs_senior ? 'text-orange-500 font-semibold' : 'text-gray-400' ?>">
+                                Est. cost: RM <?= number_format($est_cost, 2) ?><?= $needs_senior ? ' ⚠️ Requires Senior Admin' : '' ?>
+                            </p>
+                            <?php endif; ?>
                         </div>
                         <p class="text-lg font-black text-red-600"><?= $pr['pr_suggested_quantity'] ?> units</p>
                     </div>
-                    <?php if ($pr['pr_reason']): ?>
-                    <p class="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-100">"<?= htmlspecialchars($pr['pr_reason']) ?>"</p>
-                    <?php endif; ?>
-                </div>
 
                 <?php if ($pr['pr_status'] === 'rejected' && $pr['pr_review_note']): ?>
                 <p class="text-xs text-red-500 mb-3">Rejected: <?= htmlspecialchars($pr['pr_review_note']) ?> — by <?= htmlspecialchars($pr['reviewed_by_name']) ?></p>
@@ -207,6 +228,9 @@ $prs = $pdo->query("
 
                 <div class="flex items-center justify-end gap-2">
                     <?php if ($pr['pr_status'] === 'pending'): ?>
+                    <?php if ($needs_senior && !$is_senior): ?>
+                    <span class="bg-gray-100 text-gray-400 text-xs font-semibold px-4 py-2 rounded-lg" title="Only senior admin can approve">🔒 Senior Admin Only</span>
+                    <?php else: ?>
                     <form method="POST" class="inline">
                         <input type="hidden" name="approve_pr" value="1">
                         <input type="hidden" name="pr_id" value="<?= $pr['pr_id'] ?>">
@@ -214,6 +238,7 @@ $prs = $pdo->query("
                             ✓ Approve
                         </button>
                     </form>
+                    <?php endif; ?>
                     <button onclick="document.getElementById('<?= $modal_id ?>').classList.remove('hidden')"
                             class="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold px-4 py-2 rounded-lg transition-colors">
                         ✕ Reject
