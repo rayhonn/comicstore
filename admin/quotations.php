@@ -52,6 +52,43 @@ foreach ($quotations as &$q) {
 }
 unset($q);
 
+// Fetch supplier performance data and compute weighted scores
+foreach ($quotations as &$q) {
+    $perf = $pdo->prepare("
+        SELECT
+        AVG(po.po_rating) as avg_rating,
+        AVG(DATEDIFF(gr.gr_received_at, po.po_created_at)) as avg_lead_time
+        FROM purchase_orders po
+        LEFT JOIN goods_received gr ON gr.gr_po_id = po.po_id AND gr.gr_status = 'completed'
+        WHERE po.po_supplier_id = ?
+    ");
+    $perf->execute([$q['quotation_supplier_id']]);
+    $perf = $perf->fetch(PDO::FETCH_ASSOC);
+    $q['avg_rating'] = $perf['avg_rating'];
+    $q['avg_lead_time'] = $perf['avg_lead_time'];
+}
+unset($q);
+
+if (count($quotations) > 0) {
+    $min_total = min(array_column($quotations, 'total'));
+    $lead_times = array_filter(array_column($quotations, 'avg_lead_time'), fn($v) => $v !== null);
+    $min_lead_time = count($lead_times) > 0 ? min($lead_times) : null;
+
+    foreach ($quotations as &$q) {
+        $price_score = $min_total > 0 ? ($min_total / $q['total']) * 100 : 100;
+        $rating_score = $q['avg_rating'] !== null ? ($q['avg_rating'] / 5) * 100 : 50;
+        $lead_score = ($min_lead_time !== null && $q['avg_lead_time'] !== null && $q['avg_lead_time'] > 0)
+            ? ($min_lead_time / $q['avg_lead_time']) * 100 : 50;
+
+        $q['score'] = ($price_score * 0.6) + ($rating_score * 0.2) + ($lead_score * 0.2);
+    }
+    unset($q);
+
+    $best_score = max(array_column($quotations, 'score'));
+} else {
+    $best_score = null;
+}
+
 // Handle generate PO
 $success = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
@@ -142,13 +179,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
         <div class="grid grid-cols-1 md:grid-cols-<?= min(count($quotations), 3) ?> gap-4">
             <?php foreach ($quotations as $q): ?>
             <div class="bg-white rounded-2xl shadow-sm p-6 <?= $q['quotation_status'] === 'accepted' ? 'ring-2 ring-green-400' : ($q['quotation_status'] === 'rejected' ? 'opacity-50' : '') ?>">
-                <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center justify-between mb-2">
                     <p class="font-bold text-gray-800"><?= htmlspecialchars($q['supplier_name']) ?></p>
                     <?php if ($q['quotation_status'] === 'accepted'): ?>
                     <span class="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full font-semibold">✓ Accepted</span>
                     <?php elseif ($q['quotation_status'] === 'rejected'): ?>
                     <span class="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full font-semibold">Rejected</span>
+                    <?php elseif ($q['score'] == $best_score): ?>
+                    <span class="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-full font-semibold">⭐ Recommended</span>
                     <?php endif; ?>
+                </div>
+
+                <div class="flex items-center gap-3 mb-4 text-xs text-gray-400">
+                    <span>Score: <strong class="text-gray-700"><?= round($q['score'], 1) ?></strong>/100</span>
+                    <span>·</span>
+                    <span><?= $q['avg_rating'] !== null ? round($q['avg_rating'], 1) . '★' : 'No rating' ?></span>
+                    <span>·</span>
+                    <span><?= $q['avg_lead_time'] !== null ? round($q['avg_lead_time'], 1) . 'd lead time' : 'No lead time data' ?></span>
                 </div>
 
                 <div class="space-y-2 mb-4">

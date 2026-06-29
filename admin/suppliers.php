@@ -209,18 +209,21 @@ $suppliers = $pdo->query("
                             </span>
                         </td>
                         <td class="px-5 py-4 text-center">
-                            <div class="flex items-center justify-center gap-2">
-                                <button onclick='openEditModal(<?= json_encode($s) ?>)'
-                                        class="text-xs text-blue-600 hover:underline font-semibold">Edit</button>
-                                <span class="text-gray-300">|</span>
-                                <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
-                                <a href="?toggle=<?= $s['supplier_id'] ?>"
-                                class="text-xs <?= $s['supplier_status'] === 'active' ? 'text-red-500' : 'text-green-600' ?> hover:underline font-semibold">
-                                    <?= $s['supplier_status'] === 'active' ? 'Deactivate' : 'Activate' ?>
-                                </a>
-                                <?php else: ?>
-                                <span class="text-xs text-gray-300" title="Only senior admin can change supplier status">🔒</span>
-                                <?php endif; ?>
+                            <div class="flex flex-col items-center gap-1">
+                                <a href="supplier_performance.php?id=<?= $s['supplier_id'] ?>" class="text-xs text-purple-600 hover:underline font-semibold">History</a>
+                                <div class="flex items-center gap-2">
+                                    <button onclick='openEditModal(<?= json_encode($s) ?>)'
+                                            class="text-xs text-blue-600 hover:underline font-semibold">Edit</button>
+                                    <span class="text-gray-300">|</span>
+                                    <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
+                                    <a href="?toggle=<?= $s['supplier_id'] ?>"
+                                    class="text-xs <?= $s['supplier_status'] === 'active' ? 'text-red-500' : 'text-green-600' ?> hover:underline font-semibold">
+                                        <?= $s['supplier_status'] === 'active' ? 'Deactivate' : 'Activate' ?>
+                                    </a>
+                                    <?php else: ?>
+                                    <span class="text-xs text-gray-300" title="Only senior admin can change supplier status">🔒</span>
+                                    <?php endif; ?>
+                                </div>
                             </div>
                         </td>
                     </tr>

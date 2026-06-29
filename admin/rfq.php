@@ -310,7 +310,7 @@ $suppliers = $pdo->query("
                 </div>
                 <div class="min-w-0">
                     <p class="text-sm text-gray-800 truncate">${p.title}</p>
-                    <p class="text-xs text-gray-400 truncate">${p.series}${p.volume ? ' Vol.' + p.volume : ''}</p>
+                    <p class="text-xs text-gray-400 truncate">${p.series}</p>
                 </div>
             </button>
         `).join('');
@@ -333,7 +333,7 @@ $suppliers = $pdo->query("
 
     function pickProduct(rid, product) {
         document.getElementById('pid-' + rid).value = product.id;
-        document.getElementById('label-' + rid).textContent = product.title + (product.volume ? ' Vol.' + product.volume : '');
+        document.getElementById('label-' + rid).textContent = product.title;
         document.getElementById('label-' + rid).classList.remove('text-gray-400');
         document.getElementById('label-' + rid).classList.add('text-gray-800');
 
@@ -373,7 +373,7 @@ $suppliers = $pdo->query("
     window.addEventListener('DOMContentLoaded', function() {
         openRfqModal();
         document.getElementById('pid-1').value = <?= $from_pr['pr_product_id'] ?>;
-        document.getElementById('label-1').textContent = <?= json_encode($from_pr['product_title'] . ($from_pr['product_volume_number'] ? ' Vol.' . $from_pr['product_volume_number'] : '')) ?>;
+        document.getElementById('label-1').textContent = <?= json_encode($from_pr['product_title']) ?>;
         document.getElementById('label-1').classList.remove('text-gray-400');
         document.getElementById('label-1').classList.add('text-gray-800');
         document.querySelector('input[name="quantity[]"]').value = <?= $from_pr['pr_suggested_quantity'] ?>;
