@@ -5,6 +5,7 @@ if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'staf
     exit;
 }
 require_once '../includes/db.php';
+require_once '../includes/upload_helper.php';
 
 $id = $_GET['id'] ?? null;
 if (!$id) { header('Location: products.php'); exit; }
@@ -32,6 +33,7 @@ $selected_genre_ids = $selected_genres->fetchAll(PDO::FETCH_COLUMN);
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
     $title = trim($_POST['product_title']);
     $series = trim($_POST['product_series']);
     $volume = $_POST['product_volume_number'] ?: null;
@@ -50,9 +52,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         // Handle cover image
         $cover_image = $product['product_cover_image'];
-        if (!empty($_FILES['product_cover_image']['name'])) {
-            $cover_image = time() . '_' . basename($_FILES['product_cover_image']['name']);
-            move_uploaded_file($_FILES['product_cover_image']['tmp_name'], '../assets/images/' . $cover_image);
+
+        if (isset($_FILES['product_cover_image']) && $_FILES['product_cover_image']['error'] !== UPLOAD_ERR_NO_FILE) {
+            $upload_dir = '../assets/images/';
+            $new_cover_image = uploadProductImage($_FILES['product_cover_image'], $upload_dir);
+
+            if ($new_cover_image !== '') {
+                $cover_image = $new_cover_image;
+            }
         }
 
         // Update products table
@@ -80,11 +87,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $file_format = $_POST['ebook_file_format'];
             $ebook_file = $product['ebook_file_path'];
 
-            if (!empty($_FILES['ebook_file']['name'])) {
+            if (isset($_FILES['ebook_file']) && $_FILES['ebook_file']['error'] !== UPLOAD_ERR_NO_FILE) {
                 $ebook_dir = '../assets/ebooks/';
-                if (!is_dir($ebook_dir)) mkdir($ebook_dir, 0755, true);
-                $ebook_file = time() . '_' . basename($_FILES['ebook_file']['name']);
-                move_uploaded_file($_FILES['ebook_file']['tmp_name'], $ebook_dir . $ebook_file);
+                $new_ebook_file = uploadEbookFile($_FILES['ebook_file'], $ebook_dir);
+
+                if ($new_ebook_file !== '') {
+                    $ebook_file = $new_ebook_file;
+                }
             }
 
             $check = $pdo->prepare("SELECT ebook_product_id FROM product_ebook WHERE ebook_product_id = ?");
@@ -111,6 +120,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         header('Location: products.php?success=1');
         exit;
+    }
+    } catch (Exception $e) {
+        $error = $e->getMessage();
     }
 }
 ?>
