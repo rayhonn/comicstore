@@ -1,12 +1,14 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
+
+require_admin();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_id'], $_POST['action'])) {
+    csrf_verify();
+
     $is_active = $_POST['action'] === 'activate' ? 1 : 0;
     $pdo->prepare("UPDATE users SET user_is_active = ? WHERE user_id = ?")
         ->execute([$is_active, $_POST['user_id']]);
@@ -82,7 +84,6 @@ $active_users = $pdo->query("SELECT COUNT(*) FROM users WHERE user_role = 'custo
             </form>
         </div>
 
-        <!-- Users Table -->
         <?php if (count($users) === 0): ?>
         <div class="bg-white rounded-2xl shadow-sm p-12 text-center">
             <div class="text-5xl mb-4">👥</div>
@@ -136,6 +137,7 @@ $active_users = $pdo->query("SELECT COUNT(*) FROM users WHERE user_role = 'custo
                         </td>
                         <td class="px-4 py-3">
                             <form method="POST" class="inline">
+                                <?php csrf_field() ?>
                                 <input type="hidden" name="user_id" value="<?= $user['user_id'] ?>">
                                 <?php if ($user['user_is_active']): ?>
                                 <input type="hidden" name="action" value="deactivate">

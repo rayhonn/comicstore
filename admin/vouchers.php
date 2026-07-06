@@ -1,10 +1,10 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
+
+require_admin();
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
@@ -12,6 +12,8 @@ $success = '';
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add') {
@@ -197,6 +199,7 @@ $vouchers = $pdo->query("
                                     ✏️ Edit
                                 </button>
                                 <form method="POST" class="inline">
+                                    <?php csrf_field() ?>
                                     <input type="hidden" name="action" value="toggle">
                                     <input type="hidden" name="voucher_id" value="<?= $v['voucher_id'] ?>">
                                     <button type="submit"
@@ -205,6 +208,7 @@ $vouchers = $pdo->query("
                                     </button>
                                 </form>
                                 <form method="POST" class="inline">
+                                    <?php csrf_field() ?>
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="voucher_id" value="<?= $v['voucher_id'] ?>">
                                     <button type="submit" onclick="return confirm('Delete this voucher?')"
@@ -230,6 +234,7 @@ $vouchers = $pdo->query("
                 <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
             <form method="POST" class="p-5 space-y-4">
+                <?php csrf_field() ?>
                 <input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="voucher_id" id="formId">
 

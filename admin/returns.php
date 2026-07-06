@@ -1,13 +1,15 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'staff'])) {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
 require_once '../includes/notifications.php';
 
+require_admin_or_staff();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['action'])) {
+    csrf_verify();
+
     $return_id = $_POST['return_id'];
     $action = $_POST['action'];
     $admin_note = trim($_POST['admin_note'] ?? '');
@@ -47,8 +49,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['
     if ($ret_data) {
         $ret_num = '#' . str_pad($return_id, 4, '0', STR_PAD_LEFT);
         if ($action === 'approved') {
-            // Get refund amount
-            $refund_stmt = $pdo->prepare("SELECT oi.order_item_price, oi.order_item_quantity FROM return_requests rr JOIN order_items oi ON rr.     return_item_id = oi.order_item_id WHERE rr.return_id = ?");
+            $refund_stmt = $pdo->prepare("
+                SELECT oi.order_item_price, oi.order_item_quantity
+                FROM return_requests rr
+                JOIN order_items oi ON rr.return_item_id = oi.order_item_id
+                WHERE rr.return_id = ?
+            ");
             $refund_stmt->execute([$return_id]);
             $refund_item = $refund_stmt->fetch(PDO::FETCH_ASSOC);
             $refund_amount = $refund_item ? number_format($refund_item['order_item_price'] * $refund_item['order_item_quantity'], 2) : '0.00';
@@ -80,7 +86,7 @@ $sql .= " ORDER BY rr.return_created_at DESC";
 $returns = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
 $counts = [
-    'pending' => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'pending'")->fetchColumn(),
+    'pending'  => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'pending'")->fetchColumn(),
     'approved' => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'approved'")->fetchColumn(),
     'rejected' => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'rejected'")->fetchColumn(),
 ];
@@ -116,7 +122,6 @@ $counts = [
         </div>
         <?php endif; ?>
 
-        <!-- Filter Tabs -->
         <div class="flex gap-1 bg-white rounded-2xl shadow-sm p-1 mb-6 w-fit">
             <?php foreach (['all' => 'All', 'pending' => 'Pending', 'approved' => 'Approved', 'rejected' => 'Rejected'] as $key => $label): ?>
             <a href="returns.php?filter=<?= $key ?>"
@@ -189,6 +194,7 @@ $counts = [
                 <?php if ($r['return_status'] === 'pending'): ?>
                 <div class="px-6 py-4 border-t border-gray-50 bg-gray-50">
                     <form method="POST" class="space-y-3">
+                        <?php csrf_field() ?>
                         <input type="hidden" name="return_id" value="<?= $r['return_id'] ?>">
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Admin Note (optional)</label>

@@ -1,10 +1,10 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
+
+require_customer();
 
 $user_id = $_SESSION['user_id'];
 
@@ -16,6 +16,8 @@ $error = '';
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
     $action = $_POST['action'] ?? '';
 
     if ($action === 'update_profile') {
@@ -127,6 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Personal Information
                         </h3>
                         <form method="POST" class="space-y-4">
+                            <?php csrf_field() ?>
                             <input type="hidden" name="action" value="update_profile">
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
@@ -203,6 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Change Password
                         </h3>
                         <form method="POST" class="space-y-4">
+                            <?php csrf_field() ?>
                             <input type="hidden" name="action" value="change_password">
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">Current Password *</label>

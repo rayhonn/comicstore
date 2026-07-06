@@ -1,21 +1,22 @@
 <?php
 session_start();
-if (!isset($_SESSION['supplier_id']) || $_SESSION['role'] !== 'supplier') {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
+
+require_supplier();
+
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
 $supplier_id = $_SESSION['supplier_id'];
 
-// Handle response submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_response'])) {
-    $return_id = $_POST['return_id'];
-    $response = $_POST['response'];
-    $comment = trim($_POST['comment'] ?? '');
+    csrf_verify();
 
-    // Verify this return belongs to this supplier
+    $return_id = $_POST['return_id'];
+    $response  = $_POST['response'];
+    $comment   = trim($_POST['comment'] ?? '');
+
     $check = $pdo->prepare("
         SELECT sr.return_id FROM supplier_returns sr
         JOIN purchase_orders po ON po.po_id = sr.return_po_id
@@ -24,7 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_response'])) {
     $check->execute([$return_id, $supplier_id]);
     if ($check->fetch()) {
         $next_status = $response === 'accepted' ? 'acknowledged' : 'escalated';
-        $pdo->prepare("UPDATE supplier_returns SET return_supplier_response = ?, return_supplier_comment = ?, return_responded_at = NOW(),  return_status = ? WHERE return_id = ?")
+        $pdo->prepare("UPDATE supplier_returns SET return_supplier_response = ?, return_supplier_comment = ?, return_responded_at = NOW(), return_status = ? WHERE return_id = ?")
             ->execute([$response, $comment, $next_status, $return_id]);
         $_SESSION['flash_success'] = 'Your response has been submitted.';
     }
@@ -93,13 +94,13 @@ if (isset($_SESSION['flash_success'])) {
         </div>
         <?php else: ?>
         <div class="space-y-4">
-            <?php foreach ($returns as $ret): 
+            <?php foreach ($returns as $ret):
                 $response_config = [
-                    'pending'   => ['bg' => 'bg-yellow-100', 'text' => 'text-yellow-700', 'label' => '⏳ Awaiting Your Response'],
-                    'accepted'  => ['bg' => 'bg-blue-100',   'text' => 'text-blue-700',   'label' => '✓ Acknowledged'],
-                    'disputed'  => ['bg' => 'bg-orange-100', 'text' => 'text-orange-700', 'label' => '⚠️ Disputed'],
+                    'pending'  => ['bg' => 'bg-yellow-100', 'text' => 'text-yellow-700', 'label' => '⏳ Awaiting Your Response'],
+                    'accepted' => ['bg' => 'bg-blue-100',   'text' => 'text-blue-700',   'label' => '✓ Acknowledged'],
+                    'disputed' => ['bg' => 'bg-orange-100', 'text' => 'text-orange-700', 'label' => '⚠️ Disputed'],
                 ];
-                $rc = $response_config[$ret['return_supplier_response']];
+                $rc = $response_config[$ret['return_supplier_response']] ?? $response_config['pending'];
             ?>
             <div class="bg-white rounded-2xl shadow-sm p-6">
                 <div class="flex items-center justify-between mb-4">
@@ -137,9 +138,10 @@ if (isset($_SESSION['flash_success'])) {
 
                 <?php if ($ret['return_supplier_response'] === 'pending'): ?>
                 <form method="POST">
+                    <?php csrf_field() ?>
                     <input type="hidden" name="submit_response" value="1">
                     <input type="hidden" name="return_id" value="<?= $ret['return_id'] ?>">
-                    <textarea name="comment" rows="2" placeholder="Optional comment (e.g. 'We will investigate our packaging process' or 'We dispute this — items were quality-checked before shipping')"
+                    <textarea name="comment" rows="2" placeholder="Optional comment..."
                               class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-blue-400 transition-colors resize-none mb-3"></textarea>
                     <div class="flex gap-3">
                         <button type="submit" name="response" value="accepted"
@@ -163,18 +165,18 @@ if (isset($_SESSION['flash_success'])) {
                 <div class="bg-green-50 border border-green-200 rounded-xl p-3 mt-3">
                     <p class="text-xs font-semibold text-green-700 mb-1">✅ Resolved by MangaVault</p>
                     <?php if ($ret['return_resolution_type'] === 'credit_note'): ?>
-                    <p class="text-sm text-gray-700">A credit note <strong><?= htmlspecialchars($ret['return_credit_note_number']) ?></strong> for RM <?= number_format($ret['return_credit_note_amount'], 2) ?> has been issued — this will be deducted from your next invoice.</p>
+                    <p class="text-sm text-gray-700">A credit note <strong><?= htmlspecialchars($ret['return_credit_note_number']) ?></strong> for RM <?= number_format($ret['return_credit_note_amount'], 2) ?> has been issued.</p>
                     <?php elseif ($ret['return_resolution_type'] === 'replacement'): ?>
-                    <p class="text-sm text-gray-700">A replacement purchase order has been created for these items. Please check your Purchase Orders for the new PO.</p>
+                    <p class="text-sm text-gray-700">A replacement purchase order has been created. Please check your Purchase Orders.</p>
                     <?php elseif ($ret['return_resolution_type'] === 'dispute_rejected'): ?>
-                    <p class="text-sm text-gray-700">Your dispute was accepted — MangaVault has reversed this return. No deduction will be made.</p>
+                    <p class="text-sm text-gray-700">Your dispute was accepted — no deduction will be made.</p>
                     <?php elseif ($ret['return_resolution_type'] === 'dispute_upheld'): ?>
                     <p class="text-sm text-gray-700">
                         After review, MangaVault's original assessment stands.
                         <?php if ($ret['return_credit_note_number']): ?>
-                        A credit note <strong><?= htmlspecialchars($ret['return_credit_note_number']) ?></strong> for RM <?= number_format($ret['return_credit_note_amount'], 2) ?> has been issued.
+                        Credit note <strong><?= htmlspecialchars($ret['return_credit_note_number']) ?></strong> for RM <?= number_format($ret['return_credit_note_amount'], 2) ?> issued.
                         <?php else: ?>
-                        A replacement order has been created — please check your Purchase Orders.
+                        A replacement order has been created.
                         <?php endif; ?>
                     </p>
                     <?php endif; ?>

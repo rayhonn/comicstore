@@ -1,26 +1,23 @@
 <?php
 session_start();
-if (!isset($_SESSION['supplier_id']) || $_SESSION['role'] !== 'supplier') {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
+
+require_supplier();
 
 $supplier_id = $_SESSION['supplier_id'];
 $rfq_id = $_GET['id'] ?? null;
 if (!$rfq_id) { header('Location: dashboard.php'); exit; }
 
-// Verify this RFQ was sent to this supplier
 $check = $pdo->prepare("SELECT * FROM rfq_suppliers WHERE rfq_supplier_rfq_id = ? AND rfq_supplier_supplier_id = ?");
 $check->execute([$rfq_id, $supplier_id]);
 if (!$check->fetch()) { header('Location: dashboard.php'); exit; }
 
-// Get RFQ info
 $rfq = $pdo->prepare("SELECT * FROM rfq WHERE rfq_id = ?");
 $rfq->execute([$rfq_id]);
 $rfq = $rfq->fetch(PDO::FETCH_ASSOC);
 
-// Get RFQ items with product info
 $items = $pdo->prepare("
     SELECT ri.*, p.product_title, p.product_series, p.product_volume_number, p.product_cover_image
     FROM rfq_items ri
@@ -30,7 +27,6 @@ $items = $pdo->prepare("
 $items->execute([$rfq_id]);
 $items = $items->fetchAll(PDO::FETCH_ASSOC);
 
-// Check if already quoted
 $existing_quote = $pdo->prepare("SELECT * FROM quotations WHERE quotation_rfq_id = ? AND quotation_supplier_id = ?");
 $existing_quote->execute([$rfq_id, $supplier_id]);
 $existing_quote = $existing_quote->fetch(PDO::FETCH_ASSOC);
@@ -39,6 +35,8 @@ $error = '';
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote']) && !$existing_quote) {
+    csrf_verify();
+
     $prices = $_POST['unit_price'] ?? [];
     $notes = trim($_POST['notes'] ?? '');
 
@@ -61,7 +59,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote']) && !$
                 ->execute([$quotation_id, $item['rfq_item_product_id'], $item['rfq_item_quantity'], $prices[$item['rfq_item_id']]]);
         }
 
-        // Update RFQ status to quoted
         $pdo->prepare("UPDATE rfq SET rfq_status = 'quoted' WHERE rfq_id = ?")->execute([$rfq_id]);
 
         header('Location: dashboard.php?quoted=1');
@@ -110,7 +107,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote']) && !$
         <?php endif; ?>
 
         <?php if ($existing_quote): ?>
-        <!-- Already submitted -->
         <div class="bg-white rounded-2xl shadow-sm p-6">
             <div class="flex items-center gap-3 mb-5">
                 <div class="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center text-xl">✅</div>
@@ -122,8 +118,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote']) && !$
             <p class="text-sm text-gray-500">You have already submitted a quote for this RFQ. MangaVault will review and contact you if selected.</p>
         </div>
         <?php else: ?>
-        <!-- Quote Form -->
         <form method="POST">
+            <?php csrf_field() ?>
             <input type="hidden" name="submit_quote" value="1">
 
             <div class="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">

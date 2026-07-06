@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'includes/db.php';
+require_once 'includes/auth.php';
 
 $error = '';
 
@@ -18,16 +19,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($user && password_verify($password, $user['user_password_hash'])) {
             $pdo->prepare("UPDATE users SET user_last_login = NOW() WHERE user_id = ?")
                 ->execute([$user['user_id']]);
-            $_SESSION['user_id'] = $user['user_id'];
-            $_SESSION['user_name'] = $user['user_name'];
+
+            regenerate_session(); // ← session fixation 防护
+
+            $_SESSION['user_id']         = $user['user_id'];
+            $_SESSION['user_name']       = $user['user_name'];
             $_SESSION['user_first_name'] = $user['user_first_name'];
-            $_SESSION['role'] = $user['user_role'];
+            $_SESSION['role']            = $user['user_role'];
 
             if ($user['user_role'] === 'customer') {
                 header('Location: index.php');
             } else {
+                destroy_session();
                 $error = "Please use the admin portal to login.";
-                session_destroy();
             }
             exit;
         } else {
@@ -84,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <form method="POST" class="space-y-5">
             <div>
                 <label class="block text-sm font-medium text-gray-600 mb-1">Username or Email <span class="text-red-500">*</span></label>
-                <input type="text" name="user_name" 
+                <input type="text" name="user_name"
                        class="w-full px-4 py-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
                        placeholder="you@example.com"
                        value="<?= htmlspecialchars($_POST['user_name'] ?? '') ?>">
@@ -93,12 +97,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="flex justify-between items-center mb-1">
                     <label class="text-sm font-medium text-gray-600">Password <span class="text-red-500">*</span></label>
                     <a href="forgot_password.php" class="text-xs text-red-600 hover:underline">Forgot password?</a>
-                 </div>
+                </div>
                 <input type="password" name="password"
                        class="w-full px-4 py-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
                        placeholder="Your password">
             </div>
-            <button type="submit" 
+            <button type="submit"
                     class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg text-sm transition">
                 Sign In
             </button>

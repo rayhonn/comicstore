@@ -1,10 +1,10 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
+
+require_customer();
 
 $user_id = $_SESSION['user_id'];
 
@@ -58,7 +58,6 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <!-- Cart Items -->
                 <div class="flex-1 w-full">
                     <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-                        <!-- Header with Select All -->
                         <div class="px-6 py-4 border-b border-gray-50 flex items-center gap-3">
                             <input type="checkbox" id="selectAll" onchange="toggleAll(this)"
                                    class="w-4 h-4 rounded accent-red-600 cursor-pointer">
@@ -72,12 +71,10 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                              data-qty="<?= $item['cart_item_quantity'] ?>"
                              data-type="<?= $item['product_type'] ?>">
 
-                            <!-- Checkbox -->
                             <input type="checkbox"
                                    class="item-checkbox w-4 h-4 rounded accent-red-600 cursor-pointer flex-shrink-0"
                                    onchange="recalculate()">
 
-                            <!-- Image -->
                             <a href="product_detail.php?id=<?= $item['product_id'] ?>" class="flex-shrink-0">
                                 <?php if ($item['product_cover_image']): ?>
                                     <img src="../assets/images/<?= htmlspecialchars($item['product_cover_image']) ?>"
@@ -87,7 +84,6 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <?php endif; ?>
                             </a>
 
-                            <!-- Info -->
                             <div class="flex-1 min-w-0">
                                 <a href="product_detail.php?id=<?= $item['product_id'] ?>">
                                     <p class="font-semibold text-sm text-gray-800 hover:text-red-600 transition-colors truncate"><?= htmlspecialchars($item['product_title']) ?></p>
@@ -96,7 +92,6 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <p class="text-red-600 font-bold text-sm mt-1">RM <?= number_format($item['product_price'], 2) ?></p>
                             </div>
 
-                            <!-- Quantity -->
                             <div class="flex-shrink-0">
                                 <?php if ($item['product_type'] === 'physical'): ?>
                                     <div class="flex items-center border border-gray-200 rounded-lg overflow-hidden">
@@ -116,21 +111,25 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <?php endif; ?>
                             </div>
 
-                            <!-- Subtotal -->
                             <div class="flex-shrink-0 text-right min-w-16">
                                 <p id="subtotal-<?= $item['cart_item_id'] ?>" class="font-bold text-sm text-gray-800">
                                     RM <?= number_format($item['product_price'] * $item['cart_item_quantity'], 2) ?>
                                 </p>
                             </div>
 
-                            <!-- Remove -->
-                            <a href="cart_action.php?action=remove&cart_item_id=<?= $item['cart_item_id'] ?>"
-                               onclick="return confirm('Remove this item?')"
-                               class="flex-shrink-0 w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all duration-200">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </a>
+                            <!-- Remove — POST form instead of GET link -->
+                            <form method="POST" action="cart_action.php" class="flex-shrink-0"
+                                  onsubmit="return confirm('Remove this item?')">
+                                <?php csrf_field() ?>
+                                <input type="hidden" name="action" value="remove">
+                                <input type="hidden" name="cart_item_id" value="<?= $item['cart_item_id'] ?>">
+                                <button type="submit"
+                                        class="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all duration-200">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </form>
                         </div>
                         <?php endforeach; ?>
                     </div>
@@ -145,9 +144,7 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <div class="bg-white rounded-2xl shadow-sm p-6 sticky top-24">
                         <h3 class="font-bold text-gray-800 mb-4">Order Summary</h3>
 
-                        <div id="summaryList" class="space-y-3 mb-4 text-sm text-gray-500">
-                            <!-- filled by JS -->
-                        </div>
+                        <div id="summaryList" class="space-y-3 mb-4 text-sm text-gray-500"></div>
 
                         <div class="border-t border-gray-100 pt-4 mb-4">
                             <div class="flex justify-between items-center">
@@ -158,7 +155,6 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                         <p id="noItemMsg" class="text-xs text-gray-400 text-center mb-3 hidden">Please select at least one item.</p>
 
-                        <!-- Hidden form for checkout with selected items -->
                         <form id="checkoutForm" method="GET" action="checkout.php">
                             <input type="hidden" name="selected_items" id="selectedItemsInput">
                             <button type="button" onclick="proceedCheckout()"
@@ -186,8 +182,10 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
             </button>
         </div>
     </div>
+
     <script>
-    // Item data from PHP
+    const CSRF_TOKEN = <?= json_encode(csrf_token()) ?>;
+
     const itemData = {};
     <?php foreach ($items as $item): ?>
     itemData[<?= $item['cart_item_id'] ?>] = {
@@ -207,18 +205,14 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if (newQty > maxQty) newQty = maxQty;
         data.qty = newQty;
 
-        // Update display
         document.getElementById('qty-' + cartItemId).textContent = newQty;
         document.getElementById('subtotal-' + cartItemId).textContent = 'RM ' + (price * newQty).toFixed(2);
-
-        // Update data-qty on row
         document.querySelector('.cart-row[data-id="' + cartItemId + '"]').dataset.qty = newQty;
 
-        // Save to server (silent AJAX)
         fetch('cart_action.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=update&cart_item_id=' + cartItemId + '&quantity=' + newQty
+            body: 'action=update&cart_item_id=' + cartItemId + '&quantity=' + newQty + '&csrf_token=' + encodeURIComponent(CSRF_TOKEN)
         });
 
         recalculate();
@@ -248,11 +242,8 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
         document.getElementById('totalDisplay').textContent = 'RM ' + total.toFixed(2);
         document.getElementById('summaryList').innerHTML = summaryHtml || '<p class="text-gray-400 text-xs">No items selected.</p>';
         document.getElementById('selectedItemsInput').value = selectedIds.join(',');
-
-        // Show/hide no item message
         document.getElementById('noItemMsg').classList.toggle('hidden', selectedIds.length > 0);
 
-        // Update select all checkbox
         const allChecked = document.querySelectorAll('.item-checkbox:not(:checked)').length === 0;
         document.getElementById('selectAll').checked = allChecked;
         document.getElementById('selectAll').indeterminate = !allChecked && selectedIds.length > 0;
@@ -274,7 +265,6 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
         document.getElementById('checkoutForm').submit();
     }
 
-    // Init on load
     recalculate();
     </script>
 

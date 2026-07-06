@@ -1,26 +1,27 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
+
+require_customer();
 
 $user_id = $_SESSION['user_id'];
 
-// Handle actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add') {
-        $recipient = trim($_POST['address_recipient_name']);
-        $taman     = trim($_POST['address_taman'] ?? '');
-        $street    = trim($_POST['address_street']);
-        $city      = trim($_POST['address_city']);
-        $state     = trim($_POST['address_state'] ?? '');
-        $postal    = trim($_POST['address_postal_code']);
-        $country   = trim($_POST['address_country'] ?? 'Malaysia');
-        $phone     = trim($_POST['address_phone']);
+        $recipient  = trim($_POST['address_recipient_name']);
+        $taman      = trim($_POST['address_taman'] ?? '');
+        $street     = trim($_POST['address_street']);
+        $city       = trim($_POST['address_city']);
+        $state      = trim($_POST['address_state'] ?? '');
+        $postal     = trim($_POST['address_postal_code']);
+        $country    = trim($_POST['address_country'] ?? 'Malaysia');
+        $phone      = trim($_POST['address_phone']);
         $is_default = isset($_POST['is_default']) ? 1 : 0;
 
         if ($is_default) {
@@ -36,15 +37,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
 
     } elseif ($action === 'edit') {
-        $addr_id   = $_POST['address_id'];
-        $recipient = trim($_POST['address_recipient_name']);
-        $taman     = trim($_POST['address_taman'] ?? '');
-        $street    = trim($_POST['address_street']);
-        $city      = trim($_POST['address_city']);
-        $state     = trim($_POST['address_state'] ?? '');
-        $postal    = trim($_POST['address_postal_code']);
-        $country   = trim($_POST['address_country'] ?? 'Malaysia');
-        $phone     = trim($_POST['address_phone']);
+        $addr_id    = $_POST['address_id'];
+        $recipient  = trim($_POST['address_recipient_name']);
+        $taman      = trim($_POST['address_taman'] ?? '');
+        $street     = trim($_POST['address_street']);
+        $city       = trim($_POST['address_city']);
+        $state      = trim($_POST['address_state'] ?? '');
+        $postal     = trim($_POST['address_postal_code']);
+        $country    = trim($_POST['address_country'] ?? 'Malaysia');
+        $phone      = trim($_POST['address_phone']);
         $is_default = isset($_POST['is_default']) ? 1 : 0;
 
         $check = $pdo->prepare("SELECT address_id FROM addresses WHERE address_id = ? AND address_user_id = ?");
@@ -181,6 +182,7 @@ unset($_SESSION['addr_success']);
                         <div class="flex items-center gap-2 flex-wrap">
                             <?php if (!$addr['address_is_default']): ?>
                             <form method="POST" class="inline">
+                                <?php csrf_field() ?>
                                 <input type="hidden" name="action" value="set_default">
                                 <input type="hidden" name="address_id" value="<?= $addr['address_id'] ?>">
                                 <button type="submit" class="text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-300 px-3 py-1.5 rounded-lg transition-colors">
@@ -213,6 +215,7 @@ unset($_SESSION['addr_success']);
                 <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
             <form method="POST" class="p-6 space-y-4">
+                <?php csrf_field() ?>
                 <input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="address_id" id="formAddressId">
 
@@ -244,14 +247,14 @@ unset($_SESSION['addr_success']);
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">City *</label>
                         <input type="text" name="address_city" id="formCity" required
-                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Postal Code *</label>
                         <input type="text" name="address_postal_code" id="formPostal" required
-                                oninput="this.value = this.value.replace(/[^0-9]/g, '')" maxlength="5"
-                                placeholder="e.g. 80300"
-                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                               oninput="this.value = this.value.replace(/[^0-9]/g, '')" maxlength="5"
+                               placeholder="e.g. 80300"
+                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">State *</label>
@@ -279,7 +282,7 @@ unset($_SESSION['addr_success']);
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Country</label>
                         <input type="text" name="address_country" id="formCountry" value="Malaysia" readonly
-                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm bg-gray-100 text-gray-400 cursor-not-allowed">
+                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm bg-gray-100 text-gray-400 cursor-not-allowed">
                     </div>
                     <div class="col-span-2">
                         <label class="flex items-center gap-3 cursor-pointer">
@@ -312,6 +315,7 @@ unset($_SESSION['addr_success']);
             <h3 class="font-black text-gray-800 mb-2">Delete Address?</h3>
             <p class="text-sm text-gray-500 mb-6">Are you sure you want to delete <strong id="deleteAddrName"></strong>'s address?</p>
             <form method="POST">
+                <?php csrf_field() ?>
                 <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="address_id" id="deleteAddrId">
                 <div class="flex gap-3">
@@ -375,7 +379,6 @@ unset($_SESSION['addr_success']);
         document.getElementById('deleteModal').classList.remove('active');
     }
 
-    // Close modal on backdrop click
     document.getElementById('addressModal').addEventListener('click', function(e) {
         if (e.target === this) closeModal();
     });
@@ -384,22 +387,11 @@ unset($_SESSION['addr_success']);
     });
 
     const statePostcodePrefix = {
-        'Johor': '79',
-        'Kedah': '05',
-        'Kelantan': '15',
-        'Melaka': '75',
-        'Negeri Sembilan': '70',
-        'Pahang': '25',
-        'Perak': '30',
-        'Perlis': '02',
-        'Pulau Pinang': '10',
-        'Sabah': '88',
-        'Sarawak': '93',
-        'Selangor': '40',
-        'Terengganu': '20',
-        'Wilayah Persekutuan Kuala Lumpur': '50',
-        'Wilayah Persekutuan Labuan': '87',
-        'Wilayah Persekutuan Putrajaya': '62',
+        'Johor': '79', 'Kedah': '05', 'Kelantan': '15', 'Melaka': '75',
+        'Negeri Sembilan': '70', 'Pahang': '25', 'Perak': '30', 'Perlis': '02',
+        'Pulau Pinang': '10', 'Sabah': '88', 'Sarawak': '93', 'Selangor': '40',
+        'Terengganu': '20', 'Wilayah Persekutuan Kuala Lumpur': '50',
+        'Wilayah Persekutuan Labuan': '87', 'Wilayah Persekutuan Putrajaya': '62',
     };
 
     function autoPostcode(state) {

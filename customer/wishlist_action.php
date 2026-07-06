@@ -1,15 +1,26 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
+
+require_customer();
 
 $user_id = $_SESSION['user_id'];
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: wishlist.php');
+    exit;
+}
+
+csrf_verify();
+
 $product_id = $_POST['product_id'] ?? null;
-$action = $_POST['action'] ?? '';
-$redirect = $_POST['redirect'] ?? 'wishlist.php';
+$action     = $_POST['action'] ?? '';
+$redirect   = $_POST['redirect'] ?? 'wishlist.php';
+
+// 只允许站内相对路径
+$redirect = safe_redirect_target($redirect, 'wishlist.php');
 
 if ($product_id) {
     if ($action === 'add') {
@@ -27,4 +38,3 @@ if ($product_id) {
 
 header('Location: ' . $redirect);
 exit;
-?>

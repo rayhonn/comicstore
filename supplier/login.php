@@ -1,8 +1,9 @@
 <?php
 session_start();
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
 
-if (isset($_SESSION['supplier_id'])) {
+if (!empty($_SESSION['supplier_id'])) {
     header('Location: dashboard.php');
     exit;
 }
@@ -17,9 +18,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $supplier = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($supplier && password_verify($password, $supplier['supplier_password'])) {
-        $_SESSION['supplier_id'] = $supplier['supplier_id'];
+        regenerate_session(); // ← session fixation 防护
+
+        $_SESSION['user_id']       = $supplier['supplier_id']; // require_supplier() 依赖这个
+        $_SESSION['supplier_id']   = $supplier['supplier_id'];
         $_SESSION['supplier_name'] = $supplier['supplier_name'];
-        $_SESSION['role'] = 'supplier';
+        $_SESSION['role']          = 'supplier';
+
         header('Location: dashboard.php');
         exit;
     } else {

@@ -1,4 +1,8 @@
 <?php
-define('STRIPE_PUBLISHABLE_KEY', 'pk_test_51ThviIQjAUmIGDBlM8qfk8KLfYqX6YY8PxjBPb78wyW8oF4YQ4juxsw6pV60NWifXcDhOM83paEIRu6BDuBjXcai00fq2ykEOu');
-define('STRIPE_SECRET_KEY', 'sk_test_51ThviIQjAUmIGDBlNiHBtOP9l78lMprCapP0TutHrLURZaei3qlDMWyfmo62InnGXQYdZj1f0VuOnLSgNs1AMBcb008olLgxhx');
-define('STRIPE_CURRENCY', 'myr');
+require_once __DIR__ . '/config.php';
+
+if (!defined('STRIPE_SECRET_KEY')) {
+    error_log('[Stripe] STRIPE_SECRET_KEY not set in .env');
+    http_response_code(500);
+    die("Payment configuration error.");
+}

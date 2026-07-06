@@ -1,13 +1,15 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'staff') {
-    header('Location: ../admin/login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
 require_once '../includes/notifications.php';
 
+require_staff();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['action'])) {
+    csrf_verify();
+
     $return_id = $_POST['return_id'];
     $action = $_POST['action'];
     $admin_note = trim($_POST['admin_note'] ?? '');
@@ -54,7 +56,7 @@ $sql .= " ORDER BY rr.return_created_at DESC";
 $returns = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
 $counts = [
-    'pending' => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'pending'")->fetchColumn(),
+    'pending'  => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'pending'")->fetchColumn(),
     'approved' => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'approved'")->fetchColumn(),
     'rejected' => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'rejected'")->fetchColumn(),
 ];
@@ -137,6 +139,7 @@ $counts = [
                 <?php if ($r['return_status'] === 'pending'): ?>
                 <div class="px-6 py-4 border-t border-gray-50 bg-gray-50">
                     <form method="POST" class="space-y-3">
+                        <?php csrf_field() ?>
                         <input type="hidden" name="return_id" value="<?= $r['return_id'] ?>">
                         <textarea name="admin_note" rows="2" placeholder="Note for customer (optional)"
                                   class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 resize-none"></textarea>

@@ -1,15 +1,17 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'staff'])) {
-    header('Location: login.php');
-    exit;
-}
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
+require_once '../includes/csrf.php';
 require_once '../includes/notifications.php';
+
+require_admin_or_staff();
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_id'], $_POST['status'])) {
+    csrf_verify();
+
     $order_id = $_POST['order_id'];
     $status = $_POST['status'];
     $tracking = trim($_POST['tracking_number'] ?? '');
@@ -17,7 +19,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_id'], $_POST['s
     $update_sql = "UPDATE orders SET order_status = ?";
     $update_params = [$status];
 
-    // Update timestamps
     if ($status === 'processing') {
         $update_sql .= ", order_processing_at = NOW()";
     } elseif ($status === 'shipped') {
@@ -156,17 +157,15 @@ $counts['all'] = array_sum($counts);
                     'cancelled'  => 'bg-red-100 text-red-700',
                 ];
                 $color = $status_colors[$order['order_status']] ?? 'bg-gray-100 text-gray-600';
-
                 $payment_colors = [
                     'pending_confirmation' => 'bg-yellow-100 text-yellow-700',
-                    'confirmed' => 'bg-green-100 text-green-700',
-                    'cancelled' => 'bg-red-100 text-red-700',
+                    'confirmed'            => 'bg-green-100 text-green-700',
+                    'cancelled'            => 'bg-red-100 text-red-700',
                 ];
                 $pcolor = $payment_colors[$order['order_payment_status']] ?? 'bg-gray-100 text-gray-600';
             ?>
             <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
 
-                <!-- Header -->
                 <div class="px-6 py-4 border-b border-gray-50 flex flex-wrap justify-between items-center gap-3">
                     <div class="flex items-center gap-3 flex-wrap">
                         <div>
@@ -181,7 +180,6 @@ $counts['all'] = array_sum($counts);
                     <p class="font-black text-red-600 text-lg">RM <?= number_format($order['order_total_amount'], 2) ?></p>
                 </div>
 
-                <!-- Customer + Shipping Info -->
                 <div class="px-6 py-3 bg-gray-50 border-b border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                         <p class="text-xs text-gray-400 mb-0.5">Customer</p>
@@ -216,7 +214,6 @@ $counts['all'] = array_sum($counts);
                     <?php endif; ?>
                 </div>
 
-                <!-- Items -->
                 <?php
                 $items = $pdo->prepare("
                     SELECT oi.*, p.product_title, p.product_cover_image
@@ -247,10 +244,10 @@ $counts['all'] = array_sum($counts);
                     </div>
                 </div>
 
-                <!-- Update Status -->
                 <?php if ($order['order_status'] !== 'cancelled' && $order['order_status'] !== 'delivered'): ?>
                 <div class="px-6 py-4 border-t border-gray-50 bg-gray-50">
                     <form method="POST" class="flex items-center gap-3 flex-wrap">
+                        <?php csrf_field() ?>
                         <input type="hidden" name="order_id" value="<?= $order['order_id'] ?>">
                         <?php
                         $status_flow = ['pending' => 0, 'processing' => 1, 'shipped' => 2, 'delivered' => 3, 'cancelled' => 99];
