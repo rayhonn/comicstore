@@ -9,6 +9,7 @@ use PHPMailer\PHPMailer\Exception;
 
 require_once '../vendor/autoload.php';
 require_once '../includes/db.php';
+require_once '../includes/config.php';
 require_once '../includes/notifications.php';
 require_once '../includes/mail_config.php';
 
@@ -100,7 +101,7 @@ $email_body = "
                 <p style='color:#6b7280; font-size:13px; margin:0;'>✅ You can place a new order now</p>
             </div>
             <div style='text-align:center;'>
-                <a href='http://localhost/comicstore/customer/home.php'
+                <a href='" . APP_URL . "/customer/home.php'
                    style='display:inline-block; background:#C0392B; color:white; font-weight:700; font-size:14px; padding:12px 28px; border-radius:12px; text-decoration:none;'>
                     Continue Shopping
                 </a>
