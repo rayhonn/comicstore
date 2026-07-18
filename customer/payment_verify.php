@@ -4,6 +4,7 @@ use PHPMailer\PHPMailer\Exception;
 require_once '../vendor/autoload.php';
 session_start();
 require_once '../includes/db.php';
+require_once '../includes/config.php';
 
 $token = $_GET['token'] ?? '';
 
@@ -100,7 +101,7 @@ if (!$order) {
                 </div>
                 <p style='color:#6b7280; font-size:13px; margin:0 0 24px 0;'>You can place a new order anytime. We hope to see you again!</p>
                 <div style='text-align:center;'>
-                    <a href='http://localhost/comicstore/customer/home.php'
+                    <a href='" . APP_URL . "/customer/home.php'
                         style='display:inline-block; background:#C0392B; color:white; font-weight:700; font-size:14px; padding:12px 28px; border-radius:12px; text-decoration:none;'>
                         Continue Shopping
                     </a>
@@ -322,7 +323,7 @@ try {
                     </td></tr>
                 </table>
                 <div style='text-align:center;'>
-                    <a href='http://localhost/comicstore/customer/orders.php'
+                    <a href='" . APP_URL . "/customer/orders.php'
                        style='display:inline-block; background:#C0392B; color:white; font-weight:700; font-size:14px; padding:12px 28px; border-radius:12px; text-decoration:none;'>
                         View My Orders
                     </a>
@@ -351,7 +352,7 @@ try {
         $confirm_mail->Subject = "Order Confirmed $order_num - MangaVault 🎉";
         $confirm_mail->isHTML(true);
         $confirm_mail->Body = $email_body;
-        $confirm_mail->AltBody = "Hi $first_name! Your order $order_num (RM $total_fmt) has been confirmed. View orders: http://localhost/comicstore/customer/orders.php";
+        $confirm_mail->AltBody = "Hi $first_name! Your order $order_num (RM $total_fmt) has been confirmed. View orders: " . APP_URL . "/customer/orders.php";
         $confirm_mail->send();
     } catch (Exception $e) {
         // Silent fail

@@ -10,6 +10,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
     exit;
 }
 require_once '../includes/db.php';
+require_once '../includes/config.php';
 require_once '../includes/notifications.php';
 
 $session_id = $_GET['session_id'] ?? null;
@@ -231,7 +232,7 @@ $email_body = "
                 </td></tr>
             </table>
             <div style='text-align:center;'>
-                <a href='http://localhost/comicstore/customer/orders.php' style='display:inline-block; background:#C0392B; color:white; font-weight:700; font-size:14px; padding:12px 28px; border-radius:12px; text-decoration:none;'>View My Orders</a>
+                <a href='" . APP_URL . "/customer/orders.php' style='display:inline-block; background:#C0392B; color:white; font-weight:700; font-size:14px; padding:12px 28px; border-radius:12px; text-decoration:none;'>View My Orders</a>
             </div>
         </div>
         <div style='background:#f9fafb; padding:20px 32px; text-align:center; border-top:1px solid #f3f4f6;'>
