@@ -1,4 +1,12 @@
-<?php if (isset($_SESSION['user_id']) && $_SESSION['role'] === 'customer'): ?>
+<?php
+require_once __DIR__ . '/auth.php';
+$chatbot_url = app_path('customer/chatbot.php');
+
+if (
+    isset($_SESSION['user_id']) &&
+    ($_SESSION['role'] ?? '') === 'customer'
+):
+?>
 
 <!-- Chatbot Widget -->
 <div id="chatbot-container" class="fixed bottom-6 right-6 z-50">
@@ -92,12 +100,14 @@
 </div>
 
 <script>
+const chatbotUrl = <?= json_encode($chatbot_url) ?>;
+
 let chatOpen = false;
 let isTyping = false;
 
 // Load chat history when page loads
 window.addEventListener('DOMContentLoaded', function() {
-    fetch('/comicstore/customer/chatbot.php', {
+    fetch(chatbotUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'get_history=1'
@@ -170,7 +180,7 @@ function sendMessage() {
     const sendBtn = document.getElementById('send-btn');
     sendBtn.disabled = true;
 
-    fetch('/comicstore/customer/chatbot.php', {
+   fetch(chatbotUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'message=' + encodeURIComponent(message)
@@ -249,7 +259,7 @@ function hideTyping() {
 }
 
 function clearChat() {
-    fetch('/comicstore/customer/chatbot.php', {
+    fetch(chatbotUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'clear=1'
