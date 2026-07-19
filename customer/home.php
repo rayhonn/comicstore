@@ -400,7 +400,12 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
 
     // Load AI Recommendations
     <?php if (!$search && !$category_id && !$genre_id && !$type): ?>
-    fetch('/comicstore/customer/get_recommendations.php', {
+
+    const recommendationUrl = <?= json_encode(app_path('customer/get_recommendations.php')) ?>;
+    const productDetailUrl = <?= json_encode(app_path('customer/product_detail.php')) ?>;
+    const imageBaseUrl = <?= json_encode(app_path('assets/images/')) ?>;
+
+    fetch(recommendationUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'type=home'
@@ -421,11 +426,11 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
                 : '<span class="text-xs text-blue-600 font-semibold">E-Book</span>';
         
             return `
-            <a href="/comicstore/customer/product_detail.php?id=${p.product_id}"
+            <a href="${productDetailUrl}?id=${p.product_id}"
                 class="group bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col">
                 <div class="relative flex-shrink-0" style="height:200px;">
                     ${p.product_cover_image
-                        ? `<img src="/comicstore/assets/images/${p.product_cover_image}"
+                        ? `<img src="${imageBaseUrl}${p.product_cover_image}"
                                 class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
                         : `<div class="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">No Image</div>`
                     }
