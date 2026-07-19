@@ -1,10 +1,8 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
-    header('Location: login.php');
-    exit;
-}
-require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_customer();
+
+require_once __DIR__ . '/../includes/db.php';
 
 $order_id = $_GET['order_id'] ?? null;
 if (!$order_id) { header('Location: orders.php'); exit; }

@@ -1,13 +1,11 @@
 <?php
-require_once '../vendor/autoload.php';
-require_once '../includes/stripe_config.php';
-session_start();
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
-    header('Location: login.php');
-    exit;
-}
-require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_customer();
+
+require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../includes/stripe_config.php';
+require_once __DIR__ . '/../includes/db.php';
 
 if (!isset($_SESSION['pending_order'])) {
     header('Location: cart.php');
