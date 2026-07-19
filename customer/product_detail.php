@@ -3,6 +3,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 $id = $_GET['id'] ?? null;
 if (!$id) { header('Location: home.php'); exit; }
@@ -76,6 +77,7 @@ if ($eligible_order) {
 $review_success = '';
 $review_error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_review'])) {
+    csrf_verify();
     $rating = intval($_POST['rating'] ?? 0);
     $comment = trim($_POST['comment'] ?? '');
 
@@ -243,6 +245,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                             </button>
                         <?php else: ?>
                             <form method="POST" action="cart_action.php" class="flex gap-3 flex-1">
+                                <?php csrf_field(); ?>
                                 <input type="hidden" name="action" value="add">
                                 <input type="hidden" name="product_id" value="<?= $id ?>">
                                 <?php if ($product['product_type'] === 'physical'): ?>
@@ -260,9 +263,10 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
 
                         <!-- Wishlist -->
                         <form method="POST" action="wishlist_action.php">
-                            <input type="hidden" name="product_id" value="<?= $id ?>">
-                            <input type="hidden" name="action" value="<?= $in_wishlist ? 'remove' : 'add' ?>">
-                            <input type="hidden" name="redirect" value="product_detail.php?id=<?= $id ?>">
+                                <?php csrf_field(); ?>
+                                <input type="hidden" name="product_id" value="<?= $id ?>">
+                                <input type="hidden" name="action" value="<?= $in_wishlist ? 'remove' : 'add' ?>">
+                                <input type="hidden" name="redirect" value="product_detail.php?id=<?= $id ?>">
                             <button type="submit"
                                     class="py-3 px-4 rounded-xl border-2 transition-colors <?= $in_wishlist ? 'border-red-300 bg-red-50 text-red-600' : 'border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-600' ?>">
                                 <?= $in_wishlist ? '♥' : '♡' ?>
@@ -334,6 +338,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             <div class="bg-[#F5F0EB] rounded-2xl p-6 mb-6">
                 <h4 class="font-bold text-gray-800 mb-4">Write a Review</h4>
                 <form method="POST">
+                    <?php csrf_field(); ?>
                     <input type="hidden" name="submit_review" value="1">
 
                     <!-- Star Rating -->

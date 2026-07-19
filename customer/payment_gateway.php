@@ -47,7 +47,7 @@ if ($elapsed >= 300) {
 // Handle Pay Now — create Stripe session and redirect
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay_now'])) {
     \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
-    $host = $_SERVER['HTTP_HOST'];
+    $app_url = rtrim(APP_URL, '/');
 
     $line_items = [];
     foreach ($order['items'] as $item) {
@@ -94,8 +94,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay_now'])) {
             'payment_method_types' => ['card'],
             'line_items' => $line_items,
             'mode' => 'payment',
-            'success_url' => "http://{$host}/comicstore/customer/payment_success.php?session_id={CHECKOUT_SESSION_ID}",
-            'cancel_url'  => "http://{$host}/comicstore/customer/payment_cancel.php",
+            'success_url' => $app_url . '/customer/payment_success.php?session_id={CHECKOUT_SESSION_ID}',
+            'cancel_url' => $app_url . '/customer/payment_cancel.php',
         ]);
         $_SESSION['stripe_session_id'] = $checkout_session->id;
         header('Location: ' . $checkout_session->url);

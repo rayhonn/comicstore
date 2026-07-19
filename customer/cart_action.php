@@ -1,12 +1,11 @@
 <?php
-session_start();
-require_once '../includes/db.php';
-require_once '../includes/auth.php';
-require_once '../includes/csrf.php';
-
+require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
-$user_id = $_SESSION['user_id'];
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
+
+$user_id = current_user_id();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: cart.php');
