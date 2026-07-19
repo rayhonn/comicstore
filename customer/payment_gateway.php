@@ -327,7 +327,7 @@ $order_num = '#' . str_pad(time(), 4, '0', STR_PAD_LEFT);
         e.preventDefault();
         fetch('cancel_pending_voucher.php', { method: 'POST' })
             .finally(() => {
-                window.location.href = 'cart.php';
+                window.location.href = 'payment_cancel.php';
             });
     }
     </script>
