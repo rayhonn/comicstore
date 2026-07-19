@@ -1,11 +1,14 @@
 <?php
-session_start();
-require_once 'includes/db.php';
-require_once 'includes/mail_config.php';
-require_once 'vendor/autoload.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
+
+session_start();
+
+require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/mail_config.php';
+require_once __DIR__ . '/vendor/autoload.php';
 
 $error = '';
 $success = '';
@@ -24,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($user) {
             // Generate token
             $token = bin2hex(random_bytes(32));
-            $expires = gmdate('Y-m-d H:i:s', strtotime('+6 hours'));
+            $expires = gmdate('Y-m-d H:i:s', strtotime('+1 hour'));
 
             // Delete old tokens for this email
             $pdo->prepare("DELETE FROM password_resets WHERE reset_email = ?")->execute([$email]);
@@ -34,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([$email, $token, $expires]);
 
             // Send email
-            $reset_link = "http://localhost/comicstore/reset_password.php?token=" . $token;
+            $reset_link = rtrim(APP_URL, '/') . '/reset_password.php?token=' . urlencode($token);
 
             $mail = new PHPMailer(true);
             try {
