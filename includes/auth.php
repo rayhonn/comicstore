@@ -1,5 +1,5 @@
 <?php
-
+require_once __DIR__ . '/config.php';
 /**
  * Unified authentication and session helpers.
  *
@@ -10,6 +10,33 @@
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
+}
+
+function app_base_path(): string
+{
+    if (!defined('APP_URL')) {
+        return '';
+    }
+
+    $path = parse_url(APP_URL, PHP_URL_PATH);
+
+    if (!is_string($path) || $path === '' || $path === '/') {
+        return '';
+    }
+
+    return '/' . trim($path, '/');
+}
+
+function app_path(string $path = ''): string
+{
+    $base = app_base_path();
+    $path = ltrim($path, '/');
+
+    if ($path === '') {
+        return $base === '' ? '/' : $base . '/';
+    }
+
+    return $base . '/' . $path;
 }
 
 /**
@@ -71,8 +98,13 @@ function safe_redirect_target(string $target, string $default): string
      */
     $path = ltrim($path, '/');
 
-    if (str_starts_with($path, 'comicstore/')) {
-        $path = substr($path, strlen('comicstore/'));
+    $basePrefix = trim(app_base_path(), '/');
+
+    if (
+        $basePrefix !== '' &&
+        str_starts_with($path, $basePrefix . '/')
+    ) {
+        $path = substr($path, strlen($basePrefix) + 1);
     }
 
     /**
@@ -108,7 +140,7 @@ function safe_redirect_target(string $target, string $default): string
         return $default;
     }
 
-    return '/comicstore/' . $path;
+    return app_path($path);
 }
 
 /**
@@ -124,7 +156,7 @@ function require_customer(): void
         $redirect = urlencode($currentPage);
 
         // Customer login is located in the project root.
-        redirect_to('/comicstore/login.php?redirect=' . $redirect);
+        redirect_to(app_path('login.php') . '?redirect=' . $redirect);
     }
 }
 
@@ -140,7 +172,7 @@ function require_admin(): void
         $currentPage = $_SERVER['REQUEST_URI'] ?? '';
         $redirect = urlencode($currentPage);
 
-        redirect_to('/comicstore/admin/login.php?redirect=' . $redirect);
+        redirect_to(app_path('admin/login.php') . '?redirect=' . $redirect);
     }
 }
 
@@ -153,7 +185,7 @@ function require_staff(): void
         empty($_SESSION['user_id']) ||
         ($_SESSION['role'] ?? '') !== 'staff'
     ) {
-        redirect_to('/comicstore/admin/login.php');
+        redirect_to(app_path('admin/login.php'));
     }
 }
 
@@ -168,7 +200,7 @@ function require_admin_or_staff(): void
         empty($_SESSION['user_id']) ||
         !in_array($role, ['admin', 'staff'], true)
     ) {
-        redirect_to('/comicstore/admin/login.php');
+        redirect_to(app_path('admin/login.php'));
     }
 }
 
@@ -194,7 +226,7 @@ function require_supplier(): void
         empty($_SESSION['user_id']) ||
         ($_SESSION['role'] ?? '') !== 'supplier'
     ) {
-        redirect_to('/comicstore/supplier/login.php');
+        redirect_to(app_path('supplier/login.php'));
     }
 }
 
