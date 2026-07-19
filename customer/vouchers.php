@@ -70,7 +70,7 @@ if (!empty($stuck_vouchers)) {
     ")->execute([$user_id]);
 
     // Send notification
-    require_once '../includes/notifications.php';
+    require_once __DIR__ . '/../includes/notifications.php';
     sendNotification($pdo, $user_id,
         '⏰ Payment Timeout',
         'Your recent order has been cancelled due to payment timeout. Your voucher has been restored and you can place a new order now.',
@@ -78,13 +78,18 @@ if (!empty($stuck_vouchers)) {
     );
 
     // Send email
-    require_once '../includes/mail_config.php';
+    require_once __DIR__ . '/../includes/mail_config.php';
     $user_info_mail = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
     $user_info_mail->execute([$user_id]);
     $user_info_mail = $user_info_mail->fetch(PDO::FETCH_ASSOC);
 
     if ($user_info_mail) {
         $first_name = htmlspecialchars($user_info_mail['user_first_name']);
+        $shopping_url = htmlspecialchars(
+            rtrim(APP_URL, '/') . '/customer/home.php',
+            ENT_QUOTES,
+            'UTF-8'
+        );
         $cancel_email_body = "
         <!DOCTYPE html>
         <html><head><meta charset='UTF-8'></head>
@@ -111,7 +116,7 @@ if (!empty($stuck_vouchers)) {
                         <p style='color:#6b7280; font-size:13px; margin:0;'>✅ You can place a new order now</p>
                     </div>
                     <div style='text-align:center;'>
-                        <a href='http://localhost/comicstore/customer/home.php'
+                        <a href='$shopping_url'
                            style='display:inline-block; background:#C0392B; color:white; font-weight:700; font-size:14px; padding:12px 28px; border-radius:12px; text-decoration:none;'>
                             Continue Shopping
                         </a>
