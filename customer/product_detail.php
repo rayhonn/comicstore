@@ -462,7 +462,11 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
     }
 
     // Load AI "You Might Also Like"
-    fetch('/comicstore/customer/get_recommendations.php', {
+    const recommendationUrl = <?= json_encode(app_path('customer/get_recommendations.php')) ?>;
+    const productDetailUrl = <?= json_encode(app_path('customer/product_detail.php')) ?>;
+    const imageBaseUrl = <?= json_encode(app_path('assets/images/')) ?>;
+
+    fetch(recommendationUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'type=product&product_id=<?= $id ?>'
@@ -475,11 +479,11 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             return;
         }
         grid.innerHTML = data.products.map(p => `
-            <a href="/comicstore/customer/product_detail.php?id=${p.product_id}"
+            <a href="${productDetailUrl}?id=${p.product_id}"
                 class="group bg-gray-50 rounded-xl overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col">
                 <div class="relative" style="height:180px; overflow:hidden;">
                     ${p.product_cover_image
-                        ? `<img src="/comicstore/assets/images/${p.product_cover_image}"
+                        ? `<img src="${imageBaseUrl}${p.product_cover_image}"
                                 style="width:100%; height:100%; object-fit:cover;" class="group-hover:scale-105 transition-transform duration-300">`
                         : `<div style="width:100%; height:100%; background:#f3f4f6; display:flex; align-items:center; justify-content:center; color:#9ca3af; font-size:12px;">No Image</div>`
                     }
