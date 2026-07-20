@@ -128,6 +128,7 @@ function safe_redirect_target(string $target, string $default): string
 
         'admin/index.php',
         'admin/dashboard.php',
+        'admin/goods_received.php',
 
         'staff/index.php',
         'staff/dashboard.php',
@@ -138,6 +139,32 @@ function safe_redirect_target(string $target, string $default): string
 
     if (!in_array($path, $allowedPaths, true)) {
         return $default;
+    }
+
+    /*
+     * goods_received.php only accepts a positive numeric po_id.
+     * Other redirect query parameters remain discarded.
+     */
+    if ($path === 'admin/goods_received.php') {
+        $query = parse_url($target, PHP_URL_QUERY);
+
+        if (!is_string($query)) {
+            return $default;
+        }
+
+        parse_str($query, $queryParameters);
+
+        $poId = filter_var(
+            $queryParameters['po_id'] ?? null,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]]
+        );
+
+        if ($poId === false) {
+            return $default;
+        }
+
+        return app_path($path) . '?po_id=' . $poId;
     }
 
     return app_path($path);
