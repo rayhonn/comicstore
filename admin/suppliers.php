@@ -3,12 +3,14 @@ require_once __DIR__ . '/../includes/auth.php';
 require_admin();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 $error = '';
 $success = '';
 
 // Handle Add/Edit
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_supplier'])) {
+    csrf_verify();
     $name = trim($_POST['supplier_name'] ?? '');
     $contact = trim($_POST['supplier_contact_person'] ?? '');
     $phone = trim($_POST['supplier_phone'] ?? '');
@@ -81,18 +83,62 @@ if (isset($_SESSION['flash_success'])) {
 }
 
 // Handle status toggle — senior admin only
-if (isset($_GET['toggle'])) {
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['toggle_supplier'])
+) {
+    csrf_verify();
+
     if (($_SESSION['admin_level'] ?? '') !== 'senior_admin') {
-        $_SESSION['flash_error'] = 'Only senior admin can deactivate suppliers.';
+        $_SESSION['flash_error'] =
+            'Only senior admin can change supplier status.';
+
         header('Location: suppliers.php');
         exit;
     }
-    $sid = $_GET['toggle'];
-    $current = $pdo->prepare("SELECT supplier_status FROM suppliers WHERE supplier_id = ?");
-    $current->execute([$sid]);
-    $current = $current->fetchColumn();
-    $new_status = $current === 'active' ? 'inactive' : 'active';
-    $pdo->prepare("UPDATE suppliers SET supplier_status = ? WHERE supplier_id = ?")->execute([$new_status, $sid]);
+
+    $sid = filter_input(
+        INPUT_POST,
+        'supplier_id',
+        FILTER_VALIDATE_INT
+    );
+
+    if (!$sid) {
+        $_SESSION['flash_error'] = 'Invalid supplier.';
+        header('Location: suppliers.php');
+        exit;
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT supplier_status
+         FROM suppliers
+         WHERE supplier_id = ?"
+    );
+    $stmt->execute([$sid]);
+
+    $currentStatus = $stmt->fetchColumn();
+
+    if ($currentStatus === false) {
+        $_SESSION['flash_error'] = 'Supplier not found.';
+        header('Location: suppliers.php');
+        exit;
+    }
+
+    $newStatus =
+        $currentStatus === 'active'
+            ? 'inactive'
+            : 'active';
+
+    $stmt = $pdo->prepare(
+        "UPDATE suppliers
+         SET supplier_status = ?
+         WHERE supplier_id = ?"
+    );
+    $stmt->execute([$newStatus, $sid]);
+
+    $_SESSION['flash_success'] =
+        'Supplier status updated successfully.';
+
     header('Location: suppliers.php');
     exit;
 }
@@ -214,10 +260,23 @@ $suppliers = $pdo->query("
                                             class="text-xs text-blue-600 hover:underline font-semibold">Edit</button>
                                     <span class="text-gray-300">|</span>
                                     <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
-                                    <a href="?toggle=<?= $s['supplier_id'] ?>"
-                                    class="text-xs <?= $s['supplier_status'] === 'active' ? 'text-red-500' : 'text-green-600' ?> hover:underline font-semibold">
-                                        <?= $s['supplier_status'] === 'active' ? 'Deactivate' : 'Activate' ?>
-                                    </a>
+                                    <form method="POST" class="inline">
+                                        <?php csrf_field(); ?>
+
+                                        <input type="hidden" name="toggle_supplier" value="1">
+
+                                        <input
+                                            type="hidden" name="supplier_id" value="<?= (int) $s['supplier_id'] ?>">
+
+                                        <button
+                                            type="submit" onclick="return confirm('Change this supplier status?')" class="text-xs <?= $s['supplier_status'] === 'active'
+                                                ? 'text-red-500'
+                                                : 'text-green-600' ?> hover:underline font-semibold">
+                                            <?= $s['supplier_status'] === 'active'
+                                                ? 'Deactivate'
+                                                : 'Activate' ?>
+                                        </button>
+                                    </form>
                                     <?php else: ?>
                                     <span class="text-xs text-gray-300" title="Only senior admin can change supplier status">🔒</span>
                                     <?php endif; ?>
@@ -244,6 +303,7 @@ $suppliers = $pdo->query("
                 </button>
             </div>
             <form method="POST">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="save_supplier" value="1">
                 <input type="hidden" name="supplier_id" id="form_supplier_id">
 
