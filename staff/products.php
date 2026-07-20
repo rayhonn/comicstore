@@ -1,15 +1,35 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'staff') {
-    header('Location: ../admin/login.php');
-    exit;
-}
-require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_staff();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 // Toggle availability only (no delete for staff)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_id'])) {
-    $pdo->prepare("UPDATE products SET product_is_available = NOT product_is_available WHERE product_id = ?")
-        ->execute([$_POST['toggle_id']]);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['toggle_id'])
+) {
+    csrf_verify();
+
+    $toggle_id = filter_input(
+        INPUT_POST,
+        'toggle_id',
+        FILTER_VALIDATE_INT
+    );
+
+    if (!$toggle_id) {
+        header('Location: products.php');
+        exit;
+    }
+
+    $stmt = $pdo->prepare(
+        "UPDATE products
+         SET product_is_available = NOT product_is_available
+         WHERE product_id = ?"
+    );
+    $stmt->execute([$toggle_id]);
+
     header('Location: products.php?success=1');
     exit;
 }
@@ -149,7 +169,13 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <a href="edit_product.php?id=<?= $p['product_id'] ?>"
                                    class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">✏️ Edit</a>
                                 <form method="POST" class="inline">
-                                    <input type="hidden" name="toggle_id" value="<?= $p['product_id'] ?>">
+                                    <?php csrf_field(); ?>
+
+                                    <input
+                                        type="hidden"
+                                        name="toggle_id"
+                                        value="<?= (int) $p['product_id'] ?>"
+                                    >
                                     <button type="submit" class="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
                                         <?= $p['product_is_available'] ? '🙈 Hide' : '👁️ Show' ?>
                                     </button>

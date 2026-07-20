@@ -1,49 +1,70 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
+require_once __DIR__ . '/../includes/auth.php';
+require_customer();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => false,
+        'message' => 'Method not allowed.',
+    ]);
     exit;
 }
-require_once '../includes/db.php';
 
-$user_id = $_SESSION['user_id'];
+csrf_verify();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $pending = $pdo->prepare("
-        SELECT order_id, order_voucher_code FROM orders 
-        WHERE order_user_id = ? 
-        AND order_payment_status = 'pending_confirmation'
-        ORDER BY order_created_at DESC LIMIT 1
-    ");
-    $pending->execute([$user_id]);
-    $pending = $pending->fetch(PDO::FETCH_ASSOC);
+header('Content-Type: application/json');
 
-    if ($pending && !empty($pending['order_voucher_code'])) {
-        $v = $pdo->prepare("SELECT voucher_id FROM vouchers WHERE voucher_code = ?");
-        $v->execute([$pending['order_voucher_code']]);
-        $v = $v->fetch(PDO::FETCH_ASSOC);
-        if ($v) {
-            $pdo->prepare("UPDATE user_vouchers SET uv_status = 'available' WHERE uv_voucher_id = ? AND uv_user_id = ? AND uv_is_used = 0")
-                ->execute([$v['voucher_id'], $user_id]);
+$user_id = (int) $_SESSION['user_id'];
+$pending_order = $_SESSION['pending_order'] ?? null;
+
+try {
+    if (
+        is_array($pending_order) &&
+        (int) ($pending_order['user_id'] ?? 0) === $user_id &&
+        !empty($pending_order['voucher_id'])
+    ) {
+        $voucher_id = filter_var(
+            $pending_order['voucher_id'],
+            FILTER_VALIDATE_INT
+        );
+
+        if ($voucher_id) {
+            $stmt = $pdo->prepare(
+                "UPDATE user_vouchers
+                 SET uv_status = 'available',
+                     uv_is_used = 0,
+                     uv_pending_at = NULL
+                 WHERE uv_voucher_id = ?
+                 AND uv_user_id = ?
+                 AND uv_is_used = 0
+                 AND uv_status = 'pending'"
+            );
+
+            $stmt->execute([
+                $voucher_id,
+                $user_id,
+            ]);
         }
-
-        $pdo->prepare("UPDATE orders SET order_payment_status = 'cancelled', order_status = 'cancelled' WHERE order_id = ?")
-            ->execute([$pending['order_id']]);
-
-        $items = $pdo->prepare("SELECT * FROM order_items WHERE order_item_order_id = ?");
-        $items->execute([$pending['order_id']]);
-        foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
-            if ($item['order_item_type'] === 'physical') {
-                $pdo->prepare("UPDATE product_physical SET physical_stock_quantity = physical_stock_quantity + ? WHERE physical_product_id = ?")
-                    ->execute([$item['order_item_quantity'], $item['order_item_product_id']]);
-            }
-        }
-
-        $pdo->prepare("DELETE FROM voucher_usage WHERE usage_order_id = ?")
-            ->execute([$pending['order_id']]);
-        $pdo->prepare("UPDATE vouchers SET voucher_used_count = GREATEST(0, voucher_used_count - 1) WHERE voucher_code = ?")
-            ->execute([$pending['order_voucher_code']]);
     }
 
     unset($_SESSION['pending_order']);
+    unset($_SESSION['payment_lock']);
+    unset($_SESSION['stripe_session_id']);
+
+    echo json_encode([
+        'success' => true,
+    ]);
+} catch (Throwable $e) {
+    http_response_code(500);
+
+    echo json_encode([
+        'success' => false,
+        'message' => 'Unable to cancel payment.',
+    ]);
 }
-echo json_encode(['success' => true]);

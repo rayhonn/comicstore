@@ -6,6 +6,7 @@ require_customer();
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stripe_config.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 if (!isset($_SESSION['pending_order'])) {
     header('Location: cart.php');
@@ -46,6 +47,7 @@ if ($elapsed >= 300) {
 
 // Handle Pay Now — create Stripe session and redirect
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay_now'])) {
+    csrf_verify();
     \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
     $app_url = rtrim(APP_URL, '/');
 
@@ -254,6 +256,7 @@ $order_num = '#' . str_pad(time(), 4, '0', STR_PAD_LEFT);
                     </div>
 
                     <form method="POST">
+                        <?php csrf_field(); ?>
                         <input type="hidden" name="pay_now" value="1">
                         <button type="submit"
                                 class="w-full bg-red-600 hover:bg-red-700 text-white font-black py-4 rounded-xl text-sm transition-colors flex items-center justify-center gap-2">
@@ -292,42 +295,91 @@ $order_num = '#' . str_pad(time(), 4, '0', STR_PAD_LEFT);
     </div>
 
     <script>
-    const lockedAt = <?= $lock_locked_at ?> * 1000;
+    const lockedAt = <?= (int) $lock_locked_at ?> * 1000;
     const totalMs = 300 * 1000;
+    const csrfToken = <?= json_encode(csrf_token()) ?>;
+
+    function cancelPendingPayment() {
+        return fetch('cancel_pending_voucher.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type':
+                    'application/x-www-form-urlencoded;charset=UTF-8'
+            },
+            body: new URLSearchParams({
+                csrf_token: csrfToken
+            })
+        });
+    }
 
     function updateTimer() {
         const elapsed = Date.now() - lockedAt;
-        const rem = Math.max(0, Math.floor((totalMs - elapsed) / 1000));
-        const mins = Math.floor(rem / 60).toString().padStart(2, '0');
-        const secs = (rem % 60).toString().padStart(2, '0');
+        const rem = Math.max(
+            0,
+            Math.floor((totalMs - elapsed) / 1000)
+        );
 
-        document.getElementById('timerDisplay').textContent = mins + ':' + secs;
-        const pct = Math.max(0, ((totalMs - elapsed) / totalMs) * 100);
-        document.getElementById('timerBar').style.width = pct + '%';
+        const mins = Math.floor(rem / 60)
+            .toString()
+            .padStart(2, '0');
+
+        const secs = (rem % 60)
+            .toString()
+            .padStart(2, '0');
+
+        document.getElementById('timerDisplay').textContent =
+            mins + ':' + secs;
+
+        const pct = Math.max(
+            0,
+            ((totalMs - elapsed) / totalMs) * 100
+        );
+
+        document.getElementById('timerBar').style.width =
+            pct + '%';
 
         if (rem <= 60) {
-            document.getElementById('timerBar').classList.replace('bg-yellow-500', 'bg-red-500');
-            document.getElementById('timerDisplay').classList.replace('text-yellow-700', 'text-red-600');
+            document
+                .getElementById('timerBar')
+                .classList.replace(
+                    'bg-yellow-500',
+                    'bg-red-500'
+                );
+
+            document
+                .getElementById('timerDisplay')
+                .classList.replace(
+                    'text-yellow-700',
+                    'text-red-600'
+                );
         }
 
         if (rem <= 0) {
             clearInterval(timerInterval);
-            // Restore voucher via AJAX then show modal
-            fetch('cancel_pending_voucher.php', { method: 'POST' })
+
+            cancelPendingPayment()
                 .finally(() => {
-                    document.getElementById('timeoutModal').classList.remove('hidden');
+                    document
+                        .getElementById('timeoutModal')
+                        .classList.remove('hidden');
                 });
         }
     }
 
     updateTimer();
-    const timerInterval = setInterval(updateTimer, 1000);
+
+    const timerInterval = setInterval(
+        updateTimer,
+        1000
+    );
 
     function cancelPayment(e) {
         e.preventDefault();
-        fetch('cancel_pending_voucher.php', { method: 'POST' })
+
+        cancelPendingPayment()
             .finally(() => {
-                window.location.href = 'payment_cancel.php';
+                window.location.href =
+                    'payment_cancel.php';
             });
     }
     </script>
