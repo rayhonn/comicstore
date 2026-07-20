@@ -1,10 +1,9 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: ../login.php');
-    exit;
-}
-require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_admin();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 $po_id = $_GET['po_id'] ?? null;
 if (!$po_id) { header('Location: purchase_orders.php'); exit; }
@@ -51,6 +50,7 @@ if ($do_info) {
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
+    csrf_verify();
     $received_qtys = $_POST['received_qty'] ?? [];
     $rejected_qtys = $_POST['rejected_qty'] ?? [];
     $reject_reasons = $_POST['reject_reason'] ?? [];
@@ -195,6 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_receive'])) {
         <?php endif; ?>
 
         <form method="POST">
+            <?php csrf_field(); ?>
             <input type="hidden" name="confirm_receive" value="1">
 
             <div class="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">

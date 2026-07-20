@@ -1,10 +1,16 @@
 <?php
-session_start();
-if (!isset($_SESSION['supplier_id']) || $_SESSION['role'] !== 'supplier') {
-    header('Location: login.php');
-    exit;
+require_once __DIR__ . '/../includes/auth.php';
+
+if (
+    empty($_SESSION['supplier_id']) ||
+    ($_SESSION['role'] ?? '') !== 'supplier'
+) {
+    redirect_to(app_path('supplier/login.php'));
 }
-require_once '../includes/db.php';
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
+
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
 $supplier_id = $_SESSION['supplier_id'];
@@ -51,8 +57,14 @@ if (isset($_GET['download_pdf']) && $existing_do) {
     $supplier_info->execute([$supplier_id]);
     $supplier_info = $supplier_info->fetch(PDO::FETCH_ASSOC);
 
-    $host = $_SERVER['HTTP_HOST'];
-    $qr_url = "http://{$host}/comicstore/admin/login.php?redirect=" . urlencode("goods_received.php?po_id=$po_id");
+    $redirect_target =
+        app_path('admin/goods_received.php') .
+        '?po_id=' . (int) $po_id;
+
+    $qr_url =
+        rtrim(APP_URL, '/') .
+        '/admin/login.php?redirect=' .
+        urlencode($redirect_target);
     $renderer = new \BaconQrCode\Renderer\ImageRenderer(
         new \BaconQrCode\Renderer\RendererStyle\RendererStyle(140),
         new \BaconQrCode\Renderer\Image\SvgImageBackEnd()
@@ -124,6 +136,7 @@ if (isset($_GET['download_pdf']) && $existing_do) {
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_do']) && !$existing_do) {
+    csrf_verify();
     $delivery_date = $_POST['delivery_date'] ?? date('Y-m-d');
     $notes = trim($_POST['notes'] ?? '');
     $qtys = $_POST['delivery_qty'] ?? [];
@@ -182,6 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_do']) && !$exi
         </div>
         <?php else: ?>
         <form method="POST">
+            <?php csrf_field(); ?>
             <input type="hidden" name="create_do" value="1">
 
             <div class="bg-white rounded-2xl shadow-sm p-6 mb-6">
