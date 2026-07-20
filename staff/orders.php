@@ -1,21 +1,79 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'staff') {
-    header('Location: ../admin/login.php');
-    exit;
-}
-require_once '../includes/db.php';
-require_once '../includes/notifications.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_staff();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/notifications.php';
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_id'], $_POST['status'])) {
-    $order_id = $_POST['order_id'];
-    $status = $_POST['status'];
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['order_id'], $_POST['status'])
+) {
+    csrf_verify();
+
+    $order_id = filter_input(
+        INPUT_POST,
+        'order_id',
+        FILTER_VALIDATE_INT
+    );
+
+    $status = $_POST['status'] ?? '';
     $tracking = trim($_POST['tracking_number'] ?? '');
 
-    // Staff tidak boleh cancel order
-    if ($status === 'cancelled') {
+    $status_levels = [
+        'pending' => 0,
+        'processing' => 1,
+        'shipped' => 2,
+        'delivered' => 3,
+    ];
+
+    if (
+        !$order_id ||
+        !array_key_exists($status, $status_levels)
+    ) {
+        header('Location: orders.php');
+        exit;
+    }
+
+    $order_check = $pdo->prepare(
+        "SELECT order_status,
+                order_payment_status,
+                order_courier,
+                order_user_id
+         FROM orders
+         WHERE order_id = ?"
+    );
+    $order_check->execute([$order_id]);
+    $order_data = $order_check->fetch(PDO::FETCH_ASSOC);
+
+    if (
+        !$order_data ||
+        $order_data['order_payment_status'] !== 'confirmed' ||
+        in_array(
+            $order_data['order_status'],
+            ['delivered', 'cancelled'],
+            true
+        )
+    ) {
+        header('Location: orders.php');
+        exit;
+    }
+
+    $current_status = $order_data['order_status'];
+
+    if ($status === $current_status) {
+        header('Location: orders.php');
+        exit;
+    }
+
+    if (
+        !isset($status_levels[$current_status]) ||
+        $status_levels[$status] <=
+            $status_levels[$current_status]
+    ) {
         header('Location: orders.php');
         exit;
     }
@@ -27,20 +85,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_id'], $_POST['s
         $update_sql .= ", order_processing_at = NOW()";
     } elseif ($status === 'shipped') {
         $update_sql .= ", order_shipped_at = NOW()";
-        if ($tracking) {
+
+        if ($tracking !== '') {
             $update_sql .= ", order_tracking_number = ?";
             $update_params[] = $tracking;
         } else {
-            // Auto-generate tracking number
-            $order_courier = $pdo->prepare("SELECT order_courier FROM orders WHERE order_id = ?");
-            $order_courier->execute([$order_id]);
-            $courier = $order_courier->fetchColumn();
             $prefixes = [
-                'jnt' => 'JT', 'ninja_van' => 'NV', 'pos_laju' => 'EF',
-                'gdex' => 'GX', 'dhl' => 'DH'
+                'jnt' => 'JT',
+                'ninja_van' => 'NV',
+                'pos_laju' => 'EF',
+                'gdex' => 'GX',
+                'dhl' => 'DH',
             ];
-            $prefix = $prefixes[$courier] ?? 'MY';
-            $auto_tracking = $prefix . date('Y') . strtoupper(substr(md5(uniqid()), 0, 10));
+
+            $prefix =
+                $prefixes[$order_data['order_courier']] ?? 'MY';
+
+            $auto_tracking =
+                $prefix .
+                date('Y') .
+                strtoupper(substr(md5(uniqid()), 0, 10));
+
             $update_sql .= ", order_tracking_number = ?";
             $update_params[] = $auto_tracking;
         }
@@ -48,27 +113,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_id'], $_POST['s
         $update_sql .= ", order_delivered_at = NOW()";
     }
 
-    $update_sql .= " WHERE order_id = ?";
+    $update_sql .=
+        " WHERE order_id = ?
+          AND order_status = ?
+          AND order_payment_status = 'confirmed'";
+
     $update_params[] = $order_id;
-    $pdo->prepare($update_sql)->execute($update_params);
+    $update_params[] = $current_status;
 
-    // Log the action
-    $pdo->prepare("INSERT INTO admin_logs (log_admin_id, log_action, log_target_type, log_target_id, log_details) VALUES (?, 'update_order_status', 'order', ?, ?)")
-        ->execute([$_SESSION['user_id'], $order_id, "Status changed to: " . $status]);
+    $update_stmt = $pdo->prepare($update_sql);
+    $update_stmt->execute($update_params);
 
-    $order_info = $pdo->prepare("SELECT order_user_id FROM orders WHERE order_id = ?");
-    $order_info->execute([$order_id]);
-    $order_owner = $order_info->fetchColumn();
+    if ($update_stmt->rowCount() === 0) {
+        header('Location: orders.php');
+        exit;
+    }
 
-    $order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
+    $pdo->prepare(
+        "INSERT INTO admin_logs
+         (
+             log_admin_id,
+             log_action,
+             log_target_type,
+             log_target_id,
+             log_details
+         )
+         VALUES (
+             ?,
+             'update_order_status',
+             'order',
+             ?,
+             ?
+         )"
+    )->execute([
+        $_SESSION['user_id'],
+        $order_id,
+        'Status changed to: ' . $status,
+    ]);
+
+    $order_num =
+        '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
+
     $status_messages = [
-        'processing' => ['Order Update 📦', "Your order $order_num is now being processed."],
-        'shipped'    => ['Order Shipped 🚚', "Your order $order_num has been shipped! It's on the way."],
-        'delivered'  => ['Order Delivered ✅', "Your order $order_num has been delivered. Enjoy your manga!"],
+        'processing' => [
+            'Order Update 📦',
+            "Your order $order_num is now being processed.",
+        ],
+        'shipped' => [
+            'Order Shipped 🚚',
+            "Your order $order_num has been shipped! It's on the way.",
+        ],
+        'delivered' => [
+            'Order Delivered ✅',
+            "Your order $order_num has been delivered. Enjoy your manga!",
+        ],
     ];
 
     if (isset($status_messages[$status])) {
-        sendNotification($pdo, $order_owner, $status_messages[$status][0], $status_messages[$status][1], 'order');
+        sendNotification(
+            $pdo,
+            $order_data['order_user_id'],
+            $status_messages[$status][0],
+            $status_messages[$status][1],
+            'order'
+        );
     }
 
     header('Location: orders.php?success=1');
@@ -208,7 +316,13 @@ $counts['all'] = array_sum($counts);
                 <?php if ($order['order_status'] !== 'cancelled' && $order['order_status'] !== 'delivered'): ?>
                 <div class="px-6 py-4 border-t border-gray-50 bg-gray-50">
                     <form method="POST" class="flex items-center gap-3 flex-wrap">
-                        <input type="hidden" name="order_id" value="<?= $order['order_id'] ?>">
+                        <?php csrf_field(); ?>
+
+                        <input
+                            type="hidden"
+                            name="order_id"
+                            value="<?= (int) $order['order_id'] ?>"
+                        >
                         <?php
                         $status_levels = ['pending' => 0, 'processing' => 1, 'shipped' => 2, 'delivered' => 3];
                         $current_level = $status_levels[$order['order_status']] ?? 0;
