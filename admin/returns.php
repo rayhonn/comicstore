@@ -10,9 +10,34 @@ require_admin_or_staff();
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['action'])) {
     csrf_verify();
 
-    $return_id = $_POST['return_id'];
-    $action = $_POST['action'];
+    $return_id = filter_input(
+        INPUT_POST,
+        'return_id',
+        FILTER_VALIDATE_INT
+    );
+
+    $action = $_POST['action'] ?? '';
     $admin_note = trim($_POST['admin_note'] ?? '');
+
+    if (
+        !$return_id ||
+        !in_array($action, ['approved', 'rejected'], true)
+    ) {
+        http_response_code(400);
+        exit('Invalid return action.');
+    }
+
+    $status_check = $pdo->prepare(
+        "SELECT return_status
+        FROM return_requests
+        WHERE return_id = ?"
+    );
+    $status_check->execute([$return_id]);
+
+    if ($status_check->fetchColumn() !== 'pending') {
+        header('Location: returns.php');
+        exit;
+    }
 
     if ($action === 'approved') {
         $stmt = $pdo->prepare("
@@ -29,8 +54,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['
         }
     }
 
-    $pdo->prepare("UPDATE return_requests SET return_status = ?, return_admin_note = ? WHERE return_id = ?")
-        ->execute([$action, $admin_note, $return_id]);
+    $pdo->prepare(
+        "UPDATE return_requests
+        SET return_status = ?,
+            return_admin_note = ?
+        WHERE return_id = ?
+        AND return_status = 'pending'"
+    )->execute([$action, $admin_note, $return_id]);
 
     $pdo->prepare("INSERT INTO admin_logs (log_admin_id, log_action, log_target_type, log_target_id, log_details) VALUES (?, ?, 'return', ?, ?)")
         ->execute([$_SESSION['user_id'], $action . '_return', $return_id, "Return request " . $action]);

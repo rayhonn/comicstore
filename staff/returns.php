@@ -10,9 +10,34 @@ require_staff();
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['action'])) {
     csrf_verify();
 
-    $return_id = $_POST['return_id'];
-    $action = $_POST['action'];
+    $return_id = filter_input(
+        INPUT_POST,
+        'return_id',
+        FILTER_VALIDATE_INT
+    );
+
+    $action = $_POST['action'] ?? '';
     $admin_note = trim($_POST['admin_note'] ?? '');
+
+    if (
+        !$return_id ||
+        !in_array($action, ['approved', 'rejected'], true)
+    ) {
+        http_response_code(400);
+        exit('Invalid return action.');
+    }
+
+    $status_check = $pdo->prepare(
+        "SELECT return_status
+        FROM return_requests
+        WHERE return_id = ?"
+    );
+    $status_check->execute([$return_id]);
+
+    if ($status_check->fetchColumn() !== 'pending') {
+        header('Location: returns.php');
+        exit;
+    }
 
     if ($action === 'approved') {
         $stmt = $pdo->prepare("SELECT oi.order_item_product_id, oi.order_item_quantity FROM return_requests rr JOIN order_items oi ON rr.return_item_id = oi.order_item_id WHERE rr.return_id = ?");
@@ -24,8 +49,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['
         }
     }
 
-    $pdo->prepare("UPDATE return_requests SET return_status = ?, return_admin_note = ? WHERE return_id = ?")
-        ->execute([$action, $admin_note, $return_id]);
+    $pdo->prepare(
+        "UPDATE return_requests
+        SET return_status = ?,
+            return_admin_note = ?
+        WHERE return_id = ?
+        AND return_status = 'pending'"
+    )->execute([$action, $admin_note, $return_id]);
 
     $ret_info = $pdo->prepare("SELECT o.order_user_id, p.product_title FROM return_requests rr JOIN order_items oi ON rr.return_item_id = oi.order_item_id JOIN orders o ON oi.order_item_order_id = o.order_id JOIN products p ON oi.order_item_product_id = p.product_id WHERE rr.return_id = ?");
     $ret_info->execute([$return_id]);
