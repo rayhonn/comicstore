@@ -1,10 +1,9 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: ../login.php');
-    exit;
-}
-require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_admin();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 $is_senior = (($_SESSION['admin_level'] ?? '') === 'senior_admin');
 $PR_APPROVAL_THRESHOLD = 1000;
@@ -118,6 +117,7 @@ if (isset($_SESSION['flash_success'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['scan_low_stock'])) {
+    csrf_verify();
     $low_stock_products = $pdo->query("
         SELECT p.product_id, pp.physical_stock_quantity, pp.physical_low_stock_threshold
         FROM products p
@@ -150,6 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['scan_low_stock'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['approve_pr'])) {
+    csrf_verify();
     $pr_id = $_POST['pr_id'];
 
     $pr_check = $pdo->prepare("SELECT pr_product_id, pr_suggested_quantity FROM purchase_requisitions WHERE pr_id = ? AND pr_status = 'pending'");
@@ -176,6 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['approve_pr'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_pr'])) {
+    csrf_verify();
     $pr_id = $_POST['pr_id'];
     $note = trim($_POST['review_note'] ?? '');
     if ($note === '') {
@@ -221,6 +223,7 @@ $prs = $pdo->query("
                 <p class="text-gray-500 text-sm mt-1">Review restock requests submitted by staff</p>
             </div>
             <form method="POST">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="scan_low_stock" value="1">
                 <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors">
                     🔄 Scan Low Stock & Generate Drafts
@@ -291,6 +294,7 @@ $prs = $pdo->query("
                     <span class="bg-gray-100 text-gray-400 text-xs font-semibold px-4 py-2 rounded-lg" title="Only senior admin can approve">🔒 Senior Admin Only</span>
                     <?php else: ?>
                     <form method="POST" class="inline">
+                        <?php csrf_field(); ?>
                         <input type="hidden" name="approve_pr" value="1">
                         <input type="hidden" name="pr_id" value="<?= $pr['pr_id'] ?>">
                         <button type="submit" class="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold px-4 py-2 rounded-lg transition-colors">
@@ -318,6 +322,7 @@ $prs = $pdo->query("
                 <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6">
                     <h3 class="text-lg font-bold text-gray-800 mb-3">Reject <?= htmlspecialchars($pr['pr_number']) ?></h3>
                     <form method="POST">
+                        <?php csrf_field(); ?>
                         <input type="hidden" name="reject_pr" value="1">
                         <input type="hidden" name="pr_id" value="<?= $pr['pr_id'] ?>">
                         <textarea name="review_note" rows="3" required placeholder="Reason for rejection (required)"

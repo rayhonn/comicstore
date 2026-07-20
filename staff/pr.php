@@ -1,10 +1,9 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'staff') {
-    header('Location: ../admin/login.php');
-    exit;
-}
-require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_staff();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 if (isset($_GET['download_pdf'])) {
     require_once '../vendor/autoload.php';
@@ -100,6 +99,7 @@ $success = '';
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_pr'])) {
+    csrf_verify();
     $product_id = $_POST['product_id'] ?? '';
     $quantity = intval($_POST['quantity'] ?? 0);
     $reason = trim($_POST['reason'] ?? '');
@@ -122,6 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_pr'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_draft'])) {
+    csrf_verify();
     $pr_id = $_POST['pr_id'];
     $quantity = intval($_POST['quantity'] ?? 0);
     $reason = trim($_POST['reason'] ?? '');
@@ -291,6 +292,7 @@ $drafts = $pdo->query("
                 <button onclick="document.getElementById('prModal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <form method="POST">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="submit_pr" value="1">
 
                 <div class="mb-4">
@@ -345,6 +347,7 @@ $drafts = $pdo->query("
                 <button onclick="document.getElementById('claimModal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <form method="POST">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="claim_draft" value="1">
                 <input type="hidden" name="pr_id" id="claim_pr_id">
 
