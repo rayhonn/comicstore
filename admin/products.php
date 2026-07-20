@@ -1,22 +1,63 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'staff'])) {
-    header('Location: login.php');
-    exit;
-}
-require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_admin();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 // Toggle availability
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_id'])) {
-    $pdo->prepare("UPDATE products SET product_is_available = NOT product_is_available WHERE product_id = ?")
-        ->execute([$_POST['toggle_id']]);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['toggle_id'])
+) {
+    csrf_verify();
+
+    $toggle_id = filter_input(
+        INPUT_POST,
+        'toggle_id',
+        FILTER_VALIDATE_INT
+    );
+
+    if (!$toggle_id) {
+        header('Location: products.php');
+        exit;
+    }
+
+    $stmt = $pdo->prepare(
+        "UPDATE products
+         SET product_is_available = NOT product_is_available
+         WHERE product_id = ?"
+    );
+    $stmt->execute([$toggle_id]);
+
     header('Location: products.php?success=1');
     exit;
 }
 
 // Delete
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
-    $pdo->prepare("DELETE FROM products WHERE product_id = ?")->execute([$_POST['delete_id']]);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['delete_id'])
+) {
+    csrf_verify();
+
+    $delete_id = filter_input(
+        INPUT_POST,
+        'delete_id',
+        FILTER_VALIDATE_INT
+    );
+
+    if (!$delete_id) {
+        header('Location: products.php');
+        exit;
+    }
+
+    $stmt = $pdo->prepare(
+        "DELETE FROM products
+         WHERE product_id = ?"
+    );
+    $stmt->execute([$delete_id]);
+
     header('Location: products.php?success=1');
     exit;
 }
@@ -221,14 +262,26 @@ $total_low_stock = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE phys
                                     ✏️ Edit
                                 </a>
                                 <form method="POST" class="inline">
-                                    <input type="hidden" name="toggle_id" value="<?= $p['product_id'] ?>">
+                                    <?php csrf_field(); ?>
+
+                                    <input
+                                        type="hidden"
+                                        name="toggle_id"
+                                        value="<?= (int) $p['product_id'] ?>"
+                                    >
                                     <button type="submit"
                                             class="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
                                         <?= $p['product_is_available'] ? '🙈 Hide' : '👁️ Show' ?>
                                     </button>
                                 </form>
                                 <form method="POST" class="inline">
-                                    <input type="hidden" name="delete_id" value="<?= $p['product_id'] ?>">
+                                    <?php csrf_field(); ?>
+
+                                    <input
+                                        type="hidden"
+                                        name="delete_id"
+                                        value="<?= (int) $p['product_id'] ?>"
+                                    >
                                     <button type="submit" onclick="return confirm('Delete this product permanently?')"
                                             class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
                                         🗑️
