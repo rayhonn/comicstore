@@ -1,131 +1,404 @@
 <?php
 date_default_timezone_set('Asia/Kuala_Lumpur');
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: ../login.php');
-    exit;
-}
-require_once '../includes/db.php';
+
+require_once __DIR__ . '/../includes/auth.php';
+require_admin();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 $success = '';
+
 if (isset($_SESSION['flash_success'])) {
     $success = $_SESSION['flash_success'];
     unset($_SESSION['flash_success']);
 }
 
-// Handle mark as paid (with override reason if mismatch) — senior admin only
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_paid_confirm'])) {
-    if (($_SESSION['admin_level'] ?? '') !== 'senior_admin') {
-        $_SESSION['flash_success'] = 'Only senior admin can approve mismatched payments.';
-        header('Location: supplier_invoices.php');
-        exit;
-    }
-
-    $invoice_id = $_POST['invoice_id'];
-    $override_reason = trim($_POST['override_reason'] ?? '');
-
-    $pdo->prepare("UPDATE supplier_invoices SET invoice_status = 'paid', invoice_paid_at = NOW(), invoice_override_reason = ?, invoice_override_by = ? WHERE invoice_id = ?")
-        ->execute([$override_reason ?: null, $_SESSION['user_id'], $invoice_id]);
-
-    $_SESSION['flash_success'] = 'Invoice marked as paid.';
+function redirectInvoicePage(string $message): void
+{
+    $_SESSION['flash_success'] = $message;
     header('Location: supplier_invoices.php');
     exit;
 }
 
-// Simple mark as paid (no mismatch — direct link still works)
-if (isset($_GET['mark_paid'])) {
-    $check = $pdo->prepare("SELECT invoice_is_mismatch FROM supplier_invoices WHERE invoice_id = ?");
-    $check->execute([$_GET['mark_paid']]);
-    $is_mismatch = $check->fetchColumn();
+// Mark mismatched invoice as paid — senior admin only
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['mark_paid_confirm'])
+) {
+    csrf_verify();
 
-    if (!$is_mismatch) {
-        $pdo->prepare("UPDATE supplier_invoices SET invoice_status = 'paid', invoice_paid_at = NOW() WHERE invoice_id = ?")
-            ->execute([$_GET['mark_paid']]);
-        $_SESSION['flash_success'] = 'Invoice marked as paid.';
-        header('Location: supplier_invoices.php');
-        exit;
+    if (
+        ($_SESSION['admin_level'] ?? '') !==
+        'senior_admin'
+    ) {
+        redirectInvoicePage(
+            'Only senior admin can approve mismatched payments.'
+        );
     }
-    // If mismatch, fall through — JS will intercept and show modal instead
+
+    $invoice_id = filter_input(
+        INPUT_POST,
+        'invoice_id',
+        FILTER_VALIDATE_INT
+    );
+
+    $override_reason = trim(
+        $_POST['override_reason'] ?? ''
+    );
+
+    if (!$invoice_id || $override_reason === '') {
+        redirectInvoicePage(
+            'A valid invoice and override reason are required.'
+        );
+    }
+
+    $stmt = $pdo->prepare(
+        "UPDATE supplier_invoices
+         SET invoice_status = 'paid',
+             invoice_paid_at = NOW(),
+             invoice_override_reason = ?,
+             invoice_override_by = ?
+         WHERE invoice_id = ?
+         AND invoice_status = 'unpaid'
+         AND invoice_is_mismatch = 1"
+    );
+
+    $stmt->execute([
+        $override_reason,
+        $_SESSION['user_id'],
+        $invoice_id,
+    ]);
+
+    redirectInvoicePage(
+        $stmt->rowCount() === 1
+            ? 'Invoice marked as paid.'
+            : 'Invoice could not be processed.'
+    );
 }
 
-// Handle reject invoice
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_invoice'])) {
-    $invoice_id = $_POST['invoice_id'];
-    $reason = trim($_POST['reject_reason'] ?? '');
+// Mark matched invoice as paid
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['mark_paid'])
+) {
+    csrf_verify();
 
-    $pdo->prepare("UPDATE supplier_invoices SET invoice_status = 'rejected', invoice_reject_reason = ? WHERE invoice_id = ?")
-        ->execute([$reason, $invoice_id]);
+    $invoice_id = filter_input(
+        INPUT_POST,
+        'invoice_id',
+        FILTER_VALIDATE_INT
+    );
 
-    $_SESSION['flash_success'] = 'Invoice rejected. The supplier has been notified to resubmit.';
-    header('Location: supplier_invoices.php');
-    exit;
+    if (!$invoice_id) {
+        redirectInvoicePage('Invalid invoice.');
+    }
+
+    $stmt = $pdo->prepare(
+        "UPDATE supplier_invoices
+         SET invoice_status = 'paid',
+             invoice_paid_at = NOW()
+         WHERE invoice_id = ?
+         AND invoice_status = 'unpaid'
+         AND invoice_is_mismatch = 0"
+    );
+
+    $stmt->execute([$invoice_id]);
+
+    redirectInvoicePage(
+        $stmt->rowCount() === 1
+            ? 'Invoice marked as paid.'
+            : 'Invoice could not be processed.'
+    );
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['apply_credit_note'])) {
-    $invoice_id = $_POST['invoice_id'];
-    $return_id = $_POST['return_id'];
+// Reject invoice
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['reject_invoice'])
+) {
+    csrf_verify();
 
-    $inv = $pdo->prepare("SELECT invoice_amount, invoice_supplier_id FROM supplier_invoices WHERE invoice_id = ? AND invoice_status = 'unpaid'");
-    $inv->execute([$invoice_id]);
-    $inv = $inv->fetch(PDO::FETCH_ASSOC);
+    $invoice_id = filter_input(
+        INPUT_POST,
+        'invoice_id',
+        FILTER_VALIDATE_INT
+    );
 
-    if (!$inv) {
-        $_SESSION['flash_success'] = 'Invoice not found or already processed.';
-        header('Location: supplier_invoices.php'); exit;
+    $reason = trim(
+        $_POST['reject_reason'] ?? ''
+    );
+
+    if (!$invoice_id || $reason === '') {
+        redirectInvoicePage(
+            'A valid invoice and rejection reason are required.'
+        );
     }
 
-    $cn = $pdo->prepare("
-        SELECT sr.return_credit_note_amount
-        FROM supplier_returns sr
-        JOIN purchase_orders po ON po.po_id = sr.return_po_id
-        WHERE sr.return_id = ? AND sr.return_credit_note_used_invoice_id IS NULL AND po.po_supplier_id = ?
-    ");
-    $cn->execute([$return_id, $inv['invoice_supplier_id']]);
-    $cn_amount = $cn->fetchColumn();
+    $stmt = $pdo->prepare(
+        "UPDATE supplier_invoices
+         SET invoice_status = 'rejected',
+             invoice_reject_reason = ?
+         WHERE invoice_id = ?
+         AND invoice_status = 'unpaid'"
+    );
 
-    if ($cn_amount === false) {
-        $_SESSION['flash_success'] = 'This credit note is not available for this supplier.';
-        header('Location: supplier_invoices.php'); exit;
-    }
+    $stmt->execute([
+        $reason,
+        $invoice_id,
+    ]);
 
-    $applied = min($cn_amount, $inv['invoice_amount']);
-
-    $pdo->prepare("UPDATE supplier_invoices SET invoice_credit_note_id = ?, invoice_credit_applied_amount = ? WHERE invoice_id = ?")
-        ->execute([$return_id, $applied, $invoice_id]);
-    $pdo->prepare("UPDATE supplier_returns SET return_credit_note_used_invoice_id = ? WHERE return_id = ?")
-        ->execute([$invoice_id, $return_id]);
-
-    $_SESSION['flash_success'] = "Credit note applied. RM " . number_format($applied, 2) . " deducted from this invoice.";
-    header('Location: supplier_invoices.php');
-    exit;
+    redirectInvoicePage(
+        $stmt->rowCount() === 1
+            ? 'Invoice rejected. The supplier has been notified to resubmit.'
+            : 'Invoice could not be rejected.'
+    );
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_credit_note'])) {
-    $invoice_id = $_POST['invoice_id'];
+// Apply credit note
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['apply_credit_note'])
+) {
+    csrf_verify();
 
-    $inv = $pdo->prepare("SELECT invoice_credit_note_id FROM supplier_invoices WHERE invoice_id = ? AND invoice_status = 'unpaid'");
-    $inv->execute([$invoice_id]);
-    $return_id = $inv->fetchColumn();
+    $invoice_id = filter_input(
+        INPUT_POST,
+        'invoice_id',
+        FILTER_VALIDATE_INT
+    );
 
-    if (!$return_id) {
-        $_SESSION['flash_success'] = 'No credit note to remove, or invoice already paid.';
-        header('Location: supplier_invoices.php'); exit;
+    $return_id = filter_input(
+        INPUT_POST,
+        'return_id',
+        FILTER_VALIDATE_INT
+    );
+
+    if (!$invoice_id || !$return_id) {
+        redirectInvoicePage(
+            'Invalid invoice or credit note.'
+        );
     }
 
-    $pdo->prepare("UPDATE supplier_invoices SET invoice_credit_note_id = NULL, invoice_credit_applied_amount = 0 WHERE invoice_id = ?")
-        ->execute([$invoice_id]);
-    $pdo->prepare("UPDATE supplier_returns SET return_credit_note_used_invoice_id = NULL WHERE return_id = ?")
-        ->execute([$return_id]);
+    try {
+        $pdo->beginTransaction();
 
-    $_SESSION['flash_success'] = 'Credit note removed from this invoice and made available again.';
-    header('Location: supplier_invoices.php');
-    exit;
+        $inv_stmt = $pdo->prepare(
+            "SELECT invoice_amount,
+                    invoice_supplier_id,
+                    invoice_credit_note_id
+             FROM supplier_invoices
+             WHERE invoice_id = ?
+             AND invoice_status = 'unpaid'
+             FOR UPDATE"
+        );
+
+        $inv_stmt->execute([$invoice_id]);
+        $invoice = $inv_stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (
+            !$invoice ||
+            !empty($invoice['invoice_credit_note_id'])
+        ) {
+            throw new RuntimeException(
+                'Invoice not found, already processed, or already has a credit note.'
+            );
+        }
+
+        $credit_stmt = $pdo->prepare(
+            "SELECT sr.return_credit_note_amount
+             FROM supplier_returns sr
+             JOIN purchase_orders po
+               ON po.po_id = sr.return_po_id
+             WHERE sr.return_id = ?
+             AND sr.return_credit_note_used_invoice_id IS NULL
+             AND po.po_supplier_id = ?
+             FOR UPDATE"
+        );
+
+        $credit_stmt->execute([
+            $return_id,
+            $invoice['invoice_supplier_id'],
+        ]);
+
+        $credit_amount = $credit_stmt->fetchColumn();
+
+        if ($credit_amount === false) {
+            throw new RuntimeException(
+                'This credit note is not available for this supplier.'
+            );
+        }
+
+        $applied = min(
+            (float) $credit_amount,
+            (float) $invoice['invoice_amount']
+        );
+
+        $invoice_update = $pdo->prepare(
+            "UPDATE supplier_invoices
+             SET invoice_credit_note_id = ?,
+                 invoice_credit_applied_amount = ?
+             WHERE invoice_id = ?
+             AND invoice_status = 'unpaid'
+             AND invoice_credit_note_id IS NULL"
+        );
+
+        $invoice_update->execute([
+            $return_id,
+            $applied,
+            $invoice_id,
+        ]);
+
+        if ($invoice_update->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Unable to apply the credit note.'
+            );
+        }
+
+        $credit_update = $pdo->prepare(
+            "UPDATE supplier_returns
+             SET return_credit_note_used_invoice_id = ?
+             WHERE return_id = ?
+             AND return_credit_note_used_invoice_id IS NULL"
+        );
+
+        $credit_update->execute([
+            $invoice_id,
+            $return_id,
+        ]);
+
+        if ($credit_update->rowCount() !== 1) {
+            throw new RuntimeException(
+                'The credit note has already been used.'
+            );
+        }
+
+        $pdo->commit();
+
+        redirectInvoicePage(
+            'Credit note applied. RM ' .
+            number_format($applied, 2) .
+            ' deducted from this invoice.'
+        );
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        redirectInvoicePage(
+            $e instanceof RuntimeException
+                ? $e->getMessage()
+                : 'Unable to apply the credit note.'
+        );
+    }
+}
+
+// Remove credit note
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['remove_credit_note'])
+) {
+    csrf_verify();
+
+    $invoice_id = filter_input(
+        INPUT_POST,
+        'invoice_id',
+        FILTER_VALIDATE_INT
+    );
+
+    if (!$invoice_id) {
+        redirectInvoicePage('Invalid invoice.');
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $inv_stmt = $pdo->prepare(
+            "SELECT invoice_credit_note_id
+             FROM supplier_invoices
+             WHERE invoice_id = ?
+             AND invoice_status = 'unpaid'
+             FOR UPDATE"
+        );
+
+        $inv_stmt->execute([$invoice_id]);
+        $return_id = $inv_stmt->fetchColumn();
+
+        if (!$return_id) {
+            throw new RuntimeException(
+                'No credit note to remove, or invoice already paid.'
+            );
+        }
+
+        $invoice_update = $pdo->prepare(
+            "UPDATE supplier_invoices
+             SET invoice_credit_note_id = NULL,
+                 invoice_credit_applied_amount = 0
+             WHERE invoice_id = ?
+             AND invoice_status = 'unpaid'
+             AND invoice_credit_note_id = ?"
+        );
+
+        $invoice_update->execute([
+            $invoice_id,
+            $return_id,
+        ]);
+
+        if ($invoice_update->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Unable to remove the credit note.'
+            );
+        }
+
+        $credit_update = $pdo->prepare(
+            "UPDATE supplier_returns
+             SET return_credit_note_used_invoice_id = NULL
+             WHERE return_id = ?
+             AND return_credit_note_used_invoice_id = ?"
+        );
+
+        $credit_update->execute([
+            $return_id,
+            $invoice_id,
+        ]);
+
+        if ($credit_update->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Unable to release the credit note.'
+            );
+        }
+
+        $pdo->commit();
+
+        redirectInvoicePage(
+            'Credit note removed from this invoice and made available again.'
+        );
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        redirectInvoicePage(
+            $e instanceof RuntimeException
+                ? $e->getMessage()
+                : 'Unable to remove the credit note.'
+        );
+    }
 }
 
 // Handle download receipt
 if (isset($_GET['download_receipt'])) {
     require_once '../vendor/autoload.php';
-    $invoice_id = $_GET['download_receipt'];
+        $invoice_id = filter_input(
+        INPUT_GET,
+        'download_receipt',
+        FILTER_VALIDATE_INT
+    );
+
+    if (!$invoice_id) {
+        header('Location: supplier_invoices.php');
+        exit;
+    }
 
     $inv = $pdo->prepare("
         SELECT si.*, s.supplier_name, s.supplier_contact_person, s.supplier_address, s.supplier_email, po.po_number, sr.return_credit_note_number
@@ -331,8 +604,19 @@ foreach ($available_credits as $c) {
                             <p class="text-xs text-gray-400">Net: RM <?= number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) ?></p>
                             <?php if ($inv['invoice_status'] === 'unpaid'): ?>
                             <form method="POST" class="inline">
-                                <input type="hidden" name="remove_credit_note" value="1">
-                                <input type="hidden" name="invoice_id" value="<?= $inv['invoice_id'] ?>">
+                                <?php csrf_field(); ?>
+
+                                <input
+                                    type="hidden"
+                                    name="remove_credit_note"
+                                    value="1"
+                                >
+
+                                <input
+                                    type="hidden"
+                                    name="invoice_id"
+                                    value="<?= (int) $inv['invoice_id'] ?>"
+                                >
                                 <button type="submit" class="text-xs text-red-400 hover:underline mt-0.5">✕ Undo</button>
                             </form>
                             <?php endif; ?>
@@ -369,9 +653,25 @@ foreach ($available_credits as $c) {
                                 <?php if (!$inv['invoice_credit_note_id'] && !empty($credits_by_supplier[$inv['invoice_supplier_id']])): ?>
                                     <?php foreach ($credits_by_supplier[$inv['invoice_supplier_id']] as $credit): ?>
                                     <form method="POST" class="w-full">
-                                        <input type="hidden" name="apply_credit_note" value="1">
-                                        <input type="hidden" name="invoice_id" value="<?= $inv['invoice_id'] ?>">
-                                        <input type="hidden" name="return_id" value="<?= $credit['return_id'] ?>">
+                                        <?php csrf_field(); ?>
+
+                                        <input
+                                            type="hidden"
+                                            name="apply_credit_note"
+                                            value="1"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="invoice_id"
+                                            value="<?= (int) $inv['invoice_id'] ?>"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="return_id"
+                                            value="<?= (int) $credit['return_id'] ?>"
+                                        >
                                         <button type="submit" class="w-full bg-yellow-50 hover:bg-yellow-100 text-yellow-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors whitespace-normal leading-tight">
                                             💳 Apply Credit<br><?= htmlspecialchars($credit['return_credit_note_number']) ?> (RM <?= number_format($credit['return_credit_note_amount'], 2) ?>)
                                         </button>
@@ -380,7 +680,20 @@ foreach ($available_credits as $c) {
                                 <?php endif; ?>
                                 <?php if ($inv['invoice_is_mismatch']): ?>
                                     <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
-                                    <button onclick="openOverrideModal(<?= $inv['invoice_id'] ?>, '<?= htmlspecialchars($inv['invoice_number']) ?>', <?= $inv['invoice_amount'] ?>, <?= $inv['po_total_amount'] ?>)"
+                                    <button
+                                        type="button"
+                                        onclick='openOverrideModal(
+                                            <?= (int) $inv['invoice_id'] ?>,
+                                            <?= json_encode(
+                                                $inv['invoice_number'],
+                                                JSON_HEX_TAG |
+                                                JSON_HEX_AMP |
+                                                JSON_HEX_APOS |
+                                                JSON_HEX_QUOT
+                                            ) ?>,
+                                            <?= (float) $inv['invoice_amount'] ?>,
+                                            <?= (float) ($inv['po_total_amount'] ?? 0) ?>
+                                        )'
                                             class="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center">
                                         ✓ Mark as Paid
                                     </button>
@@ -390,12 +703,45 @@ foreach ($available_credits as $c) {
                                     </span>
                                     <?php endif; ?>
                                 <?php else: ?>
-                                <a href="?mark_paid=<?= $inv['invoice_id'] ?>" onclick="return confirm('Mark this invoice as paid?')"
-                                class="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center">
-                                    ✓ Mark as Paid
-                                </a>
+                                <form
+                                    method="POST"
+                                    class="w-full"
+                                    onsubmit="return confirm('Mark this invoice as paid?')"
+                                >
+                                    <?php csrf_field(); ?>
+
+                                    <input
+                                        type="hidden"
+                                        name="mark_paid"
+                                        value="1"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        name="invoice_id"
+                                        value="<?= (int) $inv['invoice_id'] ?>"
+                                    >
+
+                                    <button
+                                        type="submit"
+                                        class="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center"
+                                    >
+                                        ✓ Mark as Paid
+                                    </button>
+                                </form>
                                 <?php endif; ?>
-                                <button onclick="openRejectModal(<?= $inv['invoice_id'] ?>, '<?= htmlspecialchars($inv['invoice_number']) ?>')"
+                                <button
+                                    type="button"
+                                    onclick='openRejectModal(
+                                        <?= (int) $inv['invoice_id'] ?>,
+                                        <?= json_encode(
+                                            $inv['invoice_number'],
+                                            JSON_HEX_TAG |
+                                            JSON_HEX_AMP |
+                                            JSON_HEX_APOS |
+                                            JSON_HEX_QUOT
+                                        ) ?>
+                                    )'
                                         class="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center">
                                     ✕ Reject
                                 </button>
@@ -440,6 +786,7 @@ foreach ($available_credits as $c) {
             <p class="text-sm text-gray-600 mb-4">You are about to pay an amount that <strong>does not match</strong> the original Purchase Order. This action will be logged with your account for audit purposes. Please confirm this is intentional and provide a reason.</p>
 
             <form method="POST">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="mark_paid_confirm" value="1">
                 <input type="hidden" name="invoice_id" id="overrideInvoiceId">
                 <textarea name="override_reason" rows="3" required placeholder="Required: Explain why you are proceeding despite the mismatch (e.g. 'Confirmed with supplier via phone — correct amount is RM1,000 due to partial delivery')"
@@ -471,6 +818,7 @@ foreach ($available_credits as $c) {
             </div>
             <p class="text-sm text-gray-500 mb-4">Rejecting <strong id="rejectInvoiceLabel"></strong>. The supplier will be notified to correct and resubmit.</p>
             <form method="POST">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="reject_invoice" value="1">
                 <input type="hidden" name="invoice_id" id="rejectInvoiceId">
                 <textarea name="reject_reason" rows="3" required placeholder="e.g. Amount does not match PO total. Please verify and resubmit."

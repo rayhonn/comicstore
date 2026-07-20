@@ -366,9 +366,11 @@ $order_num = '#' . str_pad(time(), 4, '0', STR_PAD_LEFT);
         }
     }
 
+    let timerInterval = null;
+
     updateTimer();
 
-    const timerInterval = setInterval(
+    timerInterval = setInterval(
         updateTimer,
         1000
     );
