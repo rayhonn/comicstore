@@ -1,10 +1,8 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: ../login.php');
-    exit;
-}
-require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_admin();
+
+require_once __DIR__ . '/../includes/db.php';
 
 $error = '';
 $success = '';
@@ -300,7 +298,16 @@ $suppliers = $pdo->query("
                                     class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors">
                             </div>
                         </div>
-                        <p class="text-xs text-gray-400 mt-2">Supplier can log in at: <code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">/comicstore/supplier/login.php</code></p>
+                        <p class="text-xs text-gray-400 mt-2">
+                            Supplier can log in at:
+                            <code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
+                                <?= htmlspecialchars(
+                                    app_path('supplier/login.php'),
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
+                            </code>
+                        </p>
                     </div>
                 </div>
 
