@@ -1,10 +1,9 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: ../login.php');
-    exit;
-}
-require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_admin();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 $success = '';
 if (isset($_SESSION['flash_success'])) {
@@ -12,20 +11,69 @@ if (isset($_SESSION['flash_success'])) {
     unset($_SESSION['flash_success']);
 }
 
-// Handle status update
-if (isset($_GET['confirm'])) {
-    $pdo->prepare("UPDATE purchase_orders SET po_status = 'confirmed', po_confirmed_by = ? WHERE po_id = ?")->execute([$_SESSION['user_id'], $_GET['confirm']]);
-    header('Location: purchase_orders.php');
-    exit;
-}
-if (isset($_GET['cancel'])) {
-    if (($_SESSION['admin_level'] ?? '') !== 'senior_admin') {
-        $_SESSION['flash_error'] = 'Only senior admin can cancel purchase orders.';
+// Handle PO status update
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['po_action'])
+) {
+    csrf_verify();
+
+    $poId = filter_input(
+        INPUT_POST,
+        'po_id',
+        FILTER_VALIDATE_INT
+    );
+
+    if (!$poId) {
+        $_SESSION['flash_error'] = 'Invalid purchase order.';
         header('Location: purchase_orders.php');
         exit;
     }
-    $pdo->prepare("UPDATE purchase_orders SET po_status = 'cancelled' WHERE po_id = ?")->execute([$_GET['cancel']]);
-    $_SESSION['flash_success'] = 'Purchase order cancelled.';
+
+    $action = $_POST['po_action'];
+
+    if ($action === 'confirm') {
+        $stmt = $pdo->prepare(
+            "UPDATE purchase_orders
+             SET po_status = 'confirmed',
+                 po_confirmed_by = ?
+             WHERE po_id = ?
+             AND po_status = 'sent'"
+        );
+
+        $stmt->execute([
+            current_user_id(),
+            $poId
+        ]);
+
+        $_SESSION['flash_success'] =
+            $stmt->rowCount() > 0
+                ? 'Purchase order confirmed.'
+                : 'Purchase order could not be confirmed.';
+    } elseif ($action === 'cancel') {
+        if (($_SESSION['admin_level'] ?? '') !== 'senior_admin') {
+            $_SESSION['flash_error'] =
+                'Only senior admin can cancel purchase orders.';
+
+            header('Location: purchase_orders.php');
+            exit;
+        }
+
+        $stmt = $pdo->prepare(
+            "UPDATE purchase_orders
+             SET po_status = 'cancelled'
+             WHERE po_id = ?
+             AND po_status IN ('sent', 'confirmed')"
+        );
+
+        $stmt->execute([$poId]);
+
+        $_SESSION['flash_success'] =
+            $stmt->rowCount() > 0
+                ? 'Purchase order cancelled.'
+                : 'Purchase order could not be cancelled.';
+    }
+
     header('Location: purchase_orders.php');
     exit;
 }
@@ -121,12 +169,46 @@ $pos = $pdo->query("
                                 <a href="po_detail.php?id=<?= $po['po_id'] ?>" class="text-xs text-blue-600 hover:underline font-semibold">View</a>
                                 <?php if ($po['po_status'] === 'sent'): ?>
                                 <span class="text-gray-300">|</span>
-                                <a href="?confirm=<?= $po['po_id'] ?>" class="text-xs text-green-600 hover:underline font-semibold">Confirm</a>
+                                <form method="POST" class="inline">
+                                    <?php csrf_field(); ?>
+                                    <input
+                                        type="hidden" name="po_action" value="confirm">
+
+                                    <input
+                                        type="hidden" name="po_id" value="<?= (int) $po['po_id'] ?>">
+
+                                    <button
+                                        type="submit" onclick="return confirm('Confirm this PO?')" class="text-xs text-green-600 hover:underline font-semibold">
+                                        Confirm
+                                    </button>
+                                </form>
                                 <?php endif; ?>
                                 <?php if (in_array($po['po_status'], ['sent', 'confirmed'])): ?>
                                 <span class="text-gray-300">|</span>
                                 <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
-                                <a href="?cancel=<?= $po['po_id'] ?>" onclick="return confirm('Cancel this PO?')" class="text-xs text-red-500 hover:underline font-semibold">Cancel</a>
+                                <form method="POST" class="inline">
+                                    <?php csrf_field(); ?>
+
+                                    <input
+                                        type="hidden"
+                                        name="po_action"
+                                        value="cancel"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        name="po_id"
+                                        value="<?= (int) $po['po_id'] ?>"
+                                    >
+
+                                    <button
+                                        type="submit"
+                                        onclick="return confirm('Cancel this PO?')"
+                                        class="text-xs text-red-500 hover:underline font-semibold"
+                                    >
+                                        Cancel
+                                    </button>
+                                </form>
                                 <?php else: ?>
                                 <span class="text-xs text-gray-300" title="Only senior admin can cancel orders">🔒 Cancel</span>
                                 <?php endif; ?>
