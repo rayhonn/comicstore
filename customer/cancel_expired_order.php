@@ -1,63 +1,225 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
-    exit;
-}
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-require_once '../vendor/autoload.php';
-require_once '../includes/db.php';
-require_once '../includes/config.php';
-require_once '../includes/notifications.php';
-require_once '../includes/mail_config.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_customer();
 
-$user_id = $_SESSION['user_id'];
+require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/config.php';
+require_once __DIR__ . '/../includes/notifications.php';
+require_once __DIR__ . '/../includes/mail_config.php';
 
-// Find expired order
-$expired = $pdo->prepare("
-    SELECT * FROM orders
-    WHERE order_user_id = ?
-    AND order_payment_status = 'pending_confirmation'
-    AND order_confirm_expires_at < NOW()
-    LIMIT 1
-");
-$expired->execute([$user_id]);
-$order = $expired->fetch(PDO::FETCH_ASSOC);
+header('Content-Type: application/json');
 
-if (!$order) {
-    echo json_encode(['success' => false]);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+
+    echo json_encode([
+        'success' => false,
+        'message' => 'Method not allowed.',
+    ]);
     exit;
 }
 
-// Cancel order
-$pdo->prepare("UPDATE orders SET order_payment_status = 'cancelled', order_status = 'cancelled' WHERE order_id = ?")
-    ->execute([$order['order_id']]);
+csrf_verify();
 
-// Restore stock
-$items = $pdo->prepare("SELECT * FROM order_items WHERE order_item_order_id = ?");
-$items->execute([$order['order_id']]);
-foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
-    if ($item['order_item_type'] === 'physical') {
-        $pdo->prepare("UPDATE product_physical SET physical_stock_quantity = physical_stock_quantity + ? WHERE physical_product_id = ?")
-            ->execute([$item['order_item_quantity'], $item['order_item_product_id']]);
-    }
+$user_id = current_user_id();
+
+$order_id = filter_input(
+    INPUT_POST,
+    'order_id',
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
+
+if (!$order_id) {
+    http_response_code(422);
+
+    echo json_encode([
+        'success' => false,
+        'message' => 'Invalid order.',
+    ]);
+    exit;
 }
 
-// Restore voucher
-if (!empty($order['order_voucher_code'])) {
-    $v = $pdo->prepare("SELECT voucher_id FROM vouchers WHERE voucher_code = ?");
-    $v->execute([$order['order_voucher_code']]);
-    $v = $v->fetch(PDO::FETCH_ASSOC);
-    if ($v) {
-        $pdo->prepare("DELETE FROM voucher_usage WHERE usage_order_id = ?")
-            ->execute([$order['order_id']]);
-        $pdo->prepare("UPDATE vouchers SET voucher_used_count = GREATEST(0, voucher_used_count - 1) WHERE voucher_code = ?")
-            ->execute([$order['order_voucher_code']]);
-        $pdo->prepare("UPDATE user_vouchers SET uv_is_used = 0, uv_status = 'available', uv_pending_at = NULL, uv_used_at = NULL WHERE uv_voucher_id = ? AND uv_user_id = ?")
-            ->execute([$v['voucher_id'], $user_id]);
+// Cancel expired order, restore stock and restore voucher atomically
+try {
+    $pdo->beginTransaction();
+
+    $expired = $pdo->prepare("
+        SELECT *
+        FROM orders
+        WHERE order_id = ?
+        AND order_user_id = ?
+        AND order_payment_status = 'pending_confirmation'
+        AND order_confirm_expires_at < NOW()
+        FOR UPDATE
+    ");
+    $expired->execute([
+        $order_id,
+        $user_id,
+    ]);
+
+    $order = $expired->fetch(PDO::FETCH_ASSOC);
+
+    if (!$order) {
+        throw new RuntimeException(
+            'Order is not eligible for cancellation.'
+        );
     }
+
+    // Cancel the order only if it is still pending confirmation
+    $cancel = $pdo->prepare("
+        UPDATE orders
+        SET order_payment_status = 'cancelled',
+            order_status = 'cancelled'
+        WHERE order_id = ?
+        AND order_user_id = ?
+        AND order_payment_status = 'pending_confirmation'
+    ");
+    $cancel->execute([
+        $order_id,
+        $user_id,
+    ]);
+
+    if ($cancel->rowCount() !== 1) {
+        throw new RuntimeException(
+            'Order has already been processed.'
+        );
+    }
+
+    // Get order items
+    $items = $pdo->prepare("
+        SELECT
+            order_item_product_id,
+            order_item_quantity,
+            order_item_type
+        FROM order_items
+        WHERE order_item_order_id = ?
+    ");
+    $items->execute([$order_id]);
+
+    $restore_stock = $pdo->prepare("
+        UPDATE product_physical
+        SET physical_stock_quantity =
+            physical_stock_quantity + ?
+        WHERE physical_product_id = ?
+    ");
+
+    // Restore physical stock
+    foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
+        if ($item['order_item_type'] !== 'physical') {
+            continue;
+        }
+
+        $restore_stock->execute([
+            (int) $item['order_item_quantity'],
+            (int) $item['order_item_product_id'],
+        ]);
+
+        if ($restore_stock->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Unable to restore order stock.'
+            );
+        }
+    }
+
+    // Restore voucher
+    if (!empty($order['order_voucher_code'])) {
+        $voucher_stmt = $pdo->prepare("
+            SELECT voucher_id
+            FROM vouchers
+            WHERE voucher_code = ?
+            FOR UPDATE
+        ");
+        $voucher_stmt->execute([
+            $order['order_voucher_code'],
+        ]);
+
+        $voucher_id = $voucher_stmt->fetchColumn();
+
+        if ($voucher_id !== false) {
+            $delete_usage = $pdo->prepare("
+                DELETE FROM voucher_usage
+                WHERE usage_order_id = ?
+                AND usage_user_id = ?
+                AND usage_voucher_id = ?
+            ");
+            $delete_usage->execute([
+                $order_id,
+                $user_id,
+                $voucher_id,
+            ]);
+
+            /*
+             * Reduce the used count only when this order's
+             * voucher usage record was actually deleted.
+             */
+            if ($delete_usage->rowCount() === 1) {
+                $reduce_count = $pdo->prepare("
+                    UPDATE vouchers
+                    SET voucher_used_count =
+                        voucher_used_count - 1
+                    WHERE voucher_id = ?
+                    AND voucher_used_count > 0
+                ");
+                $reduce_count->execute([$voucher_id]);
+
+                if ($reduce_count->rowCount() !== 1) {
+                    throw new RuntimeException(
+                        'Unable to restore voucher usage.'
+                    );
+                }
+            }
+
+            $restore_voucher = $pdo->prepare("
+                UPDATE user_vouchers
+                SET uv_is_used = 0,
+                    uv_status = 'available',
+                    uv_pending_at = NULL,
+                    uv_used_at = NULL
+                WHERE uv_voucher_id = ?
+                AND uv_user_id = ?
+            ");
+            $restore_voucher->execute([
+                $voucher_id,
+                $user_id,
+            ]);
+        }
+    }
+
+    $pdo->commit();
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    if ($e instanceof RuntimeException) {
+        http_response_code(409);
+
+        echo json_encode([
+            'success' => false,
+            'message' => $e->getMessage(),
+        ]);
+    } else {
+        error_log(
+            'Expired order cancellation failed: ' .
+            $e->getMessage()
+        );
+
+        http_response_code(500);
+
+        echo json_encode([
+            'success' => false,
+            'message' => 'Unable to cancel the order.',
+        ]);
+    }
+
+    exit;
 }
 
 // Send notification

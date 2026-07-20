@@ -3,14 +3,37 @@ require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
-$order_id = $_GET['order_id'] ?? null;
-if (!$order_id) { header('Location: orders.php'); exit; }
+$order_id = filter_input(
+    INPUT_GET,
+    'order_id',
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
 
-$order = $pdo->prepare("SELECT * FROM orders WHERE order_id = ? AND order_user_id = ?");
-$order->execute([$order_id, $_SESSION['user_id']]);
+if (!$order_id) {
+    redirect_to(app_path('customer/orders.php'));
+}
+
+$order = $pdo->prepare("
+    SELECT *
+    FROM orders
+    WHERE order_id = ?
+    AND order_user_id = ?
+    AND order_payment_status = 'pending_confirmation'
+    AND order_confirm_expires_at IS NOT NULL
+");
+$order->execute([
+    $order_id,
+    current_user_id(),
+]);
+
 $order = $order->fetch(PDO::FETCH_ASSOC);
-if (!$order) { header('Location: orders.php'); exit; }
+
+if (!$order) {
+    redirect_to(app_path('customer/orders.php'));
+}
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
 $expires = new DateTime($order['order_confirm_expires_at']);
@@ -85,44 +108,141 @@ $order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
     </div>
 
     <script>
-    let timeLeft = <?= $diff ?>;
-    const orderId = <?= $order_id ?>;
+    let timeLeft = <?= (int) $diff ?>;
+
+    const orderId = <?= (int) $order_id ?>;
+    const csrfToken = <?= json_encode(csrf_token()) ?>;
+
+    let countdownInterval = null;
+    let cancellationStarted = false;
+
+    async function cancelExpiredOrder() {
+        if (cancellationStarted) {
+            return;
+        }
+
+        cancellationStarted = true;
+
+        if (countdownInterval !== null) {
+            clearInterval(countdownInterval);
+        }
+
+        try {
+            const response = await fetch(
+                'cancel_expired_order.php',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type':
+                            'application/x-www-form-urlencoded;charset=UTF-8',
+                        'Accept': 'application/json'
+                    },
+                    body: new URLSearchParams({
+                        csrf_token: csrfToken,
+                        order_id: orderId.toString()
+                  })
+                }
+            );
+
+            const data = await response
+                .json()
+                .catch(() => null);
+
+            if (
+                response.ok &&
+                data !== null &&
+                data.success === true
+            ) {
+                window.location.href =
+                    'orders.php?cancelled=1';
+
+                return;
+            }
+
+            checkStatus();
+
+            setTimeout(() => {
+                cancellationStarted = false;
+                cancelExpiredOrder();
+            }, 3000);
+        } catch (error) {
+            setTimeout(() => {
+                cancellationStarted = false;
+                cancelExpiredOrder();
+            }, 3000);
+        }
+    }
 
     function updateCountdown() {
         if (timeLeft <= 0) {
-            document.getElementById('countdown').textContent = '00:00';
-            document.getElementById('countdown').classList.add('text-gray-400');
-            // Call backend to cancel + notify
-            fetch('cancel_expired_order.php', { method: 'POST' })
-                .finally(() => {
-                    setTimeout(() => { window.location.href = 'orders.php?cancelled=1'; }, 1000);
-                });
+            document
+                .getElementById('countdown')
+                .textContent = '00:00';
+
+            document
+                .getElementById('countdown')
+                .classList
+                .add('text-gray-400');
+
+            cancelExpiredOrder();
             return;
         }
-        const mins = Math.floor(timeLeft / 60).toString().padStart(2, '0');
-        const secs = (timeLeft % 60).toString().padStart(2, '0');
-        document.getElementById('countdown').textContent = mins + ':' + secs;
+
+        const mins = Math
+            .floor(timeLeft / 60)
+            .toString()
+            .padStart(2, '0');
+
+        const secs = (timeLeft % 60)
+            .toString()
+            .padStart(2, '0');
+
+        document
+            .getElementById('countdown')
+            .textContent = mins + ':' + secs;
+
         timeLeft--;
     }
 
-    updateCountdown();
-    setInterval(updateCountdown, 1000);
-
-    // Poll every 3 seconds to check if confirmed
     function checkStatus() {
-        fetch('check_payment_status.php?order_id=' + orderId)
-            .then(r => r.json())
+        fetch(
+            'check_payment_status.php?order_id=' +
+            orderId
+        )
+            .then(response => response.json())
             .then(data => {
                 if (data.status === 'confirmed') {
-                    document.getElementById('statusMsg').classList.remove('hidden');
-                    setTimeout(() => { window.location.href = 'order_success.php?order_id=' + orderId; }, 2000);
+                    document
+                        .getElementById('statusMsg')
+                        .classList
+                        .remove('hidden');
+
+                    setTimeout(() => {
+                        window.location.href =
+                            'order_success.php?order_id=' +
+                            orderId;
+                    }, 2000);
                 } else if (data.status === 'cancelled') {
-                    window.location.href = 'orders.php?cancelled=1';
+                    window.location.href =
+                        'orders.php?cancelled=1';
                 }
-            }).catch(() => {});
+            })
+            .catch(() => {});
     }
 
-    setInterval(checkStatus, 3000);
-    </script>
+    updateCountdown();
+
+    if (!cancellationStarted) {
+        countdownInterval = setInterval(
+            updateCountdown,
+            1000
+        );
+    }
+
+    setInterval(
+        checkStatus,
+        3000
+    );
+</script>
 </body>
 </html>
