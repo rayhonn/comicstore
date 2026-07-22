@@ -1316,9 +1316,29 @@ if ($has_active_stripe_session) {
         allowNavigation = true;
 
         cancelPendingPayment()
-            .finally(() => {
+            .then(async response => {
+                const result =
+                    await response.json();
+
+                if (
+                    !response.ok ||
+                    !result.success
+                ) {
+                    throw new Error(
+                        result.message ||
+                        'Unable to cancel checkout.'
+                    );
+                }
+
                 window.location.href =
                     'payment_cancel.php';
+            })
+            .catch(error => {
+                allowNavigation = false;
+
+                window.alert(
+                    error.message
+                );
             });
     }
 
