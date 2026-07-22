@@ -48,39 +48,121 @@ if (
         $session_id
     )
 ) {
-    redirect_to(app_path('customer/cart.php'));
-}
-
-\Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
-
-try {
-    $stripe_session =
-        \Stripe\Checkout\Session::retrieve($session_id);
-
-    if ($stripe_session->payment_status !== 'paid') {
-        redirect_to(
-            app_path('customer/payment_cancel.php')
-        );
-    }
-} catch (\Stripe\Exception\ApiErrorException $e) {
-    error_log(
-        'Stripe session verification failed: ' .
-        $e->getMessage()
-    );
-
     redirect_to(
-        app_path('customer/payment_cancel.php')
+        app_path('customer/cart.php')
     );
 }
 
 $order = $_SESSION['pending_order'];
 $user_id = current_user_id();
 
-if ((int) ($order['user_id'] ?? 0) !== $user_id) {
-    redirect_to(app_path('customer/cart.php'));
+if (
+    !is_array($order) ||
+    (int) ($order['user_id'] ?? 0)
+        !== $user_id
+) {
+    redirect_to(
+        app_path('customer/cart.php')
+    );
 }
 
-date_default_timezone_set('Asia/Kuala_Lumpur');
+\Stripe\Stripe::setApiKey(
+    STRIPE_SECRET_KEY
+);
+
+try {
+    $stripe_session =
+        \Stripe\Checkout\Session::retrieve(
+            $session_id
+        );
+
+    $payment_status = (string) (
+        $stripe_session->payment_status
+        ?? ''
+    );
+
+    $session_status = (string) (
+        $stripe_session->status
+        ?? ''
+    );
+
+    $session_user_id = (string) (
+        $stripe_session->client_reference_id
+        ?? ''
+    );
+
+    $expected_amount = (int) round(
+        (float) ($order['total'] ?? 0)
+        * 100
+    );
+
+    $session_amount = (int) (
+        $stripe_session->amount_total
+        ?? -1
+    );
+
+    $expected_currency = strtolower(
+        (string) STRIPE_CURRENCY
+    );
+
+    $session_currency = strtolower(
+        (string) (
+            $stripe_session->currency
+            ?? ''
+        )
+    );
+
+    if (
+        $payment_status !== 'paid' ||
+        $session_status !== 'complete' ||
+        $session_user_id !==
+            (string) $user_id ||
+        $expected_amount <= 0 ||
+        $session_amount !==
+            $expected_amount ||
+        $session_currency !==
+            $expected_currency
+    ) {
+        error_log(
+            'Stripe Checkout Session validation failed: ' .
+            $session_id
+        );
+
+        redirect_to(
+            app_path(
+                'customer/payment_cancel.php'
+            )
+        );
+    }
+} catch (
+    \Stripe\Exception\ApiErrorException $e
+) {
+    error_log(
+        'Stripe session verification failed: ' .
+        $e->getMessage()
+    );
+
+    redirect_to(
+        app_path(
+            'customer/payment_cancel.php'
+        )
+    );
+} catch (Throwable $e) {
+    error_log(
+        'Stripe payment validation failed: ' .
+        $e->getMessage()
+    );
+
+    redirect_to(
+        app_path(
+            'customer/payment_cancel.php'
+        )
+    );
+}
+
+date_default_timezone_set(
+    'Asia/Kuala_Lumpur'
+);
 
 $token = bin2hex(random_bytes(32));
 $expires_at = date(
@@ -280,7 +362,10 @@ $_SESSION['stripe_processed_order_id'] =
     $order_id;
 
 unset($_SESSION['pending_order']);
+unset($_SESSION['payment_lock']);
 unset($_SESSION['stripe_session_id']);
+unset($_SESSION['stripe_checkout_url']);
+unset($_SESSION['stripe_expires_at']);
 
 $order_num =
     '#' . str_pad(

@@ -3,46 +3,155 @@ require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
-$user_id = $_SESSION['user_id'];
+$user_id = current_user_id();
 
-// Auto cancel expired pending orders for this user
-$expired_orders = $pdo->prepare("
-    SELECT o.order_id FROM orders o
-    WHERE o.order_user_id = ? 
-    AND o.order_payment_status = 'pending_confirmation'
-    AND o.order_confirm_expires_at < NOW()
-");
-$expired_orders->execute([$user_id]);
-$expired_orders = $expired_orders->fetchAll(PDO::FETCH_ASSOC);
+$pending_checkout =
+    $_SESSION['pending_order'] ?? null;
 
-foreach ($expired_orders as $exp) {
-    $pdo->prepare("UPDATE orders SET order_payment_status = 'cancelled', order_status = 'cancelled' WHERE order_id = ?")
-        ->execute([$exp['order_id']]);
-    $exp_items = $pdo->prepare("SELECT * FROM order_items WHERE order_item_order_id = ?");
-    $exp_items->execute([$exp['order_id']]);
-    $exp_items = $exp_items->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($exp_items as $ei) {
-        if ($ei['order_item_type'] === 'physical') {
-            $pdo->prepare("UPDATE product_physical SET physical_stock_quantity = physical_stock_quantity + ? WHERE physical_product_id = ?")
-                ->execute([$ei['order_item_quantity'], $ei['order_item_product_id']]);
+$has_pending_checkout =
+    is_array($pending_checkout) &&
+    (int) (
+        $pending_checkout['user_id'] ?? 0
+    ) === $user_id;
+
+$pending_checkout_total = 0.0;
+$pending_checkout_item_count = 0;
+$pending_checkout_deadline = 0;
+$pending_checkout_expired = false;
+$continue_payment_url = '';
+$continue_payment_label = '';
+$pending_checkout_status = '';
+
+$stripe_session_id =
+    $_SESSION['stripe_session_id'] ?? '';
+
+$stripe_expires_at = filter_var(
+    $_SESSION['stripe_expires_at'] ?? null,
+    FILTER_VALIDATE_INT
+);
+
+$has_saved_stripe_session =
+    is_string($stripe_session_id) &&
+    $stripe_session_id !== '';
+
+if ($has_pending_checkout) {
+    $pending_checkout_total =
+        (float) (
+            $pending_checkout['total'] ?? 0
+        );
+
+    $pending_checkout_item_count =
+        is_array(
+            $pending_checkout['items'] ?? null
+        )
+            ? count($pending_checkout['items'])
+            : 0;
+
+    if ($has_saved_stripe_session) {
+        $pending_checkout_deadline =
+            $stripe_expires_at !== false &&
+            $stripe_expires_at !== null
+                ? (int) $stripe_expires_at
+                : 0;
+
+        $continue_payment_url =
+            'resume_payment.php';
+
+        $pending_checkout_status =
+            'Stripe payment has not been completed.';
+    } else {
+        $payment_lock =
+            $_SESSION['payment_lock'] ?? null;
+
+        $locked_at = is_array($payment_lock)
+            ? filter_var(
+                $payment_lock['locked_at'] ?? null,
+                FILTER_VALIDATE_INT
+            )
+            : false;
+
+        if (
+            $locked_at !== false &&
+            $locked_at !== null
+        ) {
+            $pending_checkout_deadline =
+                (int) $locked_at + 300;
         }
+
+        $continue_payment_url =
+            'payment_gateway.php';
+
+        $pending_checkout_status =
+            'Checkout has not been completed.';
+    }
+
+    $pending_checkout_expired =
+        $pending_checkout_deadline > 0 &&
+        $pending_checkout_deadline <= time();
+
+    if ($pending_checkout_expired) {
+        $continue_payment_label =
+            'Review Checkout';
+    } elseif ($has_saved_stripe_session) {
+        $continue_payment_label =
+            'Continue Stripe Payment';
+    } else {
+        $continue_payment_label =
+            'Continue Payment';
     }
 }
 
 $stmt = $pdo->prepare("
-    SELECT o.*, a.address_recipient_name, a.address_street, a.address_city, a.address_taman
+    SELECT
+        o.*,
+        a.address_recipient_name,
+        a.address_street,
+        a.address_city,
+        a.address_taman
     FROM orders o
-    LEFT JOIN addresses a ON o.order_address_id = a.address_id
+    LEFT JOIN addresses a
+        ON o.order_address_id = a.address_id
     WHERE o.order_user_id = ?
     ORDER BY o.order_created_at DESC
 ");
+
 $stmt->execute([$user_id]);
-$orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$orders = $stmt->fetchAll(
+    PDO::FETCH_ASSOC
+);
+
+$allowed_filters = [
+    'all',
+    'pending',
+    'processing',
+    'shipped',
+    'delivered',
+    'cancelled',
+];
 
 $filter = $_GET['filter'] ?? 'all';
+
+if (
+    !is_string($filter) ||
+    !in_array(
+        $filter,
+        $allowed_filters,
+        true
+    )
+) {
+    $filter = 'all';
+}
+
 if ($filter !== 'all') {
-    $orders = array_filter($orders, fn($o) => $o['order_status'] === $filter);
+    $orders = array_filter(
+        $orders,
+        static fn(array $order): bool =>
+            $order['order_status'] ===
+            $filter
+    );
 }
 ?>
 <!DOCTYPE html>
@@ -80,6 +189,154 @@ if ($filter !== 'all') {
                     </div>
                 <?php endif; ?>
 
+                <?php if (isset($_GET['checkout_cancelled'])): ?>
+                    <div
+                        class="bg-green-50 border border-green-200 text-green-600 text-sm px-4 py-3 rounded-xl mb-5"
+                    >
+                        Pending checkout cancelled successfully.
+                    </div>
+                <?php endif; ?>
+
+                <?php if (isset($_GET['payment_resume_error'])): ?>
+                    <div
+                        class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl mb-5"
+                    >
+                        The Stripe payment session could not be checked.
+                        Please try again.
+                    </div>
+                <?php endif; ?>
+
+                <?php if ($has_pending_checkout): ?>
+                    <div
+                        class="bg-white border border-yellow-200 rounded-2xl shadow-sm overflow-hidden mb-6"
+                        id="pendingCheckoutCard"
+                        data-deadline="<?= (int) $pending_checkout_deadline ?>"
+                    >
+                        <div
+                            class="bg-yellow-50 border-b border-yellow-100 px-6 py-4 flex items-center justify-between gap-4 flex-wrap"
+                        >
+                            <div class="flex items-center gap-3">
+                                <div
+                                    class="w-11 h-11 bg-yellow-100 rounded-full flex items-center justify-center text-xl"
+                                >
+                                    ⏳
+                                </div>
+
+                                <div>
+                                    <p
+                                        class="font-black text-gray-800"
+                                    >
+                                        Pending Checkout
+                                    </p>
+
+                                    <p
+                                        class="text-xs text-gray-500"
+                                    >
+                                        <?= htmlspecialchars(
+                                            $pending_checkout_status,
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <span
+                                class="bg-yellow-100 text-yellow-700 text-xs px-3 py-1 rounded-full font-semibold"
+                            >
+                                Not Completed
+                            </span>
+                        </div>
+
+                        <div class="px-6 py-5">
+                            <div
+                                class="flex items-center justify-between gap-4 flex-wrap"
+                            >
+                                <div>
+                                    <p
+                                        class="text-xs text-gray-400 mb-1"
+                                    >
+                                        Amount
+                                    </p>
+
+                                    <p
+                                        class="text-2xl font-black text-red-600"
+                                    >
+                                        RM
+                                        <?= number_format(
+                                            $pending_checkout_total,
+                                            2
+                                        ) ?>
+                                    </p>
+
+                                    <p
+                                        class="text-xs text-gray-400 mt-1"
+                                    >
+                                        <?= $pending_checkout_item_count ?>
+                                        item(s)
+                                    </p>
+                                </div>
+
+                                <div class="text-right">
+                                    <p
+                                        class="text-xs text-gray-400 mb-1"
+                                    >
+                                        Time Remaining
+                                    </p>
+
+                                    <p
+                                        class="text-xl font-black text-yellow-700"
+                                        id="pendingCheckoutTimer"
+                                    >
+                                        <?= $pending_checkout_expired
+                                            ? 'Expired'
+                                            : '--:--' ?>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div
+                                class="bg-gray-50 rounded-xl p-4 mt-5"
+                            >
+                                <p
+                                    class="text-xs text-gray-500 leading-relaxed"
+                                >
+                                    Continue this checkout before it expires.
+                                    Stripe payments can be resumed using the
+                                    same payment session.
+                                </p>
+                            </div>
+
+                            <div
+                                class="flex flex-col sm:flex-row gap-3 mt-5"
+                            >
+                                <a
+                                    href="<?= htmlspecialchars(
+                                        $continue_payment_url,
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>"
+                                    class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm text-center transition-colors"
+                                >
+                                    <?= htmlspecialchars(
+                                        $continue_payment_label,
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </a>
+
+                                <button
+                                    type="button"
+                                    id="cancelPendingCheckoutButton"
+                                    onclick="cancelPendingCheckout()"
+                                    class="flex-1 border-2 border-gray-100 hover:bg-gray-50 text-gray-600 font-semibold py-3 rounded-xl text-sm transition-colors"
+                                >
+                                    Cancel Checkout
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                <?php endif; ?>
                 <?php
                 $filters = [
                     'all' => 'All Orders',
@@ -114,8 +371,15 @@ if ($filter !== 'all') {
                 <?php if (count($orders) === 0): ?>
                     <div class="bg-white rounded-2xl shadow-sm p-12 text-center">
                         <div class="text-6xl mb-4">📦</div>
-                        <p class="text-gray-500 font-medium mb-2">No orders found</p>
-                        <p class="text-gray-400 text-sm mb-6">You haven't placed any orders yet.</p>
+                        <p class="text-gray-500 font-medium mb-2">
+                            No placed orders found
+                        </p>
+
+                        <p class="text-gray-400 text-sm mb-6">
+                            <?= $has_pending_checkout
+                                ? 'Your unfinished checkout is shown above.'
+                                : 'You have not placed any orders yet.' ?>
+                        </p>
                         <a href="home.php" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-colors duration-200 inline-block">
                             Start Shopping
                         </a>
@@ -334,5 +598,156 @@ if ($filter !== 'all') {
         </div>
     </div>
 
+<script>
+const pendingCheckoutDeadline =
+    <?= (int) $pending_checkout_deadline ?> *
+    1000;
+
+const pendingCheckoutCsrfToken =
+    <?= json_encode(csrf_token()) ?>;
+
+let pendingCheckoutTimerInterval = null;
+
+function updatePendingCheckoutTimer() {
+    const timerElement =
+        document.getElementById(
+            'pendingCheckoutTimer'
+        );
+
+    if (
+        !timerElement ||
+        pendingCheckoutDeadline <= 0
+    ) {
+        return;
+    }
+
+    const remainingMilliseconds =
+        Math.max(
+            0,
+            pendingCheckoutDeadline -
+                Date.now()
+        );
+
+    const remainingSeconds =
+        Math.floor(
+            remainingMilliseconds / 1000
+        );
+
+    if (remainingSeconds <= 0) {
+        timerElement.textContent =
+            'Expired';
+
+        timerElement.classList.remove(
+            'text-yellow-700'
+        );
+
+        timerElement.classList.add(
+            'text-red-600'
+        );
+
+        clearInterval(
+            pendingCheckoutTimerInterval
+        );
+
+        return;
+    }
+
+    const minutes = Math.floor(
+        remainingSeconds / 60
+    )
+        .toString()
+        .padStart(2, '0');
+
+    const seconds =
+        (remainingSeconds % 60)
+            .toString()
+            .padStart(2, '0');
+
+    timerElement.textContent =
+        minutes + ':' + seconds;
+
+    if (remainingSeconds <= 60) {
+        timerElement.classList.remove(
+            'text-yellow-700'
+        );
+
+        timerElement.classList.add(
+            'text-red-600'
+        );
+    }
+}
+
+function cancelPendingCheckout() {
+    const confirmed = window.confirm(
+        'Cancel this pending checkout?'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    const button =
+        document.getElementById(
+            'cancelPendingCheckoutButton'
+        );
+
+    if (button) {
+        button.disabled = true;
+        button.textContent =
+            'Cancelling...';
+    }
+
+    fetch(
+        'cancel_pending_voucher.php',
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type':
+                    'application/x-www-form-urlencoded;charset=UTF-8',
+                'Accept':
+                    'application/json'
+            },
+            body: new URLSearchParams({
+                csrf_token:
+                    pendingCheckoutCsrfToken
+            })
+        }
+    )
+        .then(async response => {
+            const result =
+                await response.json();
+
+            if (
+                !response.ok ||
+                !result.success
+            ) {
+                throw new Error(
+                    result.message ||
+                    'Unable to cancel checkout.'
+                );
+            }
+
+            window.location.href =
+                'orders.php?checkout_cancelled=1';
+        })
+        .catch(error => {
+            window.alert(error.message);
+
+            if (button) {
+                button.disabled = false;
+                button.textContent =
+                    'Cancel Checkout';
+            }
+        });
+}
+
+updatePendingCheckoutTimer();
+
+pendingCheckoutTimerInterval =
+    setInterval(
+        updatePendingCheckoutTimer,
+        1000
+    );
+</script>
 </body>
 </html>
