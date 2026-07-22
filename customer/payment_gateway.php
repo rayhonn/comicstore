@@ -77,29 +77,27 @@ $stripe_expires_at = filter_var(
     FILTER_VALIDATE_INT
 );
 
-$has_saved_stripe_session =
+$has_stripe_session_id =
     is_string($stripe_session_id) &&
-    $stripe_session_id !== '' &&
+    $stripe_session_id !== '';
+
+$has_saved_stripe_session =
+    $has_stripe_session_id &&
     is_string($stripe_checkout_url) &&
     $stripe_checkout_url !== '' &&
     $stripe_expires_at !== false &&
     $stripe_expires_at !== null;
 
 if (
-    $has_saved_stripe_session &&
-    $stripe_expires_at <= time()
+    $has_stripe_session_id &&
+    (
+        !$has_saved_stripe_session ||
+        $stripe_expires_at <= time()
+    )
 ) {
-    restorePendingCheckoutVoucher(
-        $pdo,
-        $order,
-        $user_id
-    );
-
-    clearCheckoutSessionState();
-
     redirect_to(
         app_path(
-            'customer/cart.php?payment_expired=1'
+            'customer/resume_payment.php'
         )
     );
 }
