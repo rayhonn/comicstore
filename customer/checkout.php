@@ -3,15 +3,52 @@ require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
-$user_id = $_SESSION['user_id'];
+$user_id = current_user_id();
 
-// Clear stale payment lock
-if (isset($_SESSION['payment_lock']) && $_SESSION['payment_lock']['user_id'] == $user_id) {
-    $diff = time() - $_SESSION['payment_lock']['locked_at'];
-    if ($diff >= 300) {
-        unset($_SESSION['payment_lock']);
-    }
+$pending_order =
+    $_SESSION['pending_order'] ?? null;
+
+$stripe_session_id =
+    $_SESSION['stripe_session_id'] ?? '';
+
+$has_pending_checkout =
+    is_array($pending_order) &&
+    (int) ($pending_order['user_id'] ?? 0)
+        === $user_id;
+
+$has_stripe_session =
+    is_string($stripe_session_id) &&
+    $stripe_session_id !== '';
+
+if ($has_stripe_session) {
+    redirect_to(
+        app_path(
+            'customer/resume_payment.php'
+        )
+    );
+}
+
+if ($has_pending_checkout) {
+    redirect_to(
+        app_path(
+            'customer/payment_gateway.php'
+        )
+    );
+}
+
+if (
+    $pending_order !== null ||
+    isset($_SESSION['payment_lock']) ||
+    isset($_SESSION['stripe_checkout_url']) ||
+    isset($_SESSION['stripe_expires_at'])
+) {
+    unset($_SESSION['pending_order']);
+    unset($_SESSION['payment_lock']);
+    unset($_SESSION['stripe_session_id']);
+    unset($_SESSION['stripe_checkout_url']);
+    unset($_SESSION['stripe_expires_at']);
 }
 
 // Get selected items from cart
@@ -56,6 +93,103 @@ $addresses = $addresses->fetchAll(PDO::FETCH_ASSOC);
 
 $error = '';
 
+function findAvailableVoucher(
+    PDO $pdo,
+    string $voucher_code,
+    int $user_id
+): ?array {
+    $voucher = $pdo->prepare("
+        SELECT v.*
+        FROM vouchers v
+        INNER JOIN user_vouchers uv
+            ON uv.uv_voucher_id =
+                v.voucher_id
+        WHERE v.voucher_code = ?
+        AND uv.uv_user_id = ?
+        AND uv.uv_is_used = 0
+        AND uv.uv_status = 'available'
+        AND (
+            uv.uv_expires_at IS NULL
+            OR uv.uv_expires_at >= NOW()
+        )
+        AND v.voucher_is_active = 1
+        AND (
+            v.voucher_usage_limit IS NULL
+            OR v.voucher_used_count <
+                v.voucher_usage_limit
+        )
+        AND (
+            v.voucher_start_date IS NULL
+            OR v.voucher_start_date <= NOW()
+        )
+        AND (
+            v.voucher_end_date IS NULL
+            OR v.voucher_end_date >= NOW()
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM voucher_usage vu
+            WHERE vu.usage_voucher_id =
+                v.voucher_id
+            AND vu.usage_user_id = ?
+        )
+        LIMIT 1
+    ");
+
+    $voucher->execute([
+        $voucher_code,
+        $user_id,
+        $user_id,
+    ]);
+
+    $result =
+        $voucher->fetch(PDO::FETCH_ASSOC);
+
+    return $result ?: null;
+}
+
+function calculateVoucherDiscount(
+    array $voucher,
+    float $subtotal
+): float {
+    if (
+        $voucher['voucher_type'] ===
+        'percentage'
+    ) {
+        $discount =
+            $subtotal *
+            (
+                (float) $voucher[
+                    'voucher_value'
+                ] / 100
+            );
+
+        $maximum_discount =
+            (float) (
+                $voucher[
+                    'voucher_max_discount'
+                ] ?? 0
+            );
+
+        if ($maximum_discount > 0) {
+            $discount = min(
+                $discount,
+                $maximum_discount
+            );
+        }
+    } else {
+        $discount =
+            (float) $voucher[
+                'voucher_value'
+            ];
+    }
+
+    return round(
+        min($discount, $subtotal),
+        2
+    );
+}
+
 // Load tier shipping benefit for JS (on page load)
 $user_tier_info = $pdo->prepare("SELECT user_tier FROM users WHERE user_id = ?");
 $user_tier_info->execute([$user_id]);
@@ -65,89 +199,243 @@ $tier_shipping_stmt = $pdo->prepare("SELECT tier_free_shipping, tier_shipping_di
 $tier_shipping_stmt->execute([$user_tier_name]);
 $tier_shipping_row = $tier_shipping_stmt->fetch(PDO::FETCH_ASSOC) ?? ['tier_free_shipping' => 0, 'tier_shipping_discount' => 0];
 
-// Handle voucher check (AJAX)
-if (isset($_POST['check_voucher'])) {
-    $code = strtoupper(trim($_POST['voucher_code']));
-    $cart_total = floatval($_POST['cart_total']);
-    $v = $pdo->prepare("
-        SELECT v.* FROM vouchers v
-        WHERE v.voucher_code = ? 
-        AND v.voucher_is_active = 1
-        AND (v.voucher_start_date IS NULL OR v.voucher_start_date <= NOW())
-        AND (v.voucher_end_date IS NULL OR v.voucher_end_date >= NOW())
-        AND EXISTS (
-            SELECT 1 FROM user_vouchers uv
-            WHERE uv.uv_voucher_id = v.voucher_id
-            AND uv.uv_user_id = ?
-            AND uv.uv_is_used = 0
-            AND uv.uv_status = 'available'
-            AND (uv.uv_expires_at IS NULL OR uv.uv_expires_at >= NOW())
+$couriers = [
+    'jnt' => [
+        'name' => 'J&T Express',
+        'logo' => '🟡',
+        'peninsular_std' => 4.90,
+        'peninsular_exp' => 9.90,
+        'east_std' => 11.90,
+        'east_exp' => 19.90,
+    ],
+    'ninja_van' => [
+        'name' => 'Ninja Van',
+        'logo' => '⚫',
+        'peninsular_std' => 5.90,
+        'peninsular_exp' => 11.90,
+        'east_std' => 13.90,
+        'east_exp' => 21.90,
+    ],
+    'pos_laju' => [
+        'name' => 'Pos Laju',
+        'logo' => '🔴',
+        'peninsular_std' => 6.90,
+        'peninsular_exp' => 14.90,
+        'east_std' => 14.90,
+        'east_exp' => 24.90,
+    ],
+    'gdex' => [
+        'name' => 'GDex',
+        'logo' => '🟠',
+        'peninsular_std' => 8.90,
+        'peninsular_exp' => 16.90,
+        'east_std' => 17.90,
+        'east_exp' => 29.90,
+    ],
+    'dhl' => [
+        'name' => 'DHL Express',
+        'logo' => '🔴',
+        'peninsular_std' => 14.90,
+        'peninsular_exp' => 24.90,
+        'east_std' => 24.90,
+        'east_exp' => 39.90,
+    ],
+];
+
+// Handle voucher check
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['check_voucher'])
+) {
+    header(
+        'Content-Type: application/json'
+    );
+
+    csrf_verify();
+
+    $voucher_code = strtoupper(
+        trim(
+            (string) (
+                $_POST['voucher_code'] ?? ''
+            )
         )
-    ");
-    $v->execute([$code, $user_id]);
-    $v = $v->fetch(PDO::FETCH_ASSOC);
-    if (!$v) {
-        echo json_encode(['success' => false, 'message' => 'Invalid or expired voucher.']);
-    } elseif ($cart_total < $v['voucher_min_order']) {
-        echo json_encode(['success' => false, 'message' => 'Minimum order RM ' . number_format($v['voucher_min_order'], 2) . ' required.']);
-    } else {
-        $used = $pdo->prepare("SELECT usage_id FROM voucher_usage WHERE usage_voucher_id = ? AND usage_user_id = ?");
-        $used->execute([$v['voucher_id'], $user_id]);
-        if ($used->rowCount() > 0) {
-            echo json_encode(['success' => false, 'message' => 'You have already used this voucher.']);
-        } else {
-            if ($v['voucher_type'] === 'percentage') {
-                $discount = $cart_total * ($v['voucher_value'] / 100);
-                if ($v['voucher_max_discount']) $discount = min($discount, $v['voucher_max_discount']);
-            } else {
-                $discount = $v['voucher_value'];
-            }
-            $discount = min($discount, $cart_total);
-            echo json_encode(['success' => true, 'message' => 'Voucher applied!', 'discount' => round($discount, 2), 'voucher_id' => $v['voucher_id'], 'voucher_type' => $v['voucher_type'], 'voucher_value' => $v['voucher_value']]);
-        }
-    }
-    exit;
-}
+    );
 
-// Calculate payment lock remaining time
-$payment_lock_remaining = 0;
-$payment_lock_locked_at = 0;
-if (isset($_SESSION['payment_lock']) && $_SESSION['payment_lock']['user_id'] == $user_id) {
-    $locked_at = $_SESSION['payment_lock']['locked_at'];
-    $diff = time() - $locked_at;
-    if ($diff >= 0 && $diff < 300) {
-        $payment_lock_remaining = 300 - $diff;
-        $payment_lock_locked_at = $locked_at;
-    } else {
-        unset($_SESSION['payment_lock']);
-    }
-}
+    if ($voucher_code === '') {
+        echo json_encode([
+            'success' => false,
+            'message' =>
+                'Please enter a voucher code.',
+        ]);
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Block if payment lock active
-    if ($payment_lock_remaining > 0) {
-        header('Location: checkout.php?selected_items=' . urlencode($selected_raw));
         exit;
     }
 
+    $voucher = findAvailableVoucher(
+        $pdo,
+        $voucher_code,
+        $user_id
+    );
+
+    if (!$voucher) {
+        echo json_encode([
+            'success' => false,
+            'message' =>
+                'Invalid or expired voucher.',
+        ]);
+
+        exit;
+    }
+
+    $minimum_order =
+        (float) $voucher[
+            'voucher_min_order'
+        ];
+
+    if ($total < $minimum_order) {
+        echo json_encode([
+            'success' => false,
+            'message' =>
+                'Minimum order RM ' .
+                number_format(
+                    $minimum_order,
+                    2
+                ) .
+                ' required.',
+        ]);
+
+        exit;
+    }
+
+    $discount = calculateVoucherDiscount(
+        $voucher,
+        $total
+    );
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Voucher applied!',
+        'discount' => $discount,
+        'voucher_id' =>
+            (int) $voucher['voucher_id'],
+        'voucher_type' =>
+            $voucher['voucher_type'],
+        'voucher_value' =>
+            (float) $voucher[
+                'voucher_value'
+            ],
+    ]);
+
+    exit;
+}
+
+$payment_lock_remaining = 0;
+$payment_lock_locked_at = 0;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
     $address_id = null;
-    $shipping_method = $_POST['shipping_method'] ?? 'standard';
-    $couriers_data = [
-        'jnt'       => ['peninsular_std' => 4.90,  'peninsular_exp' => 9.90,  'east_std' => 11.90, 'east_exp' => 19.90],
-        'ninja_van' => ['peninsular_std' => 5.90,  'peninsular_exp' => 11.90, 'east_std' => 13.90, 'east_exp' => 21.90],
-        'pos_laju'  => ['peninsular_std' => 6.90,  'peninsular_exp' => 14.90, 'east_std' => 14.90, 'east_exp' => 24.90],
-        'gdex'      => ['peninsular_std' => 8.90,  'peninsular_exp' => 16.90, 'east_std' => 17.90, 'east_exp' => 29.90],
-        'dhl'       => ['peninsular_std' => 14.90, 'peninsular_exp' => 24.90, 'east_std' => 24.90, 'east_exp' => 39.90],
-    ];
-    $shipping_courier = strtolower($_POST['shipping_courier'] ?? 'jnt');
-    $shipping_zone = $_POST['shipping_zone'] ?? 'peninsular';
-    $shipping_type = str_contains($_POST['shipping_method'] ?? '', 'express') ? 'exp' : 'std';
-    $zone_key = $shipping_zone === 'east_malaysia' ? 'east' : 'peninsular';
-    $fee_key = $zone_key . '_' . $shipping_type;
-    $shipping_fee = $has_physical ? ($couriers_data[$shipping_courier][$fee_key] ?? 4.90) : 0;
+
+    $shipping_method = trim(
+        (string) (
+            $_POST['shipping_method'] ?? ''
+        )
+    );
+
+    $shipping_courier = strtolower(
+        trim(
+            (string) (
+                $_POST['shipping_courier'] ?? ''
+            )
+        )
+    );
+
+    $shipping_zone = trim(
+        (string) (
+            $_POST['shipping_zone'] ?? ''
+        )
+    );
+
+    $shipping_type = 'std';
+    $zone_key = 'peninsular';
+    $fee_key = 'peninsular_std';
+
+    $shipping_fee = 0.0;
+    $original_shipping_fee = 0.0;
+
+    if ($has_physical) {
+        $valid_courier =
+            isset($couriers[$shipping_courier]);
+
+        $valid_zone = in_array(
+            $shipping_zone,
+            [
+                'peninsular',
+                'east_malaysia',
+            ],
+            true
+        );
+
+        $valid_method = in_array(
+            $shipping_method,
+            [
+                $shipping_courier .
+                    '_standard',
+                $shipping_courier .
+                    '_express',
+            ],
+            true
+        );
+
+        if (
+            !$valid_courier ||
+            !$valid_zone ||
+            !$valid_method
+        ) {
+            $error =
+                'Please select a valid delivery method.';
+        } else {
+            $shipping_type =
+                str_ends_with(
+                    $shipping_method,
+                    '_express'
+                )
+                    ? 'exp'
+                    : 'std';
+
+            $zone_key =
+                $shipping_zone ===
+                'east_malaysia'
+                    ? 'east'
+                    : 'peninsular';
+
+            $fee_key =
+                $zone_key .
+                '_' .
+                $shipping_type;
+
+            $original_shipping_fee =
+                (float) $couriers[
+                    $shipping_courier
+                ][$fee_key];
+
+            $shipping_fee =
+                $original_shipping_fee;
+        }
+    } else {
+        $shipping_method = 'digital';
+        $shipping_courier = '';
+        $shipping_zone = '';
+    }
 
     // Apply tier shipping benefit (standard only)
-    if ($has_physical && $shipping_fee > 0 && $shipping_type === 'std') {
+    if (
+        $has_physical &&
+        empty($error) &&
+        $shipping_fee > 0 &&
+        $shipping_type === 'std'
+    ) {
         $user_tier_info = $pdo->prepare("SELECT user_tier FROM users WHERE user_id = ?");
         $user_tier_info->execute([$user_id]);
         $user_tier_name = $user_tier_info->fetchColumn() ?? 'bronze';
@@ -160,54 +448,251 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($tier_shipping_row['tier_free_shipping']) {
                 $shipping_fee = 0;
             } elseif ($tier_shipping_row['tier_shipping_discount'] > 0) {
-                $shipping_fee = max(0, $shipping_fee - $tier_shipping_row['tier_shipping_discount']);
+                $shipping_fee = max(
+                    0,
+                    $shipping_fee -
+                    $tier_shipping_row['tier_shipping_discount']
+                );
             }
         }
-    } else {
-        $user_tier_name = 'bronze';
-        $tier_shipping_row = ['tier_free_shipping' => 0, 'tier_shipping_discount' => 0];
     }
 
-    $voucher_code_input = strtoupper(trim($_POST['voucher_code_applied'] ?? ''));
-    $discount_amount = 0;
+    $voucher_code_input = strtoupper(
+        trim(
+            (string) (
+                $_POST[
+                    'voucher_code_applied'
+                ] ?? ''
+            )
+        )
+    );
+
+    $discount_amount = 0.0;
     $applied_voucher = null;
 
-    if ($voucher_code_input) {
-        $v = $pdo->prepare("SELECT * FROM vouchers WHERE voucher_code = ? AND voucher_is_active = 1 AND (voucher_start_date IS NULL OR voucher_start_date <= NOW()) AND (voucher_end_date IS NULL OR voucher_end_date >= NOW())");
-        $v->execute([$voucher_code_input]);
-        $applied_voucher = $v->fetch(PDO::FETCH_ASSOC);
-        if ($applied_voucher && $total >= $applied_voucher['voucher_min_order']) {
-            if ($applied_voucher['voucher_type'] === 'percentage') {
-                $discount_amount = $total * ($applied_voucher['voucher_value'] / 100);
-                if ($applied_voucher['voucher_max_discount']) $discount_amount = min($discount_amount, $applied_voucher['voucher_max_discount']);
-            } else {
-                $discount_amount = $applied_voucher['voucher_value'];
-            }
-            $discount_amount = min($discount_amount, $total);
+    if ($voucher_code_input !== '') {
+        $applied_voucher =
+            findAvailableVoucher(
+                $pdo,
+                $voucher_code_input,
+                $user_id
+            );
+
+        if (!$applied_voucher) {
+            $error =
+                'The selected voucher is no longer available.';
+        } elseif (
+            $total <
+            (float) $applied_voucher[
+                'voucher_min_order'
+            ]
+        ) {
+            $error =
+                'Minimum order RM ' .
+                number_format(
+                    (float) $applied_voucher[
+                        'voucher_min_order'
+                    ],
+                    2
+                ) .
+                ' required.';
+        } else {
+            $discount_amount =
+                calculateVoucherDiscount(
+                    $applied_voucher,
+                    $total
+                );
         }
     }
 
     $final_total = max(0, $total - $discount_amount + $shipping_fee);
 
     if ($has_physical) {
-        if ($_POST['address_option'] === 'saved' && !empty($_POST['address_id'])) {
-            $address_id = $_POST['address_id'];
-        } elseif ($_POST['address_option'] === 'new') {
-            $recipient = trim($_POST['address_recipient_name']);
-            $taman     = trim($_POST['address_taman'] ?? '');
-            $street    = trim($_POST['address_street']);
-            $city      = trim($_POST['address_city']);
-            $state     = trim($_POST['address_state'] ?? '');
-            $postal    = trim($_POST['address_postal_code']);
-            $country   = trim($_POST['address_country']);
-            $phone     = trim($_POST['address_phone']);
-            if (empty($recipient) || empty($street) || empty($city) || empty($state) || empty($postal) || empty($phone)) {
-                $error = "Please fill in all required shipping fields.";
+        $address_option =
+            $_POST['address_option'] ?? '';
+
+        if ($address_option === 'saved') {
+            $submitted_address_id = filter_var(
+                $_POST['address_id'] ?? null,
+                FILTER_VALIDATE_INT,
+                [
+                    'options' => [
+                        'min_range' => 1,
+                    ],
+                ]
+            );
+
+            if ($submitted_address_id === false) {
+                $error =
+                    'Please select a valid shipping address.';
             } else {
-                $pdo->prepare("INSERT INTO addresses (address_user_id, address_recipient_name, address_taman, address_street, address_city, address_state, address_postal_code, address_country, address_phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                    ->execute([$user_id, $recipient, $taman, $street, $city, $state, $postal, $country, $phone]);
-                $address_id = $pdo->lastInsertId();
+                $address_check = $pdo->prepare("
+                    SELECT address_id
+                    FROM addresses
+                    WHERE address_id = ?
+                    AND address_user_id = ?
+                ");
+
+                $address_check->execute([
+                    $submitted_address_id,
+                    $user_id,
+                ]);
+
+                if (!$address_check->fetchColumn()) {
+                    $error =
+                        'The selected shipping address is invalid.';
+                } else {
+                    $address_id =
+                        (int) $submitted_address_id;
+                }
             }
+        } elseif ($address_option === 'new') {
+            $recipient = trim(
+                (string) (
+                    $_POST[
+                        'address_recipient_name'
+                    ] ?? ''
+                )
+            );
+
+            $taman = trim(
+                (string) (
+                    $_POST['address_taman']
+                    ?? ''
+                )
+            );
+
+            $street = trim(
+                (string) (
+                    $_POST['address_street']
+                    ?? ''
+                )
+            );
+
+            $city = trim(
+                (string) (
+                    $_POST['address_city']
+                    ?? ''
+                )
+            );
+
+            $state = trim(
+                (string) (
+                    $_POST['address_state']
+                    ?? ''
+                )
+            );
+
+            $postal = trim(
+                (string) (
+                    $_POST[
+                        'address_postal_code'
+                    ] ?? ''
+                )
+            );
+
+            $country = trim(
+                (string) (
+                    $_POST['address_country']
+                    ?? 'Malaysia'
+                )
+            );
+
+            $phone = trim(
+                (string) (
+                    $_POST['address_phone']
+                    ?? ''
+                )
+            );
+
+            if (
+                $recipient === '' ||
+                $street === '' ||
+                $city === '' ||
+                $state === '' ||
+                $postal === '' ||
+                $phone === ''
+            ) {
+                $error =
+                    'Please fill in all required shipping fields.';
+            } elseif (
+                !preg_match('/\A\d{5}\z/', $postal)
+            ) {
+                $error =
+                    'Please enter a valid postal code.';
+            } elseif (
+                !preg_match(
+                    '/\A\d{10,11}\z/',
+                    $phone
+                )
+            ) {
+                $error =
+                    'Please enter a valid phone number.';
+            } else {
+                $new_address = $pdo->prepare("
+                    INSERT INTO addresses (
+                        address_user_id,
+                        address_recipient_name,
+                        address_taman,
+                        address_street,
+                        address_city,
+                        address_state,
+                        address_postal_code,
+                        address_country,
+                        address_phone
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+
+                $new_address->execute([
+                    $user_id,
+                    $recipient,
+                    $taman,
+                    $street,
+                    $city,
+                    $state,
+                    $postal,
+                    $country,
+                    $phone,
+                ]);
+
+                $address_id =
+                    (int) $pdo->lastInsertId();
+            }
+        } else {
+            $error =
+                'Please select a shipping address.';
+        }
+    }
+
+    if (
+        empty($error) &&
+        $applied_voucher !== null
+    ) {
+        $reserve_voucher = $pdo->prepare("
+            UPDATE user_vouchers
+            SET uv_status = 'pending',
+                uv_pending_at = NOW()
+            WHERE uv_voucher_id = ?
+            AND uv_user_id = ?
+            AND uv_is_used = 0
+            AND uv_status = 'available'
+            AND (
+                uv_expires_at IS NULL
+                OR uv_expires_at >= NOW()
+            )
+        ");
+
+        $reserve_voucher->execute([
+            (int) $applied_voucher[
+                'voucher_id'
+            ],
+            $user_id,
+        ]);
+
+        if ($reserve_voucher->rowCount() !== 1) {
+            $error =
+                'The selected voucher is no longer available.';
         }
     }
 
@@ -219,7 +704,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'address_id'      => $address_id,
             'shipping_method' => $shipping_method,
             'shipping_fee'    => $shipping_fee,
-            'original_shipping_fee' => $couriers_data[$shipping_courier][$fee_key] ?? $shipping_fee,
+            'original_shipping_fee' =>
+                $original_shipping_fee,
             'voucher_code'    => $voucher_code_input ?: null,
             'discount_amount' => $discount_amount,
             'voucher_id'      => $applied_voucher['voucher_id'] ?? null,
@@ -227,11 +713,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'shipping_courier'=> $shipping_courier,
             'shipping_zone'   => $shipping_zone,
         ];
-
-        if (!empty($voucher_code_input) && $applied_voucher) {
-            $pdo->prepare("UPDATE user_vouchers SET uv_status = 'pending', uv_pending_at = NOW() WHERE uv_voucher_id = ? AND uv_user_id = ? AND uv_is_used = 0")
-                ->execute([$applied_voucher['voucher_id'], $user_id]);
-        }
 
         $_SESSION['payment_lock'] = [
             'user_id'   => $user_id,
@@ -283,6 +764,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
 
         <form method="POST" id="checkoutForm">
+            <?php csrf_field(); ?>
         <input type="hidden" name="selected_items" value="<?= htmlspecialchars($selected_raw) ?>">
         <div class="flex gap-6 items-start flex-col lg:flex-row">
 
@@ -402,16 +884,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </div>
 
-                <!-- Delivery Method -->
-                <?php
-                $couriers = [
-                    'jnt'       => ['name' => 'J&T Express',  'logo' => '🟡', 'peninsular_std' => 4.90,  'peninsular_exp' => 9.90,  'east_std' => 11.90, 'east_exp' => 19.90],
-                    'ninja_van' => ['name' => 'Ninja Van',     'logo' => '⚫', 'peninsular_std' => 5.90,  'peninsular_exp' => 11.90, 'east_std' => 13.90, 'east_exp' => 21.90],
-                    'pos_laju'  => ['name' => 'Pos Laju',      'logo' => '🔴', 'peninsular_std' => 6.90,  'peninsular_exp' => 14.90, 'east_std' => 14.90, 'east_exp' => 24.90],
-                    'gdex'      => ['name' => 'GDex',          'logo' => '🟠', 'peninsular_std' => 8.90,  'peninsular_exp' => 16.90, 'east_std' => 17.90, 'east_exp' => 29.90],
-                    'dhl'       => ['name' => 'DHL Express',   'logo' => '🔴', 'peninsular_std' => 14.90, 'peninsular_exp' => 24.90, 'east_std' => 24.90, 'east_exp' => 39.90],
-                ];
-                ?>
                 <div class="bg-white rounded-2xl shadow-sm p-6">
                     <h3 class="font-bold text-gray-800 mb-5 flex items-center gap-2">
                         <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
@@ -554,6 +1026,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             AND uv.uv_is_used = 0
                             AND (uv.uv_status IS NULL OR uv.uv_status = 'available')
                             AND v.voucher_is_active = 1
+                            AND (
+                                v.voucher_usage_limit IS NULL
+                                OR v.voucher_used_count <
+                                    v.voucher_usage_limit
+                            )
                             AND (v.voucher_end_date IS NULL OR v.voucher_end_date >= NOW())
                             AND (uv.uv_expires_at IS NULL OR uv.uv_expires_at >= NOW())
                             AND NOT EXISTS (
@@ -679,7 +1156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <h3 class="text-xl font-black text-gray-800 mb-2">Confirm Order?</h3>
             <p class="text-sm text-gray-500 mb-1">You are about to place an order for</p>
             <p class="text-2xl font-black text-red-600 mb-2" id="modalTotal">RM 0.00</p>
-            <p class="text-xs text-gray-400 mb-6">You will be redirected to the payment page. Please complete payment within <strong>5 minutes</strong>.</p>
+            <p class="text-xs text-gray-400 mb-6">You will be redirected to the payment review page. Please continue to Stripe within <strong>5 minutes</strong>.</p>
             <div class="flex gap-3">
                 <button onclick="document.getElementById('placeOrderModal').classList.add('hidden')"
                         class="flex-1 py-3 border-2 border-gray-100 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
@@ -728,6 +1205,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 
     <script>
+    const checkoutCsrfToken =
+        <?= json_encode(csrf_token()) ?>;
     const lockLockedAt = <?= $payment_lock_locked_at ?> * 1000;
     const lockTotalMs = 300 * 1000;
     let lockTimer = null;
@@ -802,11 +1281,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             return;
         }
 
-        fetch('checkout.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'check_voucher=1&voucher_code=' + encodeURIComponent(code) + '&cart_total=' + subtotal + '&selected_items=<?= htmlspecialchars($selected_raw) ?>'
-        })
+        fetch(
+            'checkout.php',
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type':
+                        'application/x-www-form-urlencoded;charset=UTF-8',
+                    'Accept':
+                        'application/json'
+                },
+                body: new URLSearchParams({
+                    csrf_token:
+                        checkoutCsrfToken,
+                    check_voucher: '1',
+                    voucher_code: code,
+                    selected_items:
+                        <?= json_encode($selected_raw) ?>
+                })
+            }
+        )
         .then(r => r.json())
         .then(data => {
             if (data.success) {
