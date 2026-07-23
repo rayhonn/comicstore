@@ -429,7 +429,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     : 'standard';
         }
     } else {
-        $shipping_method = 'digital';
+        $shipping_method = 'standard';
         $shipping_courier = null;
         $shipping_zone = 'peninsular';
     }
