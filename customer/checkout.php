@@ -422,11 +422,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $shipping_fee =
                 $original_shipping_fee;
+
+            $shipping_method =
+                $shipping_type === 'exp'
+                    ? 'express'
+                    : 'standard';
         }
     } else {
         $shipping_method = 'digital';
-        $shipping_courier = '';
-        $shipping_zone = '';
+        $shipping_courier = null;
+        $shipping_zone = 'peninsular';
     }
 
     // Apply tier shipping benefit (standard only)
