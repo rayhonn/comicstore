@@ -62,9 +62,15 @@ if (empty($selected_ids)) {
 
 $placeholders = implode(',', array_fill(0, count($selected_ids), '?'));
 $stmt = $pdo->prepare("
-    SELECT ci.*, p.product_title, p.product_price, p.product_type,
-    pp.physical_stock_quantity, pe.ebook_download_limit,
-    p.product_cover_image
+    SELECT
+        ci.*,
+        p.product_title,
+        p.product_price,
+        p.product_type,
+        p.product_is_available,
+        pp.physical_stock_quantity,
+        pe.ebook_download_limit,
+        p.product_cover_image
     FROM cart_items ci
     JOIN products p ON ci.cart_item_product_id = p.product_id
     LEFT JOIN product_physical pp ON p.product_id = pp.physical_product_id
@@ -80,18 +86,70 @@ if (count($items) === 0) {
     exit;
 }
 
+$error = '';
 $total = 0;
 $has_physical = false;
+
+// Recalculate using current database price
+// and validate current product availability and stock.
 foreach ($items as $item) {
-    $total += $item['product_price'] * $item['cart_item_quantity'];
-    if ($item['product_type'] === 'physical') $has_physical = true;
+    $quantity = (int) $item['cart_item_quantity'];
+
+    if (
+        (int) $item['product_is_available'] !== 1
+    ) {
+        $error =
+            'One or more selected products are no longer available.';
+        break;
+    }
+
+    if ($quantity < 1) {
+        $error =
+            'One or more selected quantities are invalid.';
+        break;
+    }
+
+    if ($item['product_type'] === 'physical') {
+        $available_stock = max(
+            0,
+            (int) $item['physical_stock_quantity']
+        );
+
+        if ($quantity > $available_stock) {
+            $error =
+                'One or more selected products do not have enough stock.';
+            break;
+        }
+
+        $has_physical = true;
+    } elseif ($item['product_type'] === 'ebook') {
+        if ($quantity !== 1) {
+            $error =
+                'E-book quantity must be one.';
+            break;
+        }
+    } else {
+        $error =
+            'One or more selected products have an invalid type.';
+        break;
+    }
+
+    $total +=
+        (float) $item['product_price'] *
+        $quantity;
 }
 
-$addresses = $pdo->prepare("SELECT * FROM addresses WHERE address_user_id = ? ORDER BY address_is_default DESC");
-$addresses->execute([$user_id]);
-$addresses = $addresses->fetchAll(PDO::FETCH_ASSOC);
+$addresses = $pdo->prepare("
+    SELECT *
+    FROM addresses
+    WHERE address_user_id = ?
+    ORDER BY address_is_default DESC
+");
 
-$error = '';
+$addresses->execute([$user_id]);
+
+$addresses =
+    $addresses->fetchAll(PDO::FETCH_ASSOC);
 
 function findAvailableVoucher(
     PDO $pdo,
