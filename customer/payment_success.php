@@ -307,8 +307,20 @@ try {
             SET voucher_used_count =
                 voucher_used_count + 1
             WHERE voucher_id = ?
+            AND (
+                voucher_usage_limit IS NULL
+                OR voucher_used_count <
+                    voucher_usage_limit
+            )
         ");
+
         $voucher_update->execute([$voucher_id]);
+
+        if ($voucher_update->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Voucher usage limit has been reached.'
+            );
+        }
 
         $user_voucher_update = $pdo->prepare("
             UPDATE user_vouchers
