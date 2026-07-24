@@ -18,36 +18,198 @@ $success = '';
 $error = '';
 
 // Handle redeem points voucher
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['redeem_voucher'])) {
-    $voucher_id = intval($_POST['voucher_id']);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['redeem_voucher'])
+) {
+    $voucher_id = filter_var(
+        $_POST['voucher_id'] ?? null,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
 
-    $v = $pdo->prepare("SELECT * FROM vouchers WHERE voucher_id = ? AND voucher_is_active = 1 AND voucher_is_points_redeem = 1");
-    $v->execute([$voucher_id]);
-    $v = $v->fetch(PDO::FETCH_ASSOC);
-
-    if (!$v) {
-        $error = 'Voucher not found.';
-    } elseif ($user_points < $v['voucher_points_required']) {
-        $error = 'Insufficient points.';
+    if ($voucher_id === false) {
+        $error = 'Invalid voucher.';
     } else {
-        // Check already claimed
-        $claimed = $pdo->prepare("SELECT uv_id FROM user_vouchers WHERE uv_user_id = ? AND uv_voucher_id = ?");
-        $claimed->execute([$user_id, $voucher_id]);
-        if ($claimed->fetch()) {
-            $error = 'You have already claimed this voucher.';
-        } else {
-            // Deduct points
-            $pdo->prepare("UPDATE users SET user_points = user_points - ? WHERE user_id = ?")->execute([$v['voucher_points_required'], $user_id]);
+        try {
+            $pdo->beginTransaction();
 
-            // Add to user vouchers
-            $pdo->prepare("INSERT INTO user_vouchers (uv_user_id, uv_voucher_id) VALUES (?, ?)")->execute([$user_id, $voucher_id]);
+            $voucher_stmt = $pdo->prepare("
+                SELECT
+                    voucher_id,
+                    voucher_code,
+                    voucher_points_required
+                FROM vouchers
+                WHERE voucher_id = ?
+                AND voucher_is_active = 1
+                AND voucher_is_points_redeem = 1
+                AND (
+                    voucher_start_date IS NULL
+                    OR voucher_start_date <= NOW()
+                )
+                AND (
+                    voucher_end_date IS NULL
+                    OR voucher_end_date >= NOW()
+                )
+                LIMIT 1
+            ");
 
-            // Log points
-            $pdo->prepare("INSERT INTO points_log (log_user_id, log_points, log_type, log_description) VALUES (?, ?, 'redeem', ?)")
-                ->execute([$user_id, -$v['voucher_points_required'], "Redeemed voucher: {$v['voucher_code']}"]);
+            $voucher_stmt->execute([$voucher_id]);
+            $voucher = $voucher_stmt->fetch(PDO::FETCH_ASSOC);
 
-            $user_points -= $v['voucher_points_required'];
-            $success = "Voucher {$v['voucher_code']} claimed! Use it at checkout.";
+            if (!$voucher) {
+                throw new RuntimeException(
+                    'Voucher not found or no longer available.'
+                );
+            }
+
+            $points_required = max(
+                0,
+                (int) $voucher['voucher_points_required']
+            );
+
+            if ($points_required <= 0) {
+                throw new RuntimeException(
+                    'This voucher cannot be redeemed with points.'
+                );
+            }
+
+            $user_lock = $pdo->prepare("
+                SELECT user_points
+                FROM users
+                WHERE user_id = ?
+                FOR UPDATE
+            ");
+
+            $user_lock->execute([$user_id]);
+
+            $locked_user =
+                $user_lock->fetch(PDO::FETCH_ASSOC);
+
+            if (!$locked_user) {
+                throw new RuntimeException(
+                    'User account not found.'
+                );
+            }
+
+            $claimed_stmt = $pdo->prepare("
+                SELECT uv_id
+                FROM user_vouchers
+                WHERE uv_user_id = ?
+                AND uv_voucher_id = ?
+                LIMIT 1
+                FOR UPDATE
+            ");
+
+            $claimed_stmt->execute([
+                $user_id,
+                $voucher_id,
+            ]);
+
+            if ($claimed_stmt->fetchColumn()) {
+                throw new RuntimeException(
+                    'You have already claimed this voucher.'
+                );
+            }
+
+            $deduct_points = $pdo->prepare("
+                UPDATE users
+                SET user_points =
+                    user_points - ?
+                WHERE user_id = ?
+                AND user_points >= ?
+            ");
+
+            $deduct_points->execute([
+                $points_required,
+                $user_id,
+                $points_required,
+            ]);
+
+            if ($deduct_points->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Insufficient points.'
+                );
+            }
+
+            $add_voucher = $pdo->prepare("
+                INSERT INTO user_vouchers (
+                    uv_user_id,
+                    uv_voucher_id
+                )
+                VALUES (?, ?)
+            ");
+
+            $add_voucher->execute([
+                $user_id,
+                $voucher_id,
+            ]);
+
+            $log_points = $pdo->prepare("
+                INSERT INTO points_log (
+                    log_user_id,
+                    log_points,
+                    log_type,
+                    log_description
+                )
+                VALUES (?, ?, 'redeem', ?)
+            ");
+
+            $log_points->execute([
+                $user_id,
+                -$points_required,
+                'Redeemed voucher: ' .
+                    $voucher['voucher_code'],
+            ]);
+
+            $pdo->commit();
+
+            $user_points =
+                (int) $locked_user['user_points'] -
+                $points_required;
+
+            $success =
+                'Voucher ' .
+                $voucher['voucher_code'] .
+                ' claimed! Use it at checkout.';
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            error_log(
+                'Points voucher redemption database error for user ' .
+                $user_id .
+                ': ' .
+                $e->getMessage()
+            );
+
+            $error =
+                'Unable to redeem the voucher. Please try again.';
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            $error = $e->getMessage();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            error_log(
+                'Points voucher redemption failed for user ' .
+                $user_id .
+                ': ' .
+                $e->getMessage()
+            );
+
+            $error =
+                'Unable to redeem the voucher. Please try again.';
         }
     }
 }
