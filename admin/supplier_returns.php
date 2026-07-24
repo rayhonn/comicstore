@@ -169,61 +169,268 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_replacement_po
 // ------------------------------------------------------------
 // Action: Reject Dispute — supplier was right, reverse the return (senior_admin only)
 // ------------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_dispute'])) {
-    $return_id = $_POST['return_id'];
-    $notes = trim($_POST['resolution_notes'] ?? '');
-    $ret = get_return_or_redirect($pdo, $return_id);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['reject_dispute'])
+) {
+    $return_id = filter_var(
+        $_POST['return_id'] ?? null,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    $notes = trim(
+        (string) (
+            $_POST['resolution_notes'] ?? ''
+        )
+    );
 
     if (!$is_senior) {
-        $_SESSION['flash_error'] = 'Only senior admin can reverse a disputed return.';
-        header('Location: supplier_returns.php'); exit;
+        $_SESSION['flash_error'] =
+            'Only senior admin can reverse a disputed return.';
+
+        header('Location: supplier_returns.php');
+        exit;
     }
-    if ($ret['return_status'] !== 'escalated') {
-        $_SESSION['flash_error'] = 'Only escalated (disputed) returns can be reversed.';
-        header('Location: supplier_returns.php'); exit;
+
+    if ($return_id === false) {
+        $_SESSION['flash_error'] =
+            'Invalid return record.';
+
+        header('Location: supplier_returns.php');
+        exit;
     }
+
     if ($notes === '') {
-        $_SESSION['flash_error'] = 'A justification is required to reverse a disputed return.';
-        header('Location: supplier_returns.php'); exit;
+        $_SESSION['flash_error'] =
+            'A justification is required to reverse a disputed return.';
+
+        header('Location: supplier_returns.php');
+        exit;
     }
 
-    $items = get_return_items($pdo, $return_id);
-
-    $pdo->beginTransaction();
     try {
-        foreach ($items as $item) {
-            $pdo->prepare("
-                UPDATE po_items
-                SET po_item_received_quantity = po_item_received_quantity + ?,
-                    po_item_rejected_quantity = po_item_rejected_quantity - ?
-                WHERE po_item_po_id = ? AND po_item_product_id = ?
-            ")->execute([$item['return_item_quantity'], $item['return_item_quantity'], $ret['return_po_id'], $item['return_item_product_id']]);
+        $pdo->beginTransaction();
 
-            $pdo->prepare("UPDATE product_physical SET physical_stock_quantity = physical_stock_quantity + ? WHERE physical_product_id = ?")
-                ->execute([$item['return_item_quantity'], $item['return_item_product_id']]);
+        // Lock and re-check the return inside the transaction.
+        $return_stmt = $pdo->prepare("
+            SELECT
+                sr.*,
+                po.po_supplier_id,
+                po.po_number
+            FROM supplier_returns sr
+            JOIN purchase_orders po
+                ON po.po_id = sr.return_po_id
+            WHERE sr.return_id = ?
+            FOR UPDATE
+        ");
+
+        $return_stmt->execute([
+            $return_id,
+        ]);
+
+        $ret = $return_stmt->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$ret) {
+            throw new RuntimeException(
+                'Return record not found.'
+            );
         }
 
-        $new_total = $pdo->prepare("SELECT SUM(po_item_received_quantity * po_item_unit_price) FROM po_items WHERE po_item_po_id = ?");
-        $new_total->execute([$ret['return_po_id']]);
-        $payable_total = $new_total->fetchColumn();
-        $pdo->prepare("UPDATE purchase_orders SET po_total_amount = ? WHERE po_id = ?")->execute([$payable_total, $ret['return_po_id']]);
+        if ($ret['return_status'] !== 'escalated') {
+            throw new RuntimeException(
+                'Only escalated disputed returns can be reversed.'
+            );
+        }
 
-        $pdo->prepare("
-            UPDATE supplier_returns SET
-                return_status = 'resolved',
-                return_resolution_type = 'dispute_rejected',
+        // Lock the original PO before changing quantities and total.
+        $po_lock = $pdo->prepare("
+            SELECT po_id
+            FROM purchase_orders
+            WHERE po_id = ?
+            FOR UPDATE
+        ");
+
+        $po_lock->execute([
+            $ret['return_po_id'],
+        ]);
+
+        if (!$po_lock->fetchColumn()) {
+            throw new RuntimeException(
+                'The original purchase order was not found.'
+            );
+        }
+
+        $items_stmt = $pdo->prepare("
+            SELECT *
+            FROM supplier_return_items
+            WHERE return_item_return_id = ?
+            ORDER BY return_item_id
+            FOR UPDATE
+        ");
+
+        $items_stmt->execute([
+            $return_id,
+        ]);
+
+        $items = $items_stmt->fetchAll(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$items) {
+            throw new RuntimeException(
+                'No items were found for this return.'
+            );
+        }
+
+        $restore_po_item = $pdo->prepare("
+            UPDATE po_items
+            SET po_item_received_quantity =
+                    po_item_received_quantity + ?,
+                po_item_rejected_quantity =
+                    po_item_rejected_quantity - ?
+            WHERE po_item_po_id = ?
+            AND po_item_product_id = ?
+            AND po_item_rejected_quantity >= ?
+        ");
+
+        $restore_stock = $pdo->prepare("
+            UPDATE product_physical
+            SET physical_stock_quantity =
+                physical_stock_quantity + ?
+            WHERE physical_product_id = ?
+        ");
+
+        foreach ($items as $item) {
+            $quantity =
+                (int) $item[
+                    'return_item_quantity'
+                ];
+
+            $product_id =
+                (int) $item[
+                    'return_item_product_id'
+                ];
+
+            if ($quantity <= 0) {
+                throw new RuntimeException(
+                    'The return contains an invalid quantity.'
+                );
+            }
+
+            $restore_po_item->execute([
+                $quantity,
+                $quantity,
+                $ret['return_po_id'],
+                $product_id,
+                $quantity,
+            ]);
+
+            if ($restore_po_item->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Unable to restore the purchase order item.'
+                );
+            }
+
+            $restore_stock->execute([
+                $quantity,
+                $product_id,
+            ]);
+
+            if ($restore_stock->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Unable to restore product stock.'
+                );
+            }
+        }
+
+        $new_total = $pdo->prepare("
+            SELECT COALESCE(
+                SUM(
+                    po_item_received_quantity *
+                    po_item_unit_price
+                ),
+                0
+            )
+            FROM po_items
+            WHERE po_item_po_id = ?
+        ");
+
+        $new_total->execute([
+            $ret['return_po_id'],
+        ]);
+
+        $payable_total =
+            (float) $new_total->fetchColumn();
+
+        $update_po = $pdo->prepare("
+            UPDATE purchase_orders
+            SET po_total_amount = ?
+            WHERE po_id = ?
+        ");
+
+        $update_po->execute([
+            $payable_total,
+            $ret['return_po_id'],
+        ]);
+
+        $resolve_return = $pdo->prepare("
+            UPDATE supplier_returns
+            SET return_status = 'resolved',
+                return_resolution_type =
+                    'dispute_rejected',
                 return_resolution_notes = ?,
                 return_resolved_by = ?,
                 return_resolved_at = NOW()
             WHERE return_id = ?
-        ")->execute([$notes, $_SESSION['user_id'], $return_id]);
+            AND return_status = 'escalated'
+        ");
+
+        $resolve_return->execute([
+            $notes,
+            $_SESSION['user_id'],
+            $return_id,
+        ]);
+
+        if ($resolve_return->rowCount() !== 1) {
+            throw new RuntimeException(
+                'The return has already been resolved.'
+            );
+        }
 
         $pdo->commit();
-        $_SESSION['flash_success'] = "Dispute upheld in supplier's favor. Stock and PO total restored for {$ret['return_number']}.";
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        $_SESSION['flash_error'] = 'Failed to reverse return: ' . $e->getMessage();
+
+        $_SESSION['flash_success'] =
+            "Dispute upheld in supplier's favor. " .
+            'Stock and PO total restored for ' .
+            $ret['return_number'] .
+            '.';
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        if ($e instanceof RuntimeException) {
+            $_SESSION['flash_error'] =
+                $e->getMessage();
+        } else {
+            error_log(
+                'Supplier dispute reversal failed: ' .
+                $e->getMessage()
+            );
+
+            $_SESSION['flash_error'] =
+                'Failed to reverse the disputed return. ' .
+                'Please try again.';
+        }
     }
+
     header('Location: supplier_returns.php');
     exit;
 }
