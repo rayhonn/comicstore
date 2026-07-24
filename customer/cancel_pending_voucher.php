@@ -6,6 +6,7 @@ require_customer();
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stripe_config.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/voucher_helper.php';
 require_once __DIR__ . '/../includes/csrf.php';
 
 header('Content-Type: application/json');
@@ -32,43 +33,6 @@ function clearPendingCheckoutSession(): void
     unset($_SESSION['stripe_session_id']);
     unset($_SESSION['stripe_checkout_url']);
     unset($_SESSION['stripe_expires_at']);
-}
-
-function restorePendingVoucher(
-    PDO $pdo,
-    array $pending_order,
-    int $user_id
-): void {
-    $voucher_id = filter_var(
-        $pending_order['voucher_id'] ?? null,
-        FILTER_VALIDATE_INT,
-        [
-            'options' => [
-                'min_range' => 1,
-            ],
-        ]
-    );
-
-    if ($voucher_id === false) {
-        return;
-    }
-
-    $restore_voucher = $pdo->prepare("
-        UPDATE user_vouchers
-        SET uv_status = 'available',
-            uv_is_used = 0,
-            uv_pending_at = NULL,
-            uv_used_at = NULL
-        WHERE uv_voucher_id = ?
-        AND uv_user_id = ?
-        AND uv_is_used = 0
-        AND uv_status = 'pending'
-    ");
-
-    $restore_voucher->execute([
-        $voucher_id,
-        $user_id,
-    ]);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -132,9 +96,9 @@ if (
     try {
         $pdo->beginTransaction();
 
-        restorePendingVoucher(
+        restorePendingUserVoucher(
             $pdo,
-            $pending_order,
+            $pending_order['voucher_id'] ?? null,
             $user_id
         );
 
@@ -294,9 +258,9 @@ if ($stripe_session_id !== '') {
 try {
     $pdo->beginTransaction();
 
-    restorePendingVoucher(
+    restorePendingUserVoucher(
         $pdo,
-        $pending_order,
+        $pending_order['voucher_id'] ?? null,
         $user_id
     );
 

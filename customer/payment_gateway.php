@@ -6,39 +6,9 @@ require_customer();
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stripe_config.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/voucher_helper.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/config.php';
-
-function restorePendingCheckoutVoucher(
-    PDO $pdo,
-    array $order,
-    int $user_id
-): void {
-    $voucher_id = filter_var(
-        $order['voucher_id'] ?? null,
-        FILTER_VALIDATE_INT
-    );
-
-    if (!$voucher_id) {
-        return;
-    }
-
-    $restore = $pdo->prepare("
-        UPDATE user_vouchers
-        SET uv_status = 'available',
-            uv_is_used = 0,
-            uv_pending_at = NULL,
-            uv_used_at = NULL
-        WHERE uv_voucher_id = ?
-        AND uv_user_id = ?
-        AND uv_is_used = 0
-    ");
-
-    $restore->execute([
-        $voucher_id,
-        $user_id,
-    ]);
-}
 
 function clearCheckoutSessionState(): void
 {
@@ -151,12 +121,11 @@ if (
     !$has_active_stripe_session &&
     $elapsed >= 300
 ) {
-    restorePendingCheckoutVoucher(
+    restorePendingUserVoucher(
         $pdo,
-        $order,
+        $order['voucher_id'] ?? null,
         $user_id
     );
-
     clearCheckoutSessionState();
 
     redirect_to(
