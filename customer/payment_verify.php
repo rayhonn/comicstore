@@ -6,6 +6,7 @@ use PHPMailer\PHPMailer\Exception;
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/voucher_helper.php';
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/notifications.php';
 require_once __DIR__ . '/../includes/mail_config.php';
@@ -130,82 +131,12 @@ if (
                     }
                 }
 
-                if (
-                    !empty(
-                        $order['order_voucher_code']
-                    )
-                ) {
-                    $voucher_stmt = $pdo->prepare("
-                        SELECT voucher_id
-                        FROM vouchers
-                        WHERE voucher_code = ?
-                        FOR UPDATE
-                    ");
-                    $voucher_stmt->execute([
-                        $order[
-                            'order_voucher_code'
-                        ],
-                    ]);
-
-                    $voucher_id =
-                        $voucher_stmt->fetchColumn();
-
-                    if ($voucher_id !== false) {
-                        $delete_usage =
-                            $pdo->prepare("
-                                DELETE FROM voucher_usage
-                                WHERE usage_order_id = ?
-                                AND usage_user_id = ?
-                                AND usage_voucher_id = ?
-                            ");
-                        $delete_usage->execute([
-                            $order_id,
-                            $order_user_id,
-                            $voucher_id,
-                        ]);
-
-                        if (
-                            $delete_usage->rowCount()
-                            === 1
-                        ) {
-                            $reduce_count =
-                                $pdo->prepare("
-                                    UPDATE vouchers
-                                    SET voucher_used_count =
-                                        voucher_used_count - 1
-                                    WHERE voucher_id = ?
-                                    AND voucher_used_count > 0
-                                ");
-                            $reduce_count->execute([
-                                $voucher_id,
-                            ]);
-
-                            if (
-                                $reduce_count->rowCount()
-                                !== 1
-                            ) {
-                                throw new RuntimeException(
-                                    'Unable to restore voucher usage.'
-                                );
-                            }
-                        }
-
-                        $restore_voucher =
-                            $pdo->prepare("
-                                UPDATE user_vouchers
-                                SET uv_is_used = 0,
-                                    uv_status = 'available',
-                                    uv_pending_at = NULL,
-                                    uv_used_at = NULL
-                                WHERE uv_voucher_id = ?
-                                AND uv_user_id = ?
-                            ");
-                        $restore_voucher->execute([
-                            $voucher_id,
-                            $order_user_id,
-                        ]);
-                    }
-                }
+                restoreOrderVoucherUsage(
+                    $pdo,
+                    $order['order_voucher_code'] ?? null,
+                    $order_id,
+                    $order_user_id
+                );
 
                 $pdo->commit();
                 $error = 'expired';
