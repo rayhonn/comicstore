@@ -34,10 +34,26 @@ if ($item['order_item_download_count'] >= $item['ebook_download_limit']) {
     die("Download limit reached for this item. Please contact support.");
 }
 
-// Check file exists
-$file_path = '../assets/ebooks/' . $item['ebook_file_path'];
-if (!$item['ebook_file_path'] || !file_exists($file_path)) {
-    die("File not available. Please contact support.");
+// Resolve the stored e-book path to a filename
+$stored_file_path = trim((string) $item['ebook_file_path']);
+$ebook_filename = basename(
+    str_replace('\\', '/', $stored_file_path)
+);
+
+$file_path =
+    __DIR__ .
+    '/../assets/ebooks/' .
+    $ebook_filename;
+
+if (
+    $stored_file_path === '' ||
+    $ebook_filename === '' ||
+    !is_file($file_path)
+) {
+    die(
+        'File not available. ' .
+        'Please contact support.'
+    );
 }
 
 // Increment download count only when the limit is not reached
@@ -71,7 +87,11 @@ if ($increment_download->rowCount() !== 1) {
 
 // Force download
 header('Content-Type: application/octet-stream');
-header('Content-Disposition: attachment; filename="' . basename($item['ebook_file_path']) . '"');
+header(
+    'Content-Disposition: attachment; filename="' .
+    $ebook_filename .
+    '"'
+);
 header('Content-Length: ' . filesize($file_path));
 readfile($file_path);
 exit;
