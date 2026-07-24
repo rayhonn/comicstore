@@ -40,9 +40,34 @@ if (!$item['ebook_file_path'] || !file_exists($file_path)) {
     die("File not available. Please contact support.");
 }
 
-// Increment download count
-$pdo->prepare("UPDATE order_items SET order_item_download_count = order_item_download_count + 1 WHERE order_item_id = ?")
-    ->execute([$item_id]);
+// Increment download count only when the limit is not reached
+$increment_download = $pdo->prepare("
+    UPDATE order_items oi
+    JOIN orders o
+        ON oi.order_item_order_id = o.order_id
+    JOIN product_ebook pe
+        ON oi.order_item_product_id =
+            pe.ebook_product_id
+    SET oi.order_item_download_count =
+        oi.order_item_download_count + 1
+    WHERE oi.order_item_id = ?
+    AND o.order_user_id = ?
+    AND oi.order_item_type = 'ebook'
+    AND oi.order_item_download_count <
+        pe.ebook_download_limit
+");
+
+$increment_download->execute([
+    $item_id,
+    $user_id,
+]);
+
+if ($increment_download->rowCount() !== 1) {
+    die(
+        'Download limit reached for this item. ' .
+        'Please contact support.'
+    );
+}
 
 // Force download
 header('Content-Type: application/octet-stream');
