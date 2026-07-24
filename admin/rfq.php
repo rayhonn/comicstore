@@ -5,54 +5,237 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 require_once '../includes/db.php';
+require_once '../includes/csrf.php';
 
-$from_pr_id = $_GET['from_pr'] ?? null;
+$from_pr_id = filter_var(
+    $_GET['from_pr'] ?? null,
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
+if ($from_pr_id === false) $from_pr_id = null;
+
 $from_pr = null;
 if ($from_pr_id) {
-    $stmt = $pdo->prepare("SELECT pr.*, p.product_title, p.product_volume_number FROM purchase_requisitions pr JOIN products p ON p.product_id = pr.pr_product_id WHERE pr.pr_id = ? AND pr.pr_status = 'approved'");
+    $stmt = $pdo->prepare("
+        SELECT pr.*, p.product_title, p.product_volume_number
+        FROM purchase_requisitions pr
+        JOIN products p ON p.product_id = pr.pr_product_id
+        WHERE pr.pr_id = ? AND pr.pr_status = 'approved'
+    ");
     $stmt->execute([$from_pr_id]);
     $from_pr = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$from_pr) $from_pr_id = null;
 }
 
 $error = '';
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_rfq'])) {
-    $product_ids = $_POST['product_id'] ?? [];
-    $quantities = $_POST['quantity'] ?? [];
-    $supplier_ids = $_POST['supplier_ids'] ?? [];
-    $notes = trim($_POST['notes'] ?? '');
+    csrf_verify();
 
-    if (empty($product_ids) || empty($supplier_ids)) {
+    $product_ids = is_array($_POST['product_id'] ?? null) ? $_POST['product_id'] : [];
+    $quantities = is_array($_POST['quantity'] ?? null) ? $_POST['quantity'] : [];
+    $supplier_ids = is_array($_POST['supplier_ids'] ?? null) ? $_POST['supplier_ids'] : [];
+    $notes = trim((string) ($_POST['notes'] ?? ''));
+
+    $submitted_pr_id = null;
+    if (($_POST['from_pr_id'] ?? '') !== '') {
+        $submitted_pr_id = filter_var(
+            $_POST['from_pr_id'],
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]]
+        );
+        if ($submitted_pr_id === false) {
+            $error = 'Invalid purchase requisition.';
+        }
+    }
+
+    $items_data = [];
+    $seen_products = [];
+
+    if ($error === '') {
+        foreach ($product_ids as $index => $raw_product_id) {
+            $product_id = filter_var(
+                $raw_product_id,
+                FILTER_VALIDATE_INT,
+                ['options' => ['min_range' => 1]]
+            );
+            $quantity = filter_var(
+                $quantities[$index] ?? null,
+                FILTER_VALIDATE_INT,
+                ['options' => ['min_range' => 1]]
+            );
+
+            if ($product_id === false || $quantity === false) {
+                $error = 'Please select valid products and quantities.';
+                break;
+            }
+            if (isset($seen_products[$product_id])) {
+                $error = 'Each product can only be added once.';
+                break;
+            }
+
+            $seen_products[$product_id] = true;
+            $items_data[] = [
+                'product_id' => (int) $product_id,
+                'quantity' => (int) $quantity,
+            ];
+        }
+    }
+
+    $clean_supplier_ids = [];
+    if ($error === '') {
+        foreach ($supplier_ids as $raw_supplier_id) {
+            $supplier_id = filter_var(
+                $raw_supplier_id,
+                FILTER_VALIDATE_INT,
+                ['options' => ['min_range' => 1]]
+            );
+            if ($supplier_id === false) {
+                $error = 'Please select valid suppliers.';
+                break;
+            }
+            $clean_supplier_ids[(int) $supplier_id] = true;
+        }
+    }
+    $clean_supplier_ids = array_keys($clean_supplier_ids);
+
+    if ($error === '' && (!$items_data || !$clean_supplier_ids)) {
         $error = 'Please select at least one product and one supplier.';
-    } else {
-        $last = $pdo->query("SELECT rfq_id FROM rfq ORDER BY rfq_id DESC LIMIT 1")->fetchColumn();
-        $next_num = ($last ?? 0) + 1;
-        $rfq_number = 'RFQ-' . str_pad($next_num, 4, '0', STR_PAD_LEFT);
+    }
 
-        $pdo->prepare("INSERT INTO rfq (rfq_number, rfq_notes, rfq_created_by) VALUES (?, ?, ?)")
-            ->execute([$rfq_number, $notes, $_SESSION['user_id']]);
-        $rfq_id = $pdo->lastInsertId();
+    if ($error === '') {
+        try {
+            $pdo->beginTransaction();
 
-        foreach ($product_ids as $i => $pid) {
-            if (empty($pid) || empty($quantities[$i])) continue;
-            $pdo->prepare("INSERT INTO rfq_items (rfq_item_rfq_id, rfq_item_product_id, rfq_item_quantity) VALUES (?, ?, ?)")
-                ->execute([$rfq_id, $pid, $quantities[$i]]);
+            if ($submitted_pr_id !== null) {
+                $lock_pr = $pdo->prepare("
+                    SELECT pr_product_id
+                    FROM purchase_requisitions
+                    WHERE pr_id = ? AND pr_status = 'approved'
+                    FOR UPDATE
+                ");
+                $lock_pr->execute([$submitted_pr_id]);
+                $pr_product_id = $lock_pr->fetchColumn();
+
+                if ($pr_product_id === false) {
+                    throw new RuntimeException(
+                        'The purchase requisition is no longer available for conversion.'
+                    );
+                }
+                if (!isset($seen_products[(int) $pr_product_id])) {
+                    throw new RuntimeException(
+                        'The RFQ must include the product from the purchase requisition.'
+                    );
+                }
+            }
+
+            $product_placeholders = implode(',', array_fill(0, count($items_data), '?'));
+            $valid_products = $pdo->prepare("
+                SELECT product_id
+                FROM products
+                WHERE product_id IN ($product_placeholders)
+                AND product_type = 'physical'
+                AND product_is_available = 1
+                FOR UPDATE
+            ");
+            $valid_products->execute(array_column($items_data, 'product_id'));
+            if (count($valid_products->fetchAll(PDO::FETCH_COLUMN)) !== count($items_data)) {
+                throw new RuntimeException(
+                    'One or more selected products are no longer available.'
+                );
+            }
+
+            $supplier_placeholders = implode(',', array_fill(0, count($clean_supplier_ids), '?'));
+            $valid_suppliers = $pdo->prepare("
+                SELECT supplier_id
+                FROM suppliers
+                WHERE supplier_id IN ($supplier_placeholders)
+                AND supplier_status = 'active'
+                FOR UPDATE
+            ");
+            $valid_suppliers->execute($clean_supplier_ids);
+            if (count($valid_suppliers->fetchAll(PDO::FETCH_COLUMN)) !== count($clean_supplier_ids)) {
+                throw new RuntimeException(
+                    'One or more selected suppliers are no longer active.'
+                );
+            }
+
+            $temporary_number = 'TMP-RFQ-' . bin2hex(random_bytes(8));
+            $insert_rfq = $pdo->prepare("
+                INSERT INTO rfq (rfq_number, rfq_notes, rfq_created_by)
+                VALUES (?, ?, ?)
+            ");
+            $insert_rfq->execute([
+                $temporary_number,
+                $notes !== '' ? $notes : null,
+                $_SESSION['user_id'],
+            ]);
+
+            $rfq_id = (int) $pdo->lastInsertId();
+            $rfq_number = 'RFQ-' . str_pad((string) $rfq_id, 4, '0', STR_PAD_LEFT);
+
+            $set_number = $pdo->prepare("
+                UPDATE rfq SET rfq_number = ?
+                WHERE rfq_id = ? AND rfq_number = ?
+            ");
+            $set_number->execute([$rfq_number, $rfq_id, $temporary_number]);
+            if ($set_number->rowCount() !== 1) {
+                throw new RuntimeException('Unable to generate the RFQ number.');
+            }
+
+            $insert_item = $pdo->prepare("
+                INSERT INTO rfq_items
+                    (rfq_item_rfq_id, rfq_item_product_id, rfq_item_quantity)
+                VALUES (?, ?, ?)
+            ");
+            foreach ($items_data as $item) {
+                $insert_item->execute([
+                    $rfq_id,
+                    $item['product_id'],
+                    $item['quantity'],
+                ]);
+            }
+
+            $insert_supplier = $pdo->prepare("
+                INSERT INTO rfq_suppliers
+                    (rfq_supplier_rfq_id, rfq_supplier_supplier_id)
+                VALUES (?, ?)
+            ");
+            foreach ($clean_supplier_ids as $supplier_id) {
+                $insert_supplier->execute([$rfq_id, $supplier_id]);
+            }
+
+            if ($submitted_pr_id !== null) {
+                $convert_pr = $pdo->prepare("
+                    UPDATE purchase_requisitions
+                    SET pr_status = 'converted', pr_rfq_id = ?
+                    WHERE pr_id = ? AND pr_status = 'approved'
+                ");
+                $convert_pr->execute([$rfq_id, $submitted_pr_id]);
+                if ($convert_pr->rowCount() !== 1) {
+                    throw new RuntimeException(
+                        'Unable to convert the purchase requisition.'
+                    );
+                }
+            }
+
+            $pdo->commit();
+
+            $_SESSION['flash_success'] = "$rfq_number created successfully and sent to "
+                . count($clean_supplier_ids) . " supplier(s).";
+            header('Location: rfq.php');
+            exit;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+
+            if ($e instanceof RuntimeException) {
+                $error = $e->getMessage();
+            } else {
+                error_log('RFQ creation failed: ' . $e->getMessage());
+                $error = 'Unable to create the RFQ. Please try again.';
+            }
         }
-
-        foreach ($supplier_ids as $sid) {
-            $pdo->prepare("INSERT INTO rfq_suppliers (rfq_supplier_rfq_id, rfq_supplier_supplier_id) VALUES (?, ?)")
-                ->execute([$rfq_id, $sid]);
-        }
-
-        if (!empty($_POST['from_pr_id'])) {
-            $pdo->prepare("UPDATE purchase_requisitions SET pr_status = 'converted', pr_rfq_id = ? WHERE pr_id = ?")
-                ->execute([$rfq_id, $_POST['from_pr_id']]);
-        }
-
-        $_SESSION['flash_success'] = "$rfq_number created successfully and sent to " . count($supplier_ids) . " supplier(s).";
-        header('Location: rfq.php');
-        exit;
     }
 }
 
@@ -186,6 +369,7 @@ $suppliers = $pdo->query("
                 </button>
             </div>
             <form method="POST" id="rfqForm">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="create_rfq" value="1">
                 <input type="hidden" name="from_pr_id" value="<?= $from_pr_id ?? '' ?>">
 
