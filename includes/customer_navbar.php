@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/voucher_helper.php';
+require_once __DIR__ . '/stock_helper.php';
 require_once __DIR__ . '/notifications.php';
 
 // Auto-check one expired pending confirmation order.
@@ -59,56 +60,10 @@ if (isset($_SESSION['user_id'])) {
                 );
             }
 
-            $items = $pdo->prepare("
-                SELECT
-                    order_item_product_id,
-                    order_item_quantity,
-                    order_item_type
-                FROM order_items
-                WHERE order_item_order_id = ?
-            ");
-
-            $items->execute([
-                $order_id,
-            ]);
-
-            $restore_stock = $pdo->prepare("
-                UPDATE product_physical
-                SET physical_stock_quantity =
-                    physical_stock_quantity + ?
-                WHERE physical_product_id = ?
-            ");
-
-            foreach (
-                $items->fetchAll(
-                    PDO::FETCH_ASSOC
-                ) as $item
-            ) {
-                if (
-                    $item['order_item_type']
-                    !== 'physical'
-                ) {
-                    continue;
-                }
-
-                $restore_stock->execute([
-                    (int) $item[
-                        'order_item_quantity'
-                    ],
-                    (int) $item[
-                        'order_item_product_id'
-                    ],
-                ]);
-
-                if (
-                    $restore_stock->rowCount()
-                    !== 1
-                ) {
-                    throw new RuntimeException(
-                        'Unable to restore order stock.'
-                    );
-                }
-            }
+            restoreOrderPhysicalStock(
+                $pdo,
+                $order_id
+            );
 
             restoreOrderVoucherUsage(
                 $pdo,

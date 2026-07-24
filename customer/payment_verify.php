@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/voucher_helper.php';
+require_once __DIR__ . '/../includes/stock_helper.php';
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/notifications.php';
 require_once __DIR__ . '/../includes/mail_config.php';
@@ -83,53 +84,10 @@ if (
                     );
                 }
 
-                $items_stmt = $pdo->prepare("
-                    SELECT
-                        order_item_product_id,
-                        order_item_quantity,
-                        order_item_type
-                    FROM order_items
-                    WHERE order_item_order_id = ?
-                ");
-                $items_stmt->execute([$order_id]);
-
-                $restore_stock = $pdo->prepare("
-                    UPDATE product_physical
-                    SET physical_stock_quantity =
-                        physical_stock_quantity + ?
-                    WHERE physical_product_id = ?
-                ");
-
-                foreach (
-                    $items_stmt->fetchAll(
-                        PDO::FETCH_ASSOC
-                    ) as $item
-                ) {
-                    if (
-                        $item['order_item_type']
-                        !== 'physical'
-                    ) {
-                        continue;
-                    }
-
-                    $restore_stock->execute([
-                        (int) $item[
-                            'order_item_quantity'
-                        ],
-                        (int) $item[
-                            'order_item_product_id'
-                        ],
-                    ]);
-
-                    if (
-                        $restore_stock->rowCount()
-                        !== 1
-                    ) {
-                        throw new RuntimeException(
-                            'Unable to restore order stock.'
-                        );
-                    }
-                }
+                restoreOrderPhysicalStock(
+                    $pdo,
+                    $order_id
+                );
 
                 restoreOrderVoucherUsage(
                     $pdo,
