@@ -5,7 +5,7 @@ require_admin();
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
 
-// Toggle availability
+// Toggle product availability for soft delete and restore
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['toggle_id'])
@@ -34,33 +34,6 @@ if (
     exit;
 }
 
-// Delete
-if (
-    $_SERVER['REQUEST_METHOD'] === 'POST' &&
-    isset($_POST['delete_id'])
-) {
-    csrf_verify();
-
-    $delete_id = filter_input(
-        INPUT_POST,
-        'delete_id',
-        FILTER_VALIDATE_INT
-    );
-
-    if (!$delete_id) {
-        header('Location: products.php');
-        exit;
-    }
-
-    $stmt = $pdo->prepare(
-        "DELETE FROM products
-         WHERE product_id = ?"
-    );
-    $stmt->execute([$delete_id]);
-
-    header('Location: products.php?success=1');
-    exit;
-}
 
 $search = trim($_GET['search'] ?? '');
 $type = $_GET['type'] ?? '';
@@ -272,19 +245,6 @@ $total_low_stock = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE phys
                                     <button type="submit"
                                             class="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
                                         <?= $p['product_is_available'] ? '🙈 Hide' : '👁️ Show' ?>
-                                    </button>
-                                </form>
-                                <form method="POST" class="inline">
-                                    <?php csrf_field(); ?>
-
-                                    <input
-                                        type="hidden"
-                                        name="delete_id"
-                                        value="<?= (int) $p['product_id'] ?>"
-                                    >
-                                    <button type="submit" onclick="return confirm('Delete this product permanently?')"
-                                            class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
-                                        🗑️
                                     </button>
                                 </form>
                             </div>
