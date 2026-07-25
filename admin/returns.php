@@ -66,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['
         ->execute([$_SESSION['user_id'], $action . '_return', $return_id, "Return request " . $action]);
 
     $ret_info = $pdo->prepare("
-        SELECT o.order_user_id, p.product_title
+        SELECT o.order_user_id, oi.order_item_product_title AS product_title
         FROM return_requests rr
         JOIN order_items oi ON rr.return_item_id = oi.order_item_id
         JOIN orders o ON oi.order_item_order_id = o.order_id
@@ -104,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['
 $filter = $_GET['filter'] ?? 'all';
 $sql = "
     SELECT rr.*, u.user_name, u.user_first_name, u.user_last_name,
-    p.product_title, p.product_cover_image,
+    oi.order_item_product_title AS product_title, p.product_cover_image,
     oi.order_item_quantity, oi.order_item_price
     FROM return_requests rr
     JOIN users u ON rr.return_user_id = u.user_id

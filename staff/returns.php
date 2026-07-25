@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['
         AND return_status = 'pending'"
     )->execute([$action, $admin_note, $return_id]);
 
-    $ret_info = $pdo->prepare("SELECT o.order_user_id, p.product_title FROM return_requests rr JOIN order_items oi ON rr.return_item_id = oi.order_item_id JOIN orders o ON oi.order_item_order_id = o.order_id JOIN products p ON oi.order_item_product_id = p.product_id WHERE rr.return_id = ?");
+    $ret_info = $pdo->prepare("SELECT o.order_user_id, oi.order_item_product_title AS product_title FROM return_requests rr JOIN order_items oi ON rr.return_item_id = oi.order_item_id JOIN orders o ON oi.order_item_order_id = o.order_id JOIN products p ON oi.order_item_product_id = p.product_id WHERE rr.return_id = ?");
     $ret_info->execute([$return_id]);
     $ret_data = $ret_info->fetch(PDO::FETCH_ASSOC);
 
@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['
 }
 
 $filter = $_GET['filter'] ?? 'pending';
-$sql = "SELECT rr.*, u.user_first_name, u.user_last_name, p.product_title, p.product_cover_image, oi.order_item_quantity, oi.order_item_price FROM return_requests rr JOIN users u ON rr.return_user_id = u.user_id JOIN order_items oi ON rr.return_item_id = oi.order_item_id JOIN products p ON oi.order_item_product_id = p.product_id";
+$sql = "SELECT rr.*, u.user_first_name, u.user_last_name, oi.order_item_product_title AS product_title, p.product_cover_image, oi.order_item_quantity, oi.order_item_price FROM return_requests rr JOIN users u ON rr.return_user_id = u.user_id JOIN order_items oi ON rr.return_item_id = oi.order_item_id JOIN products p ON oi.order_item_product_id = p.product_id";
 if ($filter !== 'all') $sql .= " WHERE rr.return_status = " . $pdo->quote($filter);
 $sql .= " ORDER BY rr.return_created_at DESC";
 $returns = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
