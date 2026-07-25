@@ -8,7 +8,7 @@ $user_id = $_SESSION['user_id'];
 
 $returns = $pdo->prepare("
     SELECT rr.*, 
-    p.product_title, p.product_cover_image,
+    oi.order_item_product_title AS product_title, p.product_cover_image,
     o.order_id, oi.order_item_quantity, oi.order_item_price
     FROM return_requests rr
     JOIN order_items oi ON rr.return_item_id = oi.order_item_id
