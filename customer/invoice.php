@@ -32,7 +32,7 @@ if (!$order) {
 
 // Get order items
 $items = $pdo->prepare("
-    SELECT oi.*, p.product_title, p.product_cover_image, p.product_author, p.product_type
+    SELECT oi.*, oi.order_item_product_title AS product_title, p.product_cover_image, p.product_author, p.product_type
     FROM order_items oi
     JOIN products p ON oi.order_item_product_id = p.product_id
     WHERE oi.order_item_order_id = ?
