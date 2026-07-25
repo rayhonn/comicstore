@@ -538,7 +538,7 @@ if ($order && $confirmed) {
                 oi.order_item_quantity,
                 oi.order_item_price,
                 oi.order_item_type,
-                p.product_title
+                oi.order_item_product_title AS product_title
             FROM order_items oi
             JOIN products p
                 ON p.product_id =

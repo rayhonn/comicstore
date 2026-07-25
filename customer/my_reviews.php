@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_review'])) {
 $pending_reviews = $pdo->prepare("
     SELECT DISTINCT oi.order_item_product_id as product_id, oi.order_item_id,
     o.order_id, o.order_created_at,
-    p.product_title, p.product_cover_image, p.product_type,
+    oi.order_item_product_title AS product_title, p.product_cover_image, p.product_type,
     p.product_author, p.product_series, p.product_volume_number
     FROM order_items oi
     JOIN orders o ON oi.order_item_order_id = o.order_id
