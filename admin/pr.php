@@ -116,35 +116,141 @@ if (isset($_SESSION['flash_success'])) {
     unset($_SESSION['flash_success']);
 }
 
+$error = '';
+if (isset($_SESSION['flash_error'])) {
+    $error = $_SESSION['flash_error'];
+    unset($_SESSION['flash_error']);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['scan_low_stock'])) {
     csrf_verify();
-    $low_stock_products = $pdo->query("
-        SELECT p.product_id, pp.physical_stock_quantity, pp.physical_low_stock_threshold
-        FROM products p
-        JOIN product_physical pp ON pp.physical_product_id = p.product_id
-        WHERE pp.physical_stock_quantity <= pp.physical_low_stock_threshold
-        AND p.product_id NOT IN (
-            SELECT pr_product_id FROM purchase_requisitions WHERE pr_status IN ('draft', 'pending', 'approved')
-        )
-    ")->fetchAll(PDO::FETCH_ASSOC);
 
-    $created = 0;
-    foreach ($low_stock_products as $lp) {
-        $last = $pdo->query("SELECT pr_id FROM purchase_requisitions ORDER BY pr_id DESC LIMIT 1")->fetchColumn();
-        $pr_number = 'PR-' . str_pad(($last ?? 0) + 1, 4, '0', STR_PAD_LEFT);
-        $suggested_qty = max(($lp['physical_low_stock_threshold'] * 2) - $lp['physical_stock_quantity'], $lp['physical_low_stock_threshold']);
+    try {
+        $pdo->beginTransaction();
 
-        $pdo->prepare("
-            INSERT INTO purchase_requisitions (pr_number, pr_product_id, pr_suggested_quantity, pr_reason, pr_status, pr_auto_generated)
+        // Lock low-stock rows so concurrent scans cannot create duplicate drafts.
+        $low_stock_stmt = $pdo->query("
+            SELECT
+                p.product_id,
+                pp.physical_stock_quantity,
+                pp.physical_low_stock_threshold
+            FROM products p
+            JOIN product_physical pp
+                ON pp.physical_product_id = p.product_id
+            WHERE pp.physical_stock_quantity <= pp.physical_low_stock_threshold
+            ORDER BY p.product_id
+            FOR UPDATE
+        ");
+        $low_stock_products = $low_stock_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $check_open_pr = $pdo->prepare("
+            SELECT pr_id
+            FROM purchase_requisitions
+            WHERE pr_product_id = ?
+            AND pr_status IN ('draft', 'pending', 'approved')
+            LIMIT 1
+            FOR UPDATE
+        ");
+
+        $insert_pr = $pdo->prepare("
+            INSERT INTO purchase_requisitions (
+                pr_number,
+                pr_product_id,
+                pr_suggested_quantity,
+                pr_reason,
+                pr_status,
+                pr_auto_generated
+            )
             VALUES (?, ?, ?, ?, 'draft', 1)
-        ")->execute([
-            $pr_number, $lp['product_id'], $suggested_qty,
-            "Auto-generated: stock at {$lp['physical_stock_quantity']}, below threshold of {$lp['physical_low_stock_threshold']}."
-        ]);
-        $created++;
+        ");
+
+        $set_pr_number = $pdo->prepare("
+            UPDATE purchase_requisitions
+            SET pr_number = ?
+            WHERE pr_id = ?
+            AND pr_number = ?
+        ");
+
+        $created = 0;
+
+        foreach ($low_stock_products as $product) {
+            $product_id = (int) $product['product_id'];
+            $current_stock = (int) $product['physical_stock_quantity'];
+            $threshold = (int) $product['physical_low_stock_threshold'];
+
+            if ($product_id <= 0 || $threshold <= 0) {
+                throw new RuntimeException(
+                    'A low-stock product contains invalid restock data.'
+                );
+            }
+
+            // Re-check after locking because another request may have created a PR.
+            $check_open_pr->execute([$product_id]);
+            if ($check_open_pr->fetchColumn()) {
+                continue;
+            }
+
+            $suggested_quantity = max(
+                ($threshold * 2) - $current_stock,
+                $threshold
+            );
+
+            if ($suggested_quantity <= 0) {
+                throw new RuntimeException(
+                    'Unable to calculate a valid restock quantity.'
+                );
+            }
+
+            $temporary_number =
+                'TMP-PR-' . bin2hex(random_bytes(6));
+
+            $insert_pr->execute([
+                $temporary_number,
+                $product_id,
+                $suggested_quantity,
+                "Auto-generated: stock at $current_stock, below threshold of $threshold.",
+            ]);
+
+            $pr_id = (int) $pdo->lastInsertId();
+            $pr_number =
+                'PR-' . str_pad((string) $pr_id, 4, '0', STR_PAD_LEFT);
+
+            $set_pr_number->execute([
+                $pr_number,
+                $pr_id,
+                $temporary_number,
+            ]);
+
+            if ($set_pr_number->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Unable to generate the purchase requisition number.'
+                );
+            }
+
+            $created++;
+        }
+
+        $pdo->commit();
+
+        $_SESSION['flash_success'] = $created > 0
+            ? "$created draft PR(s) generated for low-stock items."
+            : 'No new drafts needed — all low-stock items already have an open PR.';
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        if ($e instanceof RuntimeException) {
+            $_SESSION['flash_error'] = $e->getMessage();
+        } else {
+            error_log(
+                'Low-stock PR generation failed: ' . $e->getMessage()
+            );
+            $_SESSION['flash_error'] =
+                'Unable to generate low-stock purchase requisitions. Please try again.';
+        }
     }
 
-    $_SESSION['flash_success'] = $created > 0 ? "$created draft PR(s) generated for low-stock items." : "No new drafts needed — all low-stock items already have an open PR.";
     header('Location: pr.php');
     exit;
 }
@@ -234,6 +340,12 @@ $prs = $pdo->query("
         <?php if ($success): ?>
         <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-6">
             ✅ <?= htmlspecialchars($success) ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($error): ?>
+        <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-6">
+            ❌ <?= htmlspecialchars($error) ?>
         </div>
         <?php endif; ?>
 
