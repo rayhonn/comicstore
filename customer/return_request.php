@@ -18,7 +18,7 @@ date_default_timezone_set('Asia/Kuala_Lumpur');
 // Verify order belongs to user, delivered, physical, within 7 days
 $stmt = $pdo->prepare("
     SELECT o.*, oi.order_item_id, oi.order_item_type, oi.order_item_price, oi.order_item_quantity,
-    p.product_title, p.product_cover_image
+    oi.order_item_product_title AS product_title, p.product_cover_image
     FROM orders o
     JOIN order_items oi ON oi.order_item_order_id = o.order_id
     JOIN products p ON oi.order_item_product_id = p.product_id
