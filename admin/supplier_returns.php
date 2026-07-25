@@ -395,7 +395,7 @@ if (
             $_SESSION['flash_error'] =
                 $e->getMessage();
         } else {
-            error_log(
+            app_error_log(
                 'Replacement purchase order creation failed: ' .
                 $e->getMessage()
             );
@@ -664,7 +664,7 @@ if (
             $_SESSION['flash_error'] =
                 $e->getMessage();
         } else {
-            error_log(
+            app_error_log(
                 'Supplier dispute reversal failed: ' .
                 $e->getMessage()
             );

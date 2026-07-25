@@ -279,7 +279,7 @@ if (
     } catch (
         \Stripe\Exception\ApiErrorException $e
     ) {
-        error_log(
+        app_error_log(
             'Stripe Checkout Session creation failed: ' .
             $e->getMessage()
         );

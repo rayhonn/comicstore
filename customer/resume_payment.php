@@ -230,7 +230,7 @@ try {
 } catch (
     \Stripe\Exception\ApiErrorException $e
 ) {
-    error_log(
+    app_error_log(
         'Stripe Checkout Session resume failed: ' .
         $e->getMessage()
     );
@@ -242,7 +242,7 @@ try {
         )
     );
 } catch (Throwable $e) {
-    error_log(
+    app_error_log(
         'Payment resume validation failed: ' .
         $e->getMessage()
     );

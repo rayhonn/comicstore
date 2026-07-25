@@ -232,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_rfq'])) {
             if ($e instanceof RuntimeException) {
                 $error = $e->getMessage();
             } else {
-                error_log('RFQ creation failed: ' . $e->getMessage());
+                app_error_log('RFQ creation failed: ' . $e->getMessage());
                 $error = 'Unable to create the RFQ. Please try again.';
             }
         }

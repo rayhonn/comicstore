@@ -122,7 +122,7 @@ try {
             'message' => $e->getMessage(),
         ]);
     } else {
-        error_log(
+        app_error_log(
             'Expired order cancellation failed: ' .
             $e->getMessage()
         );
@@ -208,7 +208,7 @@ try {
     $mail->Body = $email_body;
     $mail->send();
 } catch (Exception $e) {
-    error_log("Mail error: " . $e->getMessage());
+    app_error_log("Mail error: " . $e->getMessage());
 }
 
 // Clear payment lock

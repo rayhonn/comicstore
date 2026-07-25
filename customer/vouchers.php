@@ -181,7 +181,7 @@ if (
                 $pdo->rollBack();
             }
 
-            error_log(
+            app_error_log(
                 'Points voucher redemption database error for user ' .
                 $user_id .
                 ': ' .
@@ -201,7 +201,7 @@ if (
                 $pdo->rollBack();
             }
 
-            error_log(
+            app_error_log(
                 'Points voucher redemption failed for user ' .
                 $user_id .
                 ': ' .

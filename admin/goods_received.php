@@ -539,7 +539,7 @@ if (
         if ($e instanceof RuntimeException) {
             $error = $e->getMessage();
         } else {
-            error_log(
+            app_error_log(
                 'Goods received processing failed: ' .
                 $e->getMessage()
             );

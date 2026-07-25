@@ -199,7 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote'])) {
         if ($e instanceof RuntimeException) {
             $error = $e->getMessage();
         } else {
-            error_log(
+            app_error_log(
                 'Supplier quotation submission failed: ' .
                 $e->getMessage()
             );

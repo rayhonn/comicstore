@@ -3,6 +3,7 @@
 require_once __DIR__ . '/voucher_helper.php';
 require_once __DIR__ . '/stock_helper.php';
 require_once __DIR__ . '/notifications.php';
+require_once __DIR__ . '/logger.php';
 
 // Auto-check one expired pending confirmation order.
 if (isset($_SESSION['user_id'])) {
@@ -81,7 +82,7 @@ if (isset($_SESSION['user_id'])) {
             $pdo->rollBack();
         }
 
-        error_log(
+        app_error_log(
             'Navbar expired order cleanup failed: ' .
             $e->getMessage()
         );
@@ -107,7 +108,7 @@ if (isset($_SESSION['user_id'])) {
                 'order'
             );
         } catch (Throwable $e) {
-            error_log(
+            app_error_log(
                 'Navbar cancellation notification failed: ' .
                 $e->getMessage()
             );

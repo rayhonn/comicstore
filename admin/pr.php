@@ -243,7 +243,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['scan_low_stock'])) {
         if ($e instanceof RuntimeException) {
             $_SESSION['flash_error'] = $e->getMessage();
         } else {
-            error_log(
+            app_error_log(
                 'Low-stock PR generation failed: ' . $e->getMessage()
             );
             $_SESSION['flash_error'] =

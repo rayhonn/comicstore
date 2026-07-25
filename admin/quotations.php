@@ -348,7 +348,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
             if ($e instanceof RuntimeException) {
                 $error = $e->getMessage();
             } else {
-                error_log('Purchase order generation failed: ' . $e->getMessage());
+                app_error_log('Purchase order generation failed: ' . $e->getMessage());
                 $error = 'Unable to generate the purchase order. Please try again.';
             }
         }

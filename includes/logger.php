@@ -82,6 +82,30 @@ function app_log(
     error_log($entry);
 }
 
+function app_error_log(string $message): void
+{
+    $trace = debug_backtrace(
+        DEBUG_BACKTRACE_IGNORE_ARGS,
+        1
+    );
+
+    $caller_file = $trace[0]['file'] ?? '';
+
+    $component =
+        $caller_file !== ''
+            ? pathinfo(
+                $caller_file,
+                PATHINFO_FILENAME
+            )
+            : 'Application';
+
+    app_log(
+        'ERROR',
+        $component,
+        $message
+    );
+}
+
 function app_log_exception(
     string $component,
     Throwable $exception,

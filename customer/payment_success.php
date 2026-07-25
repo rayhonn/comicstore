@@ -123,7 +123,7 @@ try {
         $session_currency !==
             $expected_currency
     ) {
-        error_log(
+        app_error_log(
             'Stripe Checkout Session validation failed: ' .
             $session_id
         );
@@ -137,7 +137,7 @@ try {
 } catch (
     \Stripe\Exception\ApiErrorException $e
 ) {
-    error_log(
+    app_error_log(
         'Stripe session verification failed: ' .
         $e->getMessage()
     );
@@ -148,7 +148,7 @@ try {
         )
     );
 } catch (Throwable $e) {
-    error_log(
+    app_error_log(
         'Stripe payment validation failed: ' .
         $e->getMessage()
     );
@@ -358,7 +358,7 @@ try {
         $pdo->rollBack();
     }
 
-    error_log(
+    app_error_log(
         'Pending order creation failed: ' .
         $e->getMessage()
     );
@@ -500,7 +500,7 @@ if ($user_info) {
 
         $mail->send();
     } catch (Exception $e) {
-        error_log(
+        app_error_log(
             'Payment confirmation email failed: ' .
             $e->getMessage()
         );
@@ -516,7 +516,7 @@ try {
         'order'
     );
 } catch (Throwable $e) {
-    error_log(
+    app_error_log(
         'Payment confirmation notification failed: ' .
         $e->getMessage()
     );

@@ -350,7 +350,7 @@ if (
             $pdo->rollBack();
         }
 
-        error_log(
+        app_error_log(
             'Payment verification failed: ' .
             $e->getMessage()
         );
@@ -378,7 +378,7 @@ if ($order && $error === 'expired') {
             'order'
         );
     } catch (Throwable $e) {
-        error_log(
+        app_error_log(
             'Cancellation notification failed: ' .
             $e->getMessage()
         );
@@ -461,7 +461,7 @@ if ($order && $error === 'expired') {
             $mail->send();
         }
     } catch (Exception $e) {
-        error_log(
+        app_error_log(
             'Cancellation email failed: ' .
             $e->getMessage()
         );
@@ -510,7 +510,7 @@ if ($order && $confirmed) {
             );
         }
     } catch (Throwable $e) {
-        error_log(
+        app_error_log(
             'Confirmation notification failed: ' .
             $e->getMessage()
         );
@@ -669,7 +669,7 @@ if ($order && $confirmed) {
             $mail->send();
         }
     } catch (Exception $e) {
-        error_log(
+        app_error_log(
             'Confirmation email failed: ' .
             $e->getMessage()
         );

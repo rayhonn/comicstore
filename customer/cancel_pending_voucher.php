@@ -108,7 +108,7 @@ if (
             $pdo->rollBack();
         }
 
-        error_log(
+        app_error_log(
             'Invalid checkout cleanup failed: ' .
             $e->getMessage()
         );
@@ -157,7 +157,7 @@ if ($stripe_session_id !== '') {
             $session_user_id !==
             (string) $user_id
         ) {
-            error_log(
+            app_error_log(
                 'Stripe cancellation user mismatch for session: ' .
                 $stripe_session_id
             );
@@ -225,7 +225,7 @@ if ($stripe_session_id !== '') {
     } catch (
         \Stripe\Exception\ApiErrorException $e
     ) {
-        error_log(
+        app_error_log(
             'Stripe Checkout Session cancellation failed: ' .
             $e->getMessage()
         );
@@ -239,7 +239,7 @@ if ($stripe_session_id !== '') {
             ]
         );
     } catch (Throwable $e) {
-        error_log(
+        app_error_log(
             'Checkout session cancellation failed: ' .
             $e->getMessage()
         );
@@ -270,7 +270,7 @@ try {
         $pdo->rollBack();
     }
 
-    error_log(
+    app_error_log(
         'Pending checkout voucher restoration failed: ' .
         $e->getMessage()
     );
