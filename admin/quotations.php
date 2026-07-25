@@ -5,14 +5,25 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 require_once '../includes/db.php';
+require_once '../includes/csrf.php';
 
-$rfq_id = $_GET['rfq_id'] ?? null;
-if (!$rfq_id) { header('Location: rfq.php'); exit; }
+$rfq_id = filter_var(
+    $_GET['rfq_id'] ?? null,
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
+if ($rfq_id === false) {
+    header('Location: rfq.php');
+    exit;
+}
 
 $rfq = $pdo->prepare("SELECT * FROM rfq WHERE rfq_id = ?");
 $rfq->execute([$rfq_id]);
 $rfq = $rfq->fetch(PDO::FETCH_ASSOC);
-if (!$rfq) { header('Location: rfq.php'); exit; }
+if (!$rfq) {
+    header('Location: rfq.php');
+    exit;
+}
 
 // Get RFQ items
 $rfq_items = $pdo->prepare("
@@ -91,35 +102,256 @@ if (count($quotations) > 0) {
 
 // Handle generate PO
 $success = '';
+$error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
-    $quotation_id = $_POST['quotation_id'];
-    $selected_quote = null;
-    foreach ($quotations as $q) {
-        if ($q['quotation_id'] == $quotation_id) { $selected_quote = $q; break; }
-    }
+    csrf_verify();
 
-    if ($selected_quote) {
-        $last = $pdo->query("SELECT po_id FROM purchase_orders ORDER BY po_id DESC LIMIT 1")->fetchColumn();
-        $next_num = ($last ?? 0) + 1;
-        $po_number = 'PO-' . str_pad($next_num, 4, '0', STR_PAD_LEFT);
+    $quotation_id = filter_var(
+        $_POST['quotation_id'] ?? null,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
 
-        $pdo->prepare("INSERT INTO purchase_orders (po_number, po_supplier_id, po_quotation_id, po_status, po_total_amount, po_created_by) VALUES (?, ?, ?, 'sent', ?, ?)")
-            ->execute([$po_number, $selected_quote['quotation_supplier_id'], $quotation_id, $selected_quote['total'], $_SESSION['user_id']]);
-        $po_id = $pdo->lastInsertId();
+    if ($quotation_id === false) {
+        $error = 'Invalid quotation selected.';
+    } else {
+        try {
+            $pdo->beginTransaction();
 
-        foreach ($selected_quote['items'] as $item) {
-            $pdo->prepare("INSERT INTO po_items (po_item_po_id, po_item_product_id, po_item_quantity, po_item_unit_price) VALUES (?, ?, ?, ?)")
-                ->execute([$po_id, $item['quotation_item_product_id'], $item['quotation_item_quantity'], $item['quotation_item_unit_price']]);
+            // Lock the RFQ so only one quotation can be selected.
+            $locked_rfq_stmt = $pdo->prepare("
+                SELECT *
+                FROM rfq
+                WHERE rfq_id = ?
+                FOR UPDATE
+            ");
+            $locked_rfq_stmt->execute([$rfq_id]);
+            $locked_rfq = $locked_rfq_stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$locked_rfq) {
+                throw new RuntimeException('The RFQ was not found.');
+            }
+
+            if ($locked_rfq['rfq_status'] === 'closed') {
+                throw new RuntimeException(
+                    'This RFQ has already been closed and a purchase order has already been generated.'
+                );
+            }
+
+            // Lock and verify the selected quotation belongs to this RFQ.
+            $selected_quote_stmt = $pdo->prepare("
+                SELECT q.*, s.supplier_name
+                FROM quotations q
+                JOIN suppliers s ON s.supplier_id = q.quotation_supplier_id
+                WHERE q.quotation_id = ?
+                AND q.quotation_rfq_id = ?
+                FOR UPDATE
+            ");
+            $selected_quote_stmt->execute([$quotation_id, $rfq_id]);
+            $selected_quote = $selected_quote_stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$selected_quote) {
+                throw new RuntimeException(
+                    'The selected quotation does not belong to this RFQ.'
+                );
+            }
+
+            if ($selected_quote['quotation_status'] !== 'submitted') {
+                throw new RuntimeException(
+                    'This quotation is no longer available for selection.'
+                );
+            }
+
+            // Check for an existing PO created from any quotation under this RFQ.
+            $existing_po_stmt = $pdo->prepare("
+                SELECT po.po_id
+                FROM purchase_orders po
+                JOIN quotations q ON q.quotation_id = po.po_quotation_id
+                WHERE q.quotation_rfq_id = ?
+                LIMIT 1
+                FOR UPDATE
+            ");
+            $existing_po_stmt->execute([$rfq_id]);
+
+            if ($existing_po_stmt->fetchColumn()) {
+                throw new RuntimeException(
+                    'A purchase order has already been generated for this RFQ.'
+                );
+            }
+
+            // Reload and lock quotation items before creating the PO.
+            $quote_items_stmt = $pdo->prepare("
+                SELECT *
+                FROM quotation_items
+                WHERE quotation_item_quotation_id = ?
+                ORDER BY quotation_item_id
+                FOR UPDATE
+            ");
+            $quote_items_stmt->execute([$quotation_id]);
+            $quote_items = $quote_items_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if (!$quote_items) {
+                throw new RuntimeException(
+                    'No items were found for the selected quotation.'
+                );
+            }
+
+            $po_items_data = [];
+            $total_cents = 0;
+
+            foreach ($quote_items as $item) {
+                $product_id = (int) $item['quotation_item_product_id'];
+                $quantity = (int) $item['quotation_item_quantity'];
+                $unit_price = (float) $item['quotation_item_unit_price'];
+
+                if ($product_id <= 0 || $quantity <= 0 || $unit_price <= 0) {
+                    throw new RuntimeException(
+                        'The selected quotation contains invalid item data.'
+                    );
+                }
+
+                $unit_price_cents = (int) round($unit_price * 100);
+                $total_cents += $quantity * $unit_price_cents;
+
+                $po_items_data[] = [
+                    'product_id' => $product_id,
+                    'quantity' => $quantity,
+                    'unit_price' => number_format(
+                        $unit_price_cents / 100,
+                        2,
+                        '.',
+                        ''
+                    ),
+                ];
+            }
+
+            if ($total_cents <= 0) {
+                throw new RuntimeException(
+                    'The selected quotation has an invalid total amount.'
+                );
+            }
+
+            $po_total = number_format($total_cents / 100, 2, '.', '');
+
+            // Use the auto-increment ID to generate a concurrency-safe PO number.
+            $temporary_po_number = 'TMP-PO-' . bin2hex(random_bytes(6));
+
+            $insert_po = $pdo->prepare("
+                INSERT INTO purchase_orders (
+                    po_number,
+                    po_supplier_id,
+                    po_quotation_id,
+                    po_status,
+                    po_total_amount,
+                    po_created_by
+                )
+                VALUES (?, ?, ?, 'sent', ?, ?)
+            ");
+            $insert_po->execute([
+                $temporary_po_number,
+                $selected_quote['quotation_supplier_id'],
+                $quotation_id,
+                $po_total,
+                $_SESSION['user_id'],
+            ]);
+
+            $po_id = (int) $pdo->lastInsertId();
+            $po_number = 'PO-' . str_pad((string) $po_id, 4, '0', STR_PAD_LEFT);
+
+            $set_po_number = $pdo->prepare("
+                UPDATE purchase_orders
+                SET po_number = ?
+                WHERE po_id = ?
+                AND po_number = ?
+            ");
+            $set_po_number->execute([
+                $po_number,
+                $po_id,
+                $temporary_po_number,
+            ]);
+
+            if ($set_po_number->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Unable to generate the purchase order number.'
+                );
+            }
+
+            $insert_po_item = $pdo->prepare("
+                INSERT INTO po_items (
+                    po_item_po_id,
+                    po_item_product_id,
+                    po_item_quantity,
+                    po_item_unit_price
+                )
+                VALUES (?, ?, ?, ?)
+            ");
+
+            foreach ($po_items_data as $item) {
+                $insert_po_item->execute([
+                    $po_id,
+                    $item['product_id'],
+                    $item['quantity'],
+                    $item['unit_price'],
+                ]);
+            }
+
+            // Mark the selected quotation as accepted and the remaining submissions as rejected.
+            $accept_quote = $pdo->prepare("
+                UPDATE quotations
+                SET quotation_status = 'accepted'
+                WHERE quotation_id = ?
+                AND quotation_rfq_id = ?
+                AND quotation_status = 'submitted'
+            ");
+            $accept_quote->execute([$quotation_id, $rfq_id]);
+
+            if ($accept_quote->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'The selected quotation could not be accepted.'
+                );
+            }
+
+            $reject_other_quotes = $pdo->prepare("
+                UPDATE quotations
+                SET quotation_status = 'rejected'
+                WHERE quotation_rfq_id = ?
+                AND quotation_id != ?
+                AND quotation_status = 'submitted'
+            ");
+            $reject_other_quotes->execute([$rfq_id, $quotation_id]);
+
+            $close_rfq = $pdo->prepare("
+                UPDATE rfq
+                SET rfq_status = 'closed'
+                WHERE rfq_id = ?
+                AND rfq_status != 'closed'
+            ");
+            $close_rfq->execute([$rfq_id]);
+
+            if ($close_rfq->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'The RFQ could not be closed.'
+                );
+            }
+
+            $pdo->commit();
+
+            $_SESSION['flash_success'] =
+                "$po_number created successfully for {$selected_quote['supplier_name']}!";
+            header('Location: purchase_orders.php');
+            exit;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            if ($e instanceof RuntimeException) {
+                $error = $e->getMessage();
+            } else {
+                error_log('Purchase order generation failed: ' . $e->getMessage());
+                $error = 'Unable to generate the purchase order. Please try again.';
+            }
         }
-
-        // Mark this quotation as accepted, others rejected
-        $pdo->prepare("UPDATE quotations SET quotation_status = 'accepted' WHERE quotation_id = ?")->execute([$quotation_id]);
-        $pdo->prepare("UPDATE quotations SET quotation_status = 'rejected' WHERE quotation_rfq_id = ? AND quotation_id != ?")->execute([$rfq_id, $quotation_id]);
-        $pdo->prepare("UPDATE rfq SET rfq_status = 'closed' WHERE rfq_id = ?")->execute([$rfq_id]);
-
-        $_SESSION['flash_success'] = "$po_number created successfully for {$selected_quote['supplier_name']}!";
-        header('Location: purchase_orders.php');
-        exit;
     }
 }
 ?>
@@ -150,6 +382,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
                 · Status: <span class="font-semibold capitalize"><?= $rfq['rfq_status'] ?></span>
             </p>
         </div>
+
+        <?php if ($error): ?>
+        <div class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl mb-6">
+            ❌ <?= htmlspecialchars($error) ?>
+        </div>
+        <?php endif; ?>
 
         <!-- Requested Items -->
         <div class="bg-white rounded-2xl shadow-sm p-6 mb-6">
@@ -199,7 +437,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
                 </div>
 
                 <div class="space-y-2 mb-4">
-                    <?php foreach ($q['items'] as $i): 
+                    <?php foreach ($q['items'] as $i):
                         $prod = array_filter($rfq_items, fn($r) => $r['rfq_item_product_id'] == $i['quotation_item_product_id']);
                         $prod = reset($prod);
                     ?>
@@ -225,6 +463,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
 
                 <?php if ($rfq['rfq_status'] !== 'closed'): ?>
                 <form method="POST" onsubmit="return confirm('Generate PO for <?= htmlspecialchars($q['supplier_name']) ?>?')">
+                    <?php csrf_field(); ?>
                     <input type="hidden" name="generate_po" value="1">
                     <input type="hidden" name="quotation_id" value="<?= $q['quotation_id'] ?>">
                     <button type="submit"
