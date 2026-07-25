@@ -151,7 +151,7 @@ $items = $stmt2->fetchAll(PDO::FETCH_ASSOC);
             <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2">
                 <span>💳</span> Payment Method
             </h3>
-            <p class="text-sm text-gray-600"><?= htmlspecialchars($order['order_payment_method']) ?></p>
+            <p class="text-sm text-gray-600"><?= htmlspecialchars(ucwords(str_replace('_', ' ', $order['order_payment_method']))) ?></p>
         </div>
         <?php endif; ?>
         

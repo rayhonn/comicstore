@@ -164,7 +164,7 @@ $sc = $status_colors[$order['order_status']] ?? $status_colors['pending'];
                 <?php if (!empty($order['order_payment_method'])): ?>
                 <div>
                     <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Payment Method</p>
-                    <p class="font-semibold text-gray-700">💳 <?= htmlspecialchars($order['order_payment_method']) ?></p>
+                    <p class="font-semibold text-gray-700">💳 <?= htmlspecialchars(ucwords(str_replace('_', ' ', $order['order_payment_method']))) ?></p>
                 </div>
                 <?php endif; ?>
 

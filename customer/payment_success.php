@@ -224,9 +224,7 @@ try {
         $order['shipping_fee'],
         $order['shipping_courier'] ?? null,
         $order['shipping_zone'] ?? 'peninsular',
-        'Stripe - ' .
-            ($stripe_session->payment_method_types[0]
-                ?? 'card'),
+        'stripe_card',
         $token,
         $expires_at,
         $voucher_code !== '' ? $voucher_code : null,
