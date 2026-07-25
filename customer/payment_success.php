@@ -239,11 +239,12 @@ try {
         INSERT INTO order_items (
             order_item_order_id,
             order_item_product_id,
+            order_item_product_title,
             order_item_quantity,
             order_item_price,
             order_item_type
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
     ");
 
     $reduce_stock = $pdo->prepare("
@@ -264,6 +265,7 @@ try {
         $item_insert->execute([
             $order_id,
             $product_id,
+            $item['product_title'],
             $quantity,
             $item['product_price'],
             $item['product_type'],
