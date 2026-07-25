@@ -34,35 +34,178 @@ $existing_quote = $existing_quote->fetch(PDO::FETCH_ASSOC);
 $error = '';
 $success = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote']) && !$existing_quote) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote'])) {
     csrf_verify();
 
-    $prices = $_POST['unit_price'] ?? [];
-    $notes = trim($_POST['notes'] ?? '');
+    $prices = is_array($_POST['unit_price'] ?? null)
+        ? $_POST['unit_price']
+        : [];
+    $notes = trim((string) ($_POST['notes'] ?? ''));
 
-    $valid = true;
-    foreach ($items as $item) {
-        if (empty($prices[$item['rfq_item_id']]) || $prices[$item['rfq_item_id']] <= 0) {
-            $valid = false;
+    try {
+        $pdo->beginTransaction();
+
+        // Lock the supplier assignment so duplicate submissions are serialized.
+        $assignment = $pdo->prepare("
+            SELECT rfq_supplier_id
+            FROM rfq_suppliers
+            WHERE rfq_supplier_rfq_id = ?
+            AND rfq_supplier_supplier_id = ?
+            FOR UPDATE
+        ");
+        $assignment->execute([$rfq_id, $supplier_id]);
+
+        if (!$assignment->fetchColumn()) {
+            throw new RuntimeException(
+                'This RFQ is not assigned to your supplier account.'
+            );
         }
-    }
 
-    if (!$valid) {
-        $error = 'Please enter a valid price for all items.';
-    } else {
-        $pdo->prepare("INSERT INTO quotations (quotation_rfq_id, quotation_supplier_id, quotation_notes) VALUES (?, ?, ?)")
-            ->execute([$rfq_id, $supplier_id, $notes]);
-        $quotation_id = $pdo->lastInsertId();
+        // Lock and re-check the latest RFQ status inside the transaction.
+        $locked_rfq_stmt = $pdo->prepare("
+            SELECT *
+            FROM rfq
+            WHERE rfq_id = ?
+            FOR UPDATE
+        ");
+        $locked_rfq_stmt->execute([$rfq_id]);
+        $locked_rfq = $locked_rfq_stmt->fetch(PDO::FETCH_ASSOC);
 
-        foreach ($items as $item) {
-            $pdo->prepare("INSERT INTO quotation_items (quotation_item_quotation_id, quotation_item_product_id, quotation_item_quantity, quotation_item_unit_price) VALUES (?, ?, ?, ?)")
-                ->execute([$quotation_id, $item['rfq_item_product_id'], $item['rfq_item_quantity'], $prices[$item['rfq_item_id']]]);
+        if (!$locked_rfq) {
+            throw new RuntimeException('The RFQ was not found.');
         }
 
-        $pdo->prepare("UPDATE rfq SET rfq_status = 'quoted' WHERE rfq_id = ?")->execute([$rfq_id]);
+        if ($locked_rfq['rfq_status'] === 'closed') {
+            throw new RuntimeException(
+                'This RFQ has already been closed and no longer accepts quotations.'
+            );
+        }
+
+        // Reload and lock the current RFQ items before recording prices.
+        $locked_items_stmt = $pdo->prepare("
+            SELECT ri.*
+            FROM rfq_items ri
+            WHERE ri.rfq_item_rfq_id = ?
+            ORDER BY ri.rfq_item_id
+            FOR UPDATE
+        ");
+        $locked_items_stmt->execute([$rfq_id]);
+        $locked_items = $locked_items_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (!$locked_items) {
+            throw new RuntimeException(
+                'No items were found for this RFQ.'
+            );
+        }
+
+        // Re-check after locking to prevent two requests from creating two quotes.
+        $duplicate_quote = $pdo->prepare("
+            SELECT quotation_id
+            FROM quotations
+            WHERE quotation_rfq_id = ?
+            AND quotation_supplier_id = ?
+            LIMIT 1
+            FOR UPDATE
+        ");
+        $duplicate_quote->execute([$rfq_id, $supplier_id]);
+
+        if ($duplicate_quote->fetchColumn()) {
+            throw new RuntimeException(
+                'You have already submitted a quotation for this RFQ.'
+            );
+        }
+
+        $quotation_items_data = [];
+
+        foreach ($locked_items as $item) {
+            $rfq_item_id = (int) $item['rfq_item_id'];
+            $raw_price = trim(
+                (string) ($prices[$rfq_item_id] ?? '')
+            );
+
+            if (
+                !preg_match('/^\d{1,8}(?:\.\d{1,2})?$/', $raw_price) ||
+                (float) $raw_price <= 0
+            ) {
+                throw new RuntimeException(
+                    'Please enter a valid price for all items.'
+                );
+            }
+
+            $quotation_items_data[] = [
+                'product_id' => (int) $item['rfq_item_product_id'],
+                'quantity' => (int) $item['rfq_item_quantity'],
+                'unit_price' => number_format(
+                    (float) $raw_price,
+                    2,
+                    '.',
+                    ''
+                ),
+            ];
+        }
+
+        $insert_quote = $pdo->prepare("
+            INSERT INTO quotations (
+                quotation_rfq_id,
+                quotation_supplier_id,
+                quotation_notes
+            )
+            VALUES (?, ?, ?)
+        ");
+        $insert_quote->execute([
+            $rfq_id,
+            $supplier_id,
+            $notes !== '' ? $notes : null,
+        ]);
+
+        $quotation_id = (int) $pdo->lastInsertId();
+
+        $insert_quote_item = $pdo->prepare("
+            INSERT INTO quotation_items (
+                quotation_item_quotation_id,
+                quotation_item_product_id,
+                quotation_item_quantity,
+                quotation_item_unit_price
+            )
+            VALUES (?, ?, ?, ?)
+        ");
+
+        foreach ($quotation_items_data as $item) {
+            $insert_quote_item->execute([
+                $quotation_id,
+                $item['product_id'],
+                $item['quantity'],
+                $item['unit_price'],
+            ]);
+        }
+
+        $update_rfq = $pdo->prepare("
+            UPDATE rfq
+            SET rfq_status = 'quoted'
+            WHERE rfq_id = ?
+            AND rfq_status != 'closed'
+        ");
+        $update_rfq->execute([$rfq_id]);
+
+        $pdo->commit();
 
         header('Location: dashboard.php?quoted=1');
         exit;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        if ($e instanceof RuntimeException) {
+            $error = $e->getMessage();
+        } else {
+            error_log(
+                'Supplier quotation submission failed: ' .
+                $e->getMessage()
+            );
+            $error =
+                'Unable to submit the quotation. Please try again.';
+        }
     }
 }
 ?>
