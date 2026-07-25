@@ -103,65 +103,309 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_credit_note']))
 // ------------------------------------------------------------
 // Action: Create Replacement PO (resolves an acknowledged return)
 // ------------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_replacement_po'])) {
-    $return_id = $_POST['return_id'];
-    $ret = get_return_or_redirect($pdo, $return_id);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['create_replacement_po'])
+) {
+    $return_id = filter_var(
+        $_POST['return_id'] ?? null,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
 
-    if (!in_array($ret['return_status'], ['acknowledged', 'escalated'])) {
-        $_SESSION['flash_error'] = 'This return is not in a resolvable state.';
-        header('Location: supplier_returns.php'); exit;
+    $notes = trim(
+        (string) (
+            $_POST['resolution_notes'] ?? ''
+        )
+    );
+
+    if ($return_id === false) {
+        $_SESSION['flash_error'] =
+            'Invalid return record.';
+
+        header('Location: supplier_returns.php');
+        exit;
     }
-    if ($ret['return_status'] === 'escalated' && !$is_senior) {
-        $_SESSION['flash_error'] = 'Only senior admin can resolve a disputed return.';
-        header('Location: supplier_returns.php'); exit;
-    }
 
-    $notes = trim($_POST['resolution_notes'] ?? '');
-    if ($ret['return_status'] === 'escalated' && $notes === '') {
-        $_SESSION['flash_error'] = 'A justification is required to resolve a disputed return.';
-        header('Location: supplier_returns.php'); exit;
-    }
+    try {
+        $pdo->beginTransaction();
 
-    $items = get_return_items($pdo, $return_id);
-    if (empty($items)) {
-        $_SESSION['flash_error'] = 'No items found for this return.';
-        header('Location: supplier_returns.php'); exit;
-    }
+        // Lock and re-check the return and its original purchase order.
+        $return_stmt = $pdo->prepare("
+            SELECT
+                sr.*,
+                po.po_supplier_id,
+                po.po_number
+            FROM supplier_returns sr
+            JOIN purchase_orders po
+                ON po.po_id = sr.return_po_id
+            WHERE sr.return_id = ?
+            FOR UPDATE
+        ");
 
-    $po_number = generate_po_number($pdo);
-    $total = array_sum(array_map(fn($i) => $i['return_item_quantity'] * $i['return_item_unit_price'], $items));
+        $return_stmt->execute([
+            $return_id,
+        ]);
 
-    $pdo->prepare("
-        INSERT INTO purchase_orders (po_number, po_supplier_id, po_quotation_id, po_status, po_total_amount, po_notes, po_created_by)
-        VALUES (?, ?, NULL, 'confirmed', ?, ?, ?)
-    ")->execute([
-        $po_number, $ret['po_supplier_id'], $total,
-        "Replacement order for {$ret['return_number']} (original {$ret['po_number']})",
-        $_SESSION['user_id']
-    ]);
-    $new_po_id = $pdo->lastInsertId();
+        $ret = $return_stmt->fetch(
+            PDO::FETCH_ASSOC
+        );
 
-    foreach ($items as $item) {
-        $pdo->prepare("
-            INSERT INTO po_items (po_item_po_id, po_item_product_id, po_item_quantity, po_item_unit_price)
+        if (!$ret) {
+            throw new RuntimeException(
+                'Return record not found.'
+            );
+        }
+
+        if (
+            !in_array(
+                $ret['return_status'],
+                ['acknowledged', 'escalated'],
+                true
+            )
+        ) {
+            throw new RuntimeException(
+                'This return is not in a resolvable state.'
+            );
+        }
+
+        if (
+            $ret['return_status'] === 'escalated' &&
+            !$is_senior
+        ) {
+            throw new RuntimeException(
+                'Only senior admin can resolve a disputed return.'
+            );
+        }
+
+        if (
+            $ret['return_status'] === 'escalated' &&
+            $notes === ''
+        ) {
+            throw new RuntimeException(
+                'A justification is required to resolve a disputed return.'
+            );
+        }
+
+        if (!empty($ret['return_replacement_po_id'])) {
+            throw new RuntimeException(
+                'A replacement purchase order has already been created for this return.'
+            );
+        }
+
+        // Lock and reload the return items inside the transaction.
+        $items_stmt = $pdo->prepare("
+            SELECT *
+            FROM supplier_return_items
+            WHERE return_item_return_id = ?
+            ORDER BY return_item_id
+            FOR UPDATE
+        ");
+
+        $items_stmt->execute([
+            $return_id,
+        ]);
+
+        $items = $items_stmt->fetchAll(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$items) {
+            throw new RuntimeException(
+                'No items were found for this return.'
+            );
+        }
+
+        $po_items_data = [];
+        $total_cents = 0;
+
+        foreach ($items as $item) {
+            $product_id =
+                (int) $item['return_item_product_id'];
+            $quantity =
+                (int) $item['return_item_quantity'];
+            $unit_price =
+                (float) $item['return_item_unit_price'];
+
+            if (
+                $product_id <= 0 ||
+                $quantity <= 0 ||
+                $unit_price <= 0
+            ) {
+                throw new RuntimeException(
+                    'The return contains invalid item data.'
+                );
+            }
+
+            $unit_price_cents =
+                (int) round($unit_price * 100);
+            $total_cents +=
+                $quantity * $unit_price_cents;
+
+            $po_items_data[] = [
+                'product_id' => $product_id,
+                'quantity' => $quantity,
+                'unit_price' => number_format(
+                    $unit_price_cents / 100,
+                    2,
+                    '.',
+                    ''
+                ),
+            ];
+        }
+
+        if ($total_cents <= 0) {
+            throw new RuntimeException(
+                'The replacement order has an invalid total amount.'
+            );
+        }
+
+        $po_total = number_format(
+            $total_cents / 100,
+            2,
+            '.',
+            ''
+        );
+
+        // Use the auto-increment ID to create a concurrency-safe PO number.
+        $temporary_po_number =
+            'TMP-PO-' . bin2hex(random_bytes(6));
+
+        $insert_po = $pdo->prepare("
+            INSERT INTO purchase_orders (
+                po_number,
+                po_supplier_id,
+                po_quotation_id,
+                po_status,
+                po_total_amount,
+                po_notes,
+                po_created_by
+            )
+            VALUES (?, ?, NULL, 'confirmed', ?, ?, ?)
+        ");
+
+        $insert_po->execute([
+            $temporary_po_number,
+            $ret['po_supplier_id'],
+            $po_total,
+            'Replacement order for ' .
+                $ret['return_number'] .
+                ' (original ' .
+                $ret['po_number'] .
+                ')',
+            $_SESSION['user_id'],
+        ]);
+
+        $new_po_id =
+            (int) $pdo->lastInsertId();
+        $po_number =
+            'PO-' . str_pad(
+                (string) $new_po_id,
+                4,
+                '0',
+                STR_PAD_LEFT
+            );
+
+        $set_po_number = $pdo->prepare("
+            UPDATE purchase_orders
+            SET po_number = ?
+            WHERE po_id = ?
+            AND po_number = ?
+        ");
+
+        $set_po_number->execute([
+            $po_number,
+            $new_po_id,
+            $temporary_po_number,
+        ]);
+
+        if ($set_po_number->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Unable to generate the replacement purchase order number.'
+            );
+        }
+
+        $insert_po_item = $pdo->prepare("
+            INSERT INTO po_items (
+                po_item_po_id,
+                po_item_product_id,
+                po_item_quantity,
+                po_item_unit_price
+            )
             VALUES (?, ?, ?, ?)
-        ")->execute([$new_po_id, $item['return_item_product_id'], $item['return_item_quantity'], $item['return_item_unit_price']]);
+        ");
+
+        foreach ($po_items_data as $item) {
+            $insert_po_item->execute([
+                $new_po_id,
+                $item['product_id'],
+                $item['quantity'],
+                $item['unit_price'],
+            ]);
+        }
+
+        $resolution_type =
+            $ret['return_status'] === 'escalated'
+                ? 'dispute_upheld'
+                : 'replacement';
+
+        $resolve_return = $pdo->prepare("
+            UPDATE supplier_returns
+            SET return_status = 'resolved',
+                return_resolution_type = ?,
+                return_resolution_notes = ?,
+                return_replacement_po_id = ?,
+                return_resolved_by = ?,
+                return_resolved_at = NOW()
+            WHERE return_id = ?
+            AND return_status = ?
+            AND return_replacement_po_id IS NULL
+        ");
+
+        $resolve_return->execute([
+            $resolution_type,
+            $notes !== '' ? $notes : null,
+            $new_po_id,
+            $_SESSION['user_id'],
+            $return_id,
+            $ret['return_status'],
+        ]);
+
+        if ($resolve_return->rowCount() !== 1) {
+            throw new RuntimeException(
+                'The return has already been resolved.'
+            );
+        }
+
+        $pdo->commit();
+
+        $_SESSION['flash_success'] =
+            "Replacement $po_number created and confirmed. " .
+            'Use Goods Received once it arrives.';
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        if ($e instanceof RuntimeException) {
+            $_SESSION['flash_error'] =
+                $e->getMessage();
+        } else {
+            error_log(
+                'Replacement purchase order creation failed: ' .
+                $e->getMessage()
+            );
+
+            $_SESSION['flash_error'] =
+                'Unable to create the replacement purchase order. ' .
+                'Please try again.';
+        }
     }
 
-    $resolution_type = $ret['return_status'] === 'escalated' ? 'dispute_upheld' : 'replacement';
-
-    $pdo->prepare("
-        UPDATE supplier_returns SET
-            return_status = 'resolved',
-            return_resolution_type = ?,
-            return_resolution_notes = ?,
-            return_replacement_po_id = ?,
-            return_resolved_by = ?,
-            return_resolved_at = NOW()
-        WHERE return_id = ?
-    ")->execute([$resolution_type, $notes ?: null, $new_po_id, $_SESSION['user_id'], $return_id]);
-
-    $_SESSION['flash_success'] = "Replacement $po_number created and confirmed. Use Goods Received once it arrives.";
     header('Location: supplier_returns.php');
     exit;
 }
