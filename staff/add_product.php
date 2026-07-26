@@ -1,12 +1,13 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'staff') {
-    header('Location: ../admin/login.php');
-    exit;
-}
-require_once '../includes/db.php';
-require_once '../includes/upload_helper.php';
-require_once '../includes/notifications.php';
+
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ .
+    '/../includes/upload_helper.php';
+require_once __DIR__ .
+    '/../includes/notifications.php';
+
+require_staff();
 
 $error = '';
 $categories = $pdo->query("SELECT * FROM categories ORDER BY category_name")->fetchAll(PDO::FETCH_ASSOC);
