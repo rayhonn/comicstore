@@ -1,6 +1,10 @@
 <?php
-session_start();
-require_once 'includes/db.php';
+
+require_once __DIR__ . '/includes/session.php';
+
+start_secure_session();
+
+require_once __DIR__ . '/includes/db.php';
 
 $cart_count = 0;
 if (isset($_SESSION['user_id'])) {

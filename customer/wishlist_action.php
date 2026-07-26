@@ -1,5 +1,5 @@
 <?php
-session_start();
+
 require_once '../includes/db.php';
 require_once '../includes/auth.php';
 require_once '../includes/csrf.php';
@@ -19,7 +19,7 @@ $product_id = $_POST['product_id'] ?? null;
 $action     = $_POST['action'] ?? '';
 $redirect   = $_POST['redirect'] ?? 'wishlist.php';
 
-// 只允许站内相对路径
+// Only allow approved internal redirect paths.
 $redirect = safe_redirect_target($redirect, 'wishlist.php');
 
 if ($product_id) {

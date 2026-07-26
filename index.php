@@ -1,6 +1,10 @@
 <?php
-session_start();
-require_once 'includes/db.php';
+
+require_once __DIR__ . '/includes/session.php';
+
+start_secure_session();
+
+require_once __DIR__ . '/includes/db.php';
 
 $rankings = $pdo->query("
     SELECT p.*, 

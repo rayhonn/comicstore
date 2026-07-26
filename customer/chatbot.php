@@ -1,15 +1,26 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
-    echo json_encode(['error' => 'Unauthorized']);
-    exit;
-}
-require_once '../includes/db.php';
-require_once '../includes/gemini_config.php';
+
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ .
+    '/../includes/gemini_config.php';
 
 header('Content-Type: application/json');
 
-$user_id = $_SESSION['user_id'];
+if (
+    empty($_SESSION['user_id']) ||
+    ($_SESSION['role'] ?? '') !== 'customer'
+) {
+    http_response_code(401);
+
+    echo json_encode([
+        'error' => 'Unauthorized',
+    ]);
+
+    exit;
+}
+
+$user_id = current_user_id();
 // Handle clear chat
 if (isset($_POST['clear'])) {
     unset($_SESSION['chat_history']);
