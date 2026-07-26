@@ -70,9 +70,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 regenerate_session();
 
-                $_SESSION['user_id'] =
-                    $supplier['supplier_id'];
-
                 $_SESSION['supplier_id'] =
                     $supplier['supplier_id'];
 

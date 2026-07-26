@@ -39,11 +39,68 @@ function app_session_cookie_parameters(): array
 }
 
 /**
+ * Remove session identity fields that do not belong to the
+ * currently authenticated account type.
+ */
+function app_normalize_session_identity(): void
+{
+    $role = (string) ($_SESSION['role'] ?? '');
+
+    if ($role === 'supplier') {
+        unset(
+            $_SESSION['user_id'],
+            $_SESSION['user_name'],
+            $_SESSION['user_first_name'],
+            $_SESSION['admin_level']
+        );
+
+        return;
+    }
+
+    if (
+        in_array(
+            $role,
+            [
+                'customer',
+                'admin',
+                'staff',
+            ],
+            true
+        )
+    ) {
+        unset(
+            $_SESSION['supplier_id'],
+            $_SESSION['supplier_name']
+        );
+
+        if ($role !== 'admin') {
+            unset($_SESSION['admin_level']);
+        }
+
+        return;
+    }
+
+    unset(
+        $_SESSION['user_id'],
+        $_SESSION['user_name'],
+        $_SESSION['user_first_name'],
+        $_SESSION['supplier_id'],
+        $_SESSION['supplier_name'],
+        $_SESSION['admin_level'],
+        $_SESSION['role']
+    );
+}
+
+/**
  * Determine whether the session contains an authenticated account.
  */
 function app_session_is_authenticated(): bool
 {
     $role = (string) ($_SESSION['role'] ?? '');
+
+    if ($role === 'supplier') {
+        return !empty($_SESSION['supplier_id']);
+    }
 
     return (
         !empty($_SESSION['user_id']) &&
@@ -53,11 +110,26 @@ function app_session_is_authenticated(): bool
                 'customer',
                 'admin',
                 'staff',
-                'supplier',
             ],
             true
         )
     );
+}
+
+/**
+ * Return the authenticated account ID for logging.
+ */
+function app_session_account_id(): int
+{
+    if (
+        ($_SESSION['role'] ?? '') === 'supplier'
+    ) {
+        return (int) (
+            $_SESSION['supplier_id'] ?? 0
+        );
+    }
+
+    return (int) ($_SESSION['user_id'] ?? 0);
 }
 
 /**
@@ -85,7 +157,7 @@ function app_enforce_session_idle_timeout(): void
         ($now - $lastActivity) >=
             APP_SESSION_IDLE_TIMEOUT_SECONDS
     ) {
-        $accountId = (int) $_SESSION['user_id'];
+        $accountId = app_session_account_id();
         $role = (string) $_SESSION['role'];
 
         $_SESSION = [];
@@ -159,8 +231,10 @@ function app_refresh_session_cookie(): void
 function start_secure_session(): void
 {
     if (session_status() === PHP_SESSION_ACTIVE) {
+        app_normalize_session_identity();
         app_enforce_session_idle_timeout();
         app_refresh_session_cookie();
+
         return;
     }
 
@@ -221,6 +295,7 @@ function start_secure_session(): void
         );
     }
 
+    app_normalize_session_identity();
     app_enforce_session_idle_timeout();
     app_refresh_session_cookie();
 }

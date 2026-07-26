@@ -252,7 +252,7 @@ function require_senior_admin(): void
 function require_supplier(): void
 {
     if (
-        empty($_SESSION['user_id']) ||
+        empty($_SESSION['supplier_id']) ||
         ($_SESSION['role'] ?? '') !== 'supplier'
     ) {
         redirect_to(app_path('supplier/login.php'));
@@ -265,6 +265,17 @@ function require_supplier(): void
 function regenerate_session(): void
 {
     session_regenerate_id(true);
+
+    unset(
+        $_SESSION['user_id'],
+        $_SESSION['user_name'],
+        $_SESSION['user_first_name'],
+        $_SESSION['supplier_id'],
+        $_SESSION['supplier_name'],
+        $_SESSION['admin_level'],
+        $_SESSION['role'],
+        $_SESSION['auth_last_activity_at']
+    );
 }
 
 /**
