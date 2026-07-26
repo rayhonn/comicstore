@@ -265,6 +265,15 @@ if ($filter !== 'all') {
                     </div>
                 <?php endif; ?>
 
+                <?php if (isset($_GET['payment_processing'])): ?>
+                    <div
+                        class="bg-yellow-50 border border-yellow-200 text-yellow-700 text-sm px-4 py-3 rounded-xl mb-5"
+                    >
+                        Your Stripe payment is being processed. The order will
+                        appear here after server confirmation.
+                    </div>
+                <?php endif; ?>
+
                 <?php if ($has_pending_checkout): ?>
                     <div
                         class="bg-white border border-yellow-200 rounded-2xl shadow-sm overflow-hidden mb-6"
