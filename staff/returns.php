@@ -7,72 +7,219 @@ require_once '../includes/notifications.php';
 
 require_staff();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'], $_POST['action'])) {
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset(
+        $_POST['return_id'],
+        $_POST['action']
+    )
+) {
     csrf_verify();
 
     $return_id = filter_input(
         INPUT_POST,
         'return_id',
-        FILTER_VALIDATE_INT
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
     );
 
     $action = $_POST['action'] ?? '';
-    $admin_note = trim($_POST['admin_note'] ?? '');
+    $admin_note = trim(
+        (string) ($_POST['admin_note'] ?? '')
+    );
 
     if (
-        !$return_id ||
-        !in_array($action, ['approved', 'rejected'], true)
+        $return_id === false ||
+        !in_array(
+            $action,
+            [
+                'approved',
+                'rejected',
+            ],
+            true
+        )
     ) {
         http_response_code(400);
         exit('Invalid return action.');
     }
 
-    $status_check = $pdo->prepare(
-        "SELECT return_status
-        FROM return_requests
-        WHERE return_id = ?"
-    );
-    $status_check->execute([$return_id]);
+    try {
+        $pdo->beginTransaction();
 
-    if ($status_check->fetchColumn() !== 'pending') {
+        $return_stmt = $pdo->prepare("
+            SELECT
+                rr.return_status,
+                o.order_user_id,
+                oi.order_item_product_id,
+                oi.order_item_product_title
+                    AS product_title,
+                oi.order_item_quantity,
+                oi.order_item_price
+            FROM return_requests rr
+            JOIN order_items oi
+                ON oi.order_item_id =
+                    rr.return_item_id
+            JOIN orders o
+                ON o.order_id =
+                    oi.order_item_order_id
+            WHERE rr.return_id = ?
+            FOR UPDATE
+        ");
+
+        $return_stmt->execute([
+            $return_id,
+        ]);
+
+        $return_data = $return_stmt->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$return_data) {
+            throw new RuntimeException(
+                'Return request not found.'
+            );
+        }
+
+        if (
+            $return_data['return_status'] !==
+            'pending'
+        ) {
+            throw new RuntimeException(
+                'Return request has already been processed.'
+            );
+        }
+
+        $update_return = $pdo->prepare("
+            UPDATE return_requests
+            SET return_status = ?,
+                return_admin_note = ?
+            WHERE return_id = ?
+            AND return_status = 'pending'
+        ");
+
+        $update_return->execute([
+            $action,
+            $admin_note,
+            $return_id,
+        ]);
+
+        if ($update_return->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Return request has already been processed.'
+            );
+        }
+
+        if ($action === 'approved') {
+            $restore_stock = $pdo->prepare("
+                UPDATE product_physical
+                SET physical_stock_quantity =
+                    physical_stock_quantity + ?
+                WHERE physical_product_id = ?
+            ");
+
+            $restore_stock->execute([
+                (int) $return_data[
+                    'order_item_quantity'
+                ],
+                (int) $return_data[
+                    'order_item_product_id'
+                ],
+            ]);
+
+            if ($restore_stock->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Unable to restore product stock.'
+                );
+            }
+        }
+
+        $pdo->commit();
+    } catch (RuntimeException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
         header('Location: returns.php');
         exit;
-    }
-
-    if ($action === 'approved') {
-        $stmt = $pdo->prepare("SELECT oi.order_item_product_id, oi.order_item_quantity FROM return_requests rr JOIN order_items oi ON rr.return_item_id = oi.order_item_id WHERE rr.return_id = ?");
-        $stmt->execute([$return_id]);
-        $item = $stmt->fetch();
-        if ($item) {
-            $pdo->prepare("UPDATE product_physical SET physical_stock_quantity = physical_stock_quantity + ? WHERE physical_product_id = ?")
-                ->execute([$item['order_item_quantity'], $item['order_item_product_id']]);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
         }
+
+        app_error_log(
+            'Staff return request processing failed: ' .
+            $e->getMessage()
+        );
+
+        http_response_code(500);
+        exit('Unable to process the return request.');
     }
 
-    $pdo->prepare(
-        "UPDATE return_requests
-        SET return_status = ?,
-            return_admin_note = ?
-        WHERE return_id = ?
-        AND return_status = 'pending'"
-    )->execute([$action, $admin_note, $return_id]);
+    $ret_num =
+        '#' .
+        str_pad(
+            (string) $return_id,
+            4,
+            '0',
+            STR_PAD_LEFT
+        );
 
-    $ret_info = $pdo->prepare("SELECT o.order_user_id, oi.order_item_product_title AS product_title FROM return_requests rr JOIN order_items oi ON rr.return_item_id = oi.order_item_id JOIN orders o ON oi.order_item_order_id = o.order_id JOIN products p ON oi.order_item_product_id = p.product_id WHERE rr.return_id = ?");
-    $ret_info->execute([$return_id]);
-    $ret_data = $ret_info->fetch(PDO::FETCH_ASSOC);
-
-    if ($ret_data) {
-        $ret_num = '#' . str_pad($return_id, 4, '0', STR_PAD_LEFT);
+    try {
         if ($action === 'approved') {
-            $refund_stmt = $pdo->prepare("SELECT oi.order_item_price, oi.order_item_quantity FROM return_requests rr JOIN order_items oi ON rr.return_item_id = oi.order_item_id WHERE rr.return_id = ?");
-            $refund_stmt->execute([$return_id]);
-            $refund_item = $refund_stmt->fetch(PDO::FETCH_ASSOC);
-            $refund_amount = $refund_item ? number_format($refund_item['order_item_price'] * $refund_item['order_item_quantity'], 2) : '0.00';
+            $refund_amount = number_format(
+                (float) $return_data[
+                    'order_item_price'
+                ] *
+                (int) $return_data[
+                    'order_item_quantity'
+                ],
+                2
+            );
 
-            sendNotification($pdo, $ret_data['order_user_id'], 'Return Approved ✅', "Your return $ret_num for \"{$ret_data['product_title']}\" has been approved. A refund of RM $refund_amount will be processed to your original payment method within 5-7 working days.", 'return');
+            sendNotification(
+                $pdo,
+                (int) $return_data[
+                    'order_user_id'
+                ],
+                'Return Approved ✅',
+                "Your return $ret_num for \"" .
+                $return_data['product_title'] .
+                "\" has been approved. A refund of RM " .
+                $refund_amount .
+                ' will be processed to your original ' .
+                'payment method within 5-7 working days.',
+                'return'
+            );
         } else {
-            sendNotification($pdo, $ret_data['order_user_id'], 'Return Rejected ❌', "Your return $ret_num has been rejected." . ($admin_note ? " Reason: $admin_note" : ''), 'return');
+            $message =
+                "Your return $ret_num for \"" .
+                $return_data['product_title'] .
+                '" has been rejected.';
+
+            if ($admin_note !== '') {
+                $message .=
+                    ' Reason: ' . $admin_note;
+            }
+
+            sendNotification(
+                $pdo,
+                (int) $return_data[
+                    'order_user_id'
+                ],
+                'Return Rejected ❌',
+                $message,
+                'return'
+            );
         }
+    } catch (Throwable $e) {
+        app_error_log(
+            'Staff return notification failed: ' .
+            $e->getMessage()
+        );
     }
 
     header('Location: returns.php?success=1');
