@@ -102,6 +102,7 @@ if (
                 $confirm_order = $pdo->prepare("
                     UPDATE orders
                     SET order_payment_status = 'confirmed',
+                        order_status = 'processing',
                         order_confirm_token = NULL,
                         order_confirm_expires_at = NULL,
                         order_processing_at = NOW()
