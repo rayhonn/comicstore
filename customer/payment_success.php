@@ -19,18 +19,39 @@ if ($session_id === '') {
     redirect_to(app_path('customer/cart.php'));
 }
 
-if (
-    isset(
-        $_SESSION['stripe_processed_session_id'],
-        $_SESSION['stripe_processed_order_id']
-    ) &&
-    hash_equals(
-        $_SESSION['stripe_processed_session_id'],
-        $session_id
-    )
-) {
+$user_id = current_user_id();
+
+$processed_order_stmt = $pdo->prepare("
+    SELECT order_id
+    FROM orders
+    WHERE order_stripe_session_id = ?
+    AND order_user_id = ?
+    LIMIT 1
+");
+
+$processed_order_stmt->execute([
+    $session_id,
+    $user_id,
+]);
+
+$processed_order_id =
+    $processed_order_stmt->fetchColumn();
+
+if ($processed_order_id !== false) {
     $processed_order_id =
-        (int) $_SESSION['stripe_processed_order_id'];
+        (int) $processed_order_id;
+
+    $_SESSION['stripe_processed_session_id'] =
+        $session_id;
+
+    $_SESSION['stripe_processed_order_id'] =
+        $processed_order_id;
+
+    unset($_SESSION['pending_order']);
+    unset($_SESSION['payment_lock']);
+    unset($_SESSION['stripe_session_id']);
+    unset($_SESSION['stripe_checkout_url']);
+    unset($_SESSION['stripe_expires_at']);
 
     redirect_to(
         app_path(
@@ -54,7 +75,6 @@ if (
 }
 
 $order = $_SESSION['pending_order'];
-$user_id = current_user_id();
 
 if (
     !is_array($order) ||
@@ -202,6 +222,7 @@ try {
             order_courier,
             order_delivery_zone,
             order_payment_method,
+            order_stripe_session_id,
             order_payment_status,
             order_confirm_token,
             order_confirm_expires_at,
@@ -209,7 +230,7 @@ try {
             order_discount_amount
         )
         VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             'pending_confirmation',
             ?, ?, ?, ?
         )
@@ -225,6 +246,7 @@ try {
         $order['shipping_courier'] ?? null,
         $order['shipping_zone'] ?? 'peninsular',
         'stripe_card',
+        $session_id,
         $token,
         $expires_at,
         $voucher_code !== '' ? $voucher_code : null,
@@ -353,6 +375,66 @@ try {
     }
 
     $pdo->commit();
+} catch (PDOException $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    $mysql_error_code =
+        (int) ($e->errorInfo[1] ?? 0);
+
+    if (
+        $e->getCode() === '23000' &&
+        $mysql_error_code === 1062
+    ) {
+        $existing_order_stmt = $pdo->prepare("
+            SELECT order_id
+            FROM orders
+            WHERE order_stripe_session_id = ?
+            AND order_user_id = ?
+            LIMIT 1
+        ");
+
+        $existing_order_stmt->execute([
+            $session_id,
+            $user_id,
+        ]);
+
+        $existing_order_id =
+            $existing_order_stmt->fetchColumn();
+
+        if ($existing_order_id !== false) {
+            $existing_order_id =
+                (int) $existing_order_id;
+
+            $_SESSION['stripe_processed_session_id'] =
+                $session_id;
+
+            $_SESSION['stripe_processed_order_id'] =
+                $existing_order_id;
+
+            unset($_SESSION['pending_order']);
+            unset($_SESSION['payment_lock']);
+            unset($_SESSION['stripe_session_id']);
+            unset($_SESSION['stripe_checkout_url']);
+            unset($_SESSION['stripe_expires_at']);
+
+            redirect_to(
+                app_path(
+                    'customer/payment_waiting.php?order_id=' .
+                    $existing_order_id
+                )
+            );
+        }
+    }
+
+    app_error_log(
+        'Pending order creation database error: ' .
+        $e->getMessage()
+    );
+
+    http_response_code(500);
+    exit('Unable to create the pending order.');
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
