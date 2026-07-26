@@ -1,21 +1,70 @@
 <?php
-session_start();
-require_once '../includes/db.php';
-header('Content-Type: application/json');
 
-$order_id = $_GET['order_id'] ?? null;
-if (!$order_id || !isset($_SESSION['user_id'])) {
-    echo json_encode(['status' => 'error']);
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/db.php';
+
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+
+if (
+    empty($_SESSION['user_id']) ||
+    ($_SESSION['role'] ?? '') !== 'customer'
+) {
+    http_response_code(401);
+
+    echo json_encode([
+        'status' => 'error',
+    ]);
+
     exit;
 }
 
-$order = $pdo->prepare("SELECT order_payment_status FROM orders WHERE order_id = ? AND order_user_id = ?");
-$order->execute([$order_id, $_SESSION['user_id']]);
-$order = $order->fetch(PDO::FETCH_ASSOC);
+$order_id = filter_input(
+    INPUT_GET,
+    'order_id',
+    FILTER_VALIDATE_INT,
+    [
+        'options' => [
+            'min_range' => 1,
+        ],
+    ]
+);
+
+if (!$order_id) {
+    http_response_code(400);
+
+    echo json_encode([
+        'status' => 'error',
+    ]);
+
+    exit;
+}
+
+$statement = $pdo->prepare("
+    SELECT order_payment_status
+    FROM orders
+    WHERE order_id = ?
+    AND order_user_id = ?
+    LIMIT 1
+");
+
+$statement->execute([
+    $order_id,
+    current_user_id(),
+]);
+
+$order = $statement->fetch(PDO::FETCH_ASSOC);
 
 if (!$order) {
-    echo json_encode(['status' => 'error']);
+    http_response_code(404);
+
+    echo json_encode([
+        'status' => 'error',
+    ]);
+
     exit;
 }
 
-echo json_encode(['status' => $order['order_payment_status']]);
+echo json_encode([
+    'status' => $order['order_payment_status'],
+]);
