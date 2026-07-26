@@ -176,13 +176,10 @@ if (
                         collection_product_id,
                         collection_acquired_date
                     )
-                    SELECT ?, ?, CURDATE()
-                    WHERE NOT EXISTS (
-                        SELECT 1
-                        FROM user_collection
-                        WHERE collection_user_id = ?
-                        AND collection_product_id = ?
-                    )
+                    VALUES (?, ?, CURDATE())
+                    ON DUPLICATE KEY UPDATE
+                        collection_acquired_date =
+                            collection_acquired_date
                 ");
 
                 foreach (
@@ -194,8 +191,6 @@ if (
                         (int) $product_id;
 
                     $add_collection->execute([
-                        $order_user_id,
-                        $product_id,
                         $order_user_id,
                         $product_id,
                     ]);
