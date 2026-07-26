@@ -50,52 +50,250 @@ function get_return_items($pdo, $return_id) {
 // ------------------------------------------------------------
 // Action: Issue Credit Note (resolves an acknowledged return)
 // ------------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_credit_note'])) {
-    $return_id = $_POST['return_id'];
-    $cn_seq = trim($_POST['credit_note_seq'] ?? '');
-    if (!ctype_digit($cn_seq) || strlen($cn_seq) !== 4) {
-        $_SESSION['flash_error'] = 'Credit note number must be 4 digits.';
-        header('Location: supplier_returns.php'); exit;
-    }
-    $cn_number = 'CN-' . date('Y') . '-' . $cn_seq;
-    $items_for_amount = get_return_items($pdo, $return_id);
-    $cn_amount = array_sum(array_map(fn($i) => $i['return_item_quantity'] * $i['return_item_unit_price'], $items_for_amount));
-    $ret = get_return_or_redirect($pdo, $return_id);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['issue_credit_note'])
+) {
+    $return_id = filter_var(
+        $_POST['return_id'] ?? null,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
 
-    if (!in_array($ret['return_status'], ['acknowledged', 'escalated'])) {
-        $_SESSION['flash_error'] = 'This return is not in a resolvable state.';
-        header('Location: supplier_returns.php'); exit;
-    }
-    if ($ret['return_status'] === 'escalated' && !$is_senior) {
-        $_SESSION['flash_error'] = 'Only senior admin can resolve a disputed return.';
-        header('Location: supplier_returns.php'); exit;
-    }
-    if ($cn_number === '') {
-        $_SESSION['flash_error'] = 'Credit note number and amount are required.';
-        header('Location: supplier_returns.php'); exit;
+    $cn_seq = trim(
+        (string) (
+            $_POST['credit_note_seq'] ?? ''
+        )
+    );
+
+    $notes = trim(
+        (string) (
+            $_POST['resolution_notes'] ?? ''
+        )
+    );
+
+    if ($return_id === false) {
+        $_SESSION['flash_error'] =
+            'Invalid return record.';
+
+        header('Location: supplier_returns.php');
+        exit;
     }
 
-    $notes = trim($_POST['resolution_notes'] ?? '');
-    if ($ret['return_status'] === 'escalated' && $notes === '') {
-        $_SESSION['flash_error'] = 'A justification is required to resolve a disputed return.';
-        header('Location: supplier_returns.php'); exit;
+    if (
+        !ctype_digit($cn_seq) ||
+        strlen($cn_seq) !== 4
+    ) {
+        $_SESSION['flash_error'] =
+            'Credit note number must be 4 digits.';
+
+        header('Location: supplier_returns.php');
+        exit;
     }
 
-    $resolution_type = $ret['return_status'] === 'escalated' ? 'dispute_upheld' : 'credit_note';
+    $cn_number =
+        'CN-' . date('Y') . '-' . $cn_seq;
 
-    $pdo->prepare("
-        UPDATE supplier_returns SET
-            return_status = 'resolved',
-            return_resolution_type = ?,
-            return_resolution_notes = ?,
-            return_credit_note_number = ?,
-            return_credit_note_amount = ?,
-            return_resolved_by = ?,
-            return_resolved_at = NOW()
-        WHERE return_id = ?
-    ")->execute([$resolution_type, $notes ?: null, $cn_number, $cn_amount, $_SESSION['user_id'], $return_id]);
+    try {
+        $pdo->beginTransaction();
 
-    $_SESSION['flash_success'] = "Credit note $cn_number recorded. Return {$ret['return_number']} marked resolved.";
+        $return_stmt = $pdo->prepare("
+            SELECT
+                sr.*,
+                po.po_supplier_id,
+                po.po_number
+            FROM supplier_returns sr
+            JOIN purchase_orders po
+                ON po.po_id = sr.return_po_id
+            WHERE sr.return_id = ?
+            FOR UPDATE
+        ");
+
+        $return_stmt->execute([
+            $return_id,
+        ]);
+
+        $ret = $return_stmt->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$ret) {
+            throw new RuntimeException(
+                'Return record not found.'
+            );
+        }
+
+        if (
+            !in_array(
+                $ret['return_status'],
+                [
+                    'acknowledged',
+                    'escalated',
+                ],
+                true
+            )
+        ) {
+            throw new RuntimeException(
+                'This return is not in a resolvable state.'
+            );
+        }
+
+        if (
+            $ret['return_status'] ===
+                'escalated' &&
+            !$is_senior
+        ) {
+            throw new RuntimeException(
+                'Only senior admin can resolve a disputed return.'
+            );
+        }
+
+        if (
+            $ret['return_status'] ===
+                'escalated' &&
+            $notes === ''
+        ) {
+            throw new RuntimeException(
+                'A justification is required to resolve a disputed return.'
+            );
+        }
+
+        if (
+            !empty(
+                $ret['return_replacement_po_id']
+            ) ||
+            !empty(
+                $ret['return_credit_note_number']
+            )
+        ) {
+            throw new RuntimeException(
+                'This return has already been resolved.'
+            );
+        }
+
+        $items_stmt = $pdo->prepare("
+            SELECT
+                return_item_quantity,
+                return_item_unit_price
+            FROM supplier_return_items
+            WHERE return_item_return_id = ?
+            FOR UPDATE
+        ");
+
+        $items_stmt->execute([
+            $return_id,
+        ]);
+
+        $return_items = $items_stmt->fetchAll(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$return_items) {
+            throw new RuntimeException(
+                'No items were found for this return.'
+            );
+        }
+
+        $cn_amount = 0.0;
+
+        foreach ($return_items as $item) {
+            $quantity = (int) $item[
+                'return_item_quantity'
+            ];
+
+            $unit_price = (float) $item[
+                'return_item_unit_price'
+            ];
+
+            if (
+                $quantity <= 0 ||
+                $unit_price < 0
+            ) {
+                throw new RuntimeException(
+                    'The return contains invalid item data.'
+                );
+            }
+
+            $cn_amount +=
+                $quantity * $unit_price;
+        }
+
+        if ($cn_amount <= 0) {
+            throw new RuntimeException(
+                'The credit note amount is invalid.'
+            );
+        }
+
+        $resolution_type =
+            $ret['return_status'] ===
+                'escalated'
+                ? 'dispute_upheld'
+                : 'credit_note';
+
+        $resolve_return = $pdo->prepare("
+            UPDATE supplier_returns
+            SET return_status = 'resolved',
+                return_resolution_type = ?,
+                return_resolution_notes = ?,
+                return_credit_note_number = ?,
+                return_credit_note_amount = ?,
+                return_resolved_by = ?,
+                return_resolved_at = NOW()
+            WHERE return_id = ?
+            AND return_status = ?
+            AND return_replacement_po_id IS NULL
+            AND return_credit_note_number IS NULL
+        ");
+
+        $resolve_return->execute([
+            $resolution_type,
+            $notes !== '' ? $notes : null,
+            $cn_number,
+            $cn_amount,
+            (int) $_SESSION['user_id'],
+            $return_id,
+            $ret['return_status'],
+        ]);
+
+        if ($resolve_return->rowCount() !== 1) {
+            throw new RuntimeException(
+                'This return has already been resolved.'
+            );
+        }
+
+        $pdo->commit();
+
+        $_SESSION['flash_success'] =
+            "Credit note $cn_number recorded. " .
+            'Return ' .
+            $ret['return_number'] .
+            ' marked resolved.';
+    } catch (RuntimeException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        $_SESSION['flash_error'] =
+            $e->getMessage();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        app_error_log(
+            'Supplier credit note resolution failed: ' .
+            $e->getMessage()
+        );
+
+        $_SESSION['flash_error'] =
+            'Unable to record the credit note. ' .
+            'Please try again.';
+    }
+
     header('Location: supplier_returns.php');
     exit;
 }
