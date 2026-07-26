@@ -6,17 +6,18 @@ require_customer();
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stripe_config.php';
 require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/voucher_helper.php';
+require_once __DIR__ .
+    '/../includes/payment_draft_helper.php';
 require_once __DIR__ . '/../includes/csrf.php';
 
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
 function respondWithJson(
-    int $status_code,
+    int $statusCode,
     array $payload
 ): never {
-    http_response_code($status_code);
+    http_response_code($statusCode);
 
     echo json_encode(
         $payload,
@@ -29,6 +30,7 @@ function respondWithJson(
 function clearPendingCheckoutSession(): void
 {
     unset($_SESSION['pending_order']);
+    unset($_SESSION['payment_draft_id']);
     unset($_SESSION['payment_lock']);
     unset($_SESSION['stripe_session_id']);
     unset($_SESSION['stripe_checkout_url']);
@@ -40,7 +42,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         405,
         [
             'success' => false,
-            'message' => 'Method not allowed.',
+            'message' =>
+                'Method not allowed.',
         ]
     );
 }
@@ -49,10 +52,47 @@ csrf_verify();
 
 $user_id = current_user_id();
 
-$pending_order =
-    $_SESSION['pending_order'] ?? null;
+$payment_draft_id = filter_var(
+    $_SESSION['payment_draft_id'] ?? null,
+    FILTER_VALIDATE_INT,
+    [
+        'options' => [
+            'min_range' => 1,
+        ],
+    ]
+);
 
-if (!is_array($pending_order)) {
+if ($payment_draft_id === false) {
+    $payment_draft_id = null;
+}
+
+$payment_draft = null;
+
+if ($payment_draft_id !== null) {
+    $payment_draft = loadPaymentDraft(
+        $pdo,
+        (int) $payment_draft_id,
+        $user_id
+    );
+}
+
+if ($payment_draft === null) {
+    $payment_draft_id =
+        findActivePaymentDraftId(
+            $pdo,
+            $user_id
+        );
+
+    if ($payment_draft_id !== null) {
+        $payment_draft = loadPaymentDraft(
+            $pdo,
+            $payment_draft_id,
+            $user_id
+        );
+    }
+}
+
+if ($payment_draft === null) {
     clearPendingCheckoutSession();
 
     respondWithJson(
@@ -63,29 +103,67 @@ if (!is_array($pending_order)) {
     );
 }
 
-if (
-    (int) ($pending_order['user_id'] ?? 0)
-        !== $user_id
-) {
-    clearPendingCheckoutSession();
+$payment_draft_id =
+    (int) $payment_draft[
+        'payment_draft_id'
+    ];
 
+$status = (string) $payment_draft[
+    'status'
+];
+
+if (
+    in_array(
+        $status,
+        [
+            'paid',
+            'completed',
+        ],
+        true
+    ) ||
+    $payment_draft['order_id'] !== null
+) {
     respondWithJson(
-        403,
+        409,
         [
             'success' => false,
             'message' =>
-                'Pending checkout ownership could not be verified.',
+                'Payment has already been completed.',
         ]
     );
 }
 
-$stripe_session_id =
-    $_SESSION['stripe_session_id'] ?? '';
+if (
+    !in_array(
+        $status,
+        [
+            'pending',
+            'checkout_open',
+        ],
+        true
+    )
+) {
+    clearPendingCheckoutSession();
+
+    respondWithJson(
+        200,
+        [
+            'success' => true,
+        ]
+    );
+}
+
+$stripe_session_id = trim(
+    (string) (
+        $payment_draft[
+            'stripe_session_id'
+        ] ?? ''
+    )
+);
 
 if (
     $stripe_session_id !== '' &&
     (
-        !is_string($stripe_session_id) ||
         strlen($stripe_session_id) > 255 ||
         !preg_match(
             '/\Acs_[A-Za-z0-9_]+\z/',
@@ -93,23 +171,20 @@ if (
         )
     )
 ) {
-    try {
-        $pdo->beginTransaction();
+    app_error_log(
+        'Invalid Stripe Session ID stored for payment draft: ' .
+        $payment_draft_id
+    );
 
-        restorePendingUserVoucher(
+    try {
+        cancelPaymentDraft(
             $pdo,
-            $pending_order['voucher_id'] ?? null,
+            $payment_draft_id,
             $user_id
         );
-
-        $pdo->commit();
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-
         app_error_log(
-            'Invalid checkout cleanup failed: ' .
+            'Invalid payment draft cancellation failed: ' .
             $e->getMessage()
         );
 
@@ -126,11 +201,9 @@ if (
     clearPendingCheckoutSession();
 
     respondWithJson(
-        400,
+        200,
         [
-            'success' => false,
-            'message' =>
-                'The Stripe payment session was invalid and has been cleared.',
+            'success' => true,
         ]
     );
 }
@@ -142,10 +215,13 @@ if ($stripe_session_id !== '') {
         );
 
         $checkout_session =
-            $stripe->checkout->sessions->retrieve(
-                $stripe_session_id,
-                []
-            );
+            $stripe
+                ->checkout
+                ->sessions
+                ->retrieve(
+                    $stripe_session_id,
+                    []
+                );
 
         $session_user_id = (string) (
             $checkout_session
@@ -153,13 +229,31 @@ if ($stripe_session_id !== '') {
             ?? ''
         );
 
+        $metadata_draft_id = (string) (
+            $checkout_session
+                ->metadata
+                ->payment_draft_id
+            ?? ''
+        );
+
+        $metadata_user_id = (string) (
+            $checkout_session
+                ->metadata
+                ->user_id
+            ?? ''
+        );
+
         if (
             $session_user_id !==
-            (string) $user_id
+                (string) $user_id ||
+            $metadata_user_id !==
+                (string) $user_id ||
+            $metadata_draft_id !==
+                (string) $payment_draft_id
         ) {
             app_error_log(
-                'Stripe cancellation user mismatch for session: ' .
-                $stripe_session_id
+                'Stripe cancellation ownership mismatch for payment draft: ' .
+                $payment_draft_id
             );
 
             respondWithJson(
@@ -167,8 +261,44 @@ if ($stripe_session_id !== '') {
                 [
                     'success' => false,
                     'message' =>
-                        'The Stripe payment session does not belong to this account.',
+                        'The Stripe payment session does not belong to this checkout.',
                 ]
+            );
+        }
+
+        $expected_amount = (int) round(
+            (float) $payment_draft[
+                'total'
+            ] * 100
+        );
+
+        $session_amount = (int) (
+            $checkout_session->amount_total
+            ?? -1
+        );
+
+        $expected_currency = strtolower(
+            (string) $payment_draft[
+                'currency'
+            ]
+        );
+
+        $session_currency = strtolower(
+            (string) (
+                $checkout_session->currency
+                ?? ''
+            )
+        );
+
+        if (
+            $expected_amount <= 0 ||
+            $session_amount !==
+                $expected_amount ||
+            $session_currency !==
+                $expected_currency
+        ) {
+            throw new RuntimeException(
+                'Stripe Checkout Session payment details mismatch.'
             );
         }
 
@@ -188,17 +318,20 @@ if ($stripe_session_id !== '') {
                 [
                     'success' => false,
                     'message' =>
-                        'Payment has already been completed. Continue the payment process from My Orders.',
+                        'Payment has already been completed.',
                 ]
             );
         }
 
         if ($session_status === 'open') {
             $expired_session =
-                $stripe->checkout->sessions->expire(
-                    $stripe_session_id,
-                    []
-                );
+                $stripe
+                    ->checkout
+                    ->sessions
+                    ->expire(
+                        $stripe_session_id,
+                        []
+                    );
 
             if (
                 (string) (
@@ -256,22 +389,23 @@ if ($stripe_session_id !== '') {
 }
 
 try {
-    $pdo->beginTransaction();
-
-    restorePendingUserVoucher(
+    cancelPaymentDraft(
         $pdo,
-        $pending_order['voucher_id'] ?? null,
+        $payment_draft_id,
         $user_id
     );
-
-    $pdo->commit();
+} catch (PaymentDraftException $e) {
+    respondWithJson(
+        409,
+        [
+            'success' => false,
+            'message' =>
+                $e->getMessage(),
+        ]
+    );
 } catch (Throwable $e) {
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-
     app_error_log(
-        'Pending checkout voucher restoration failed: ' .
+        'Payment draft cancellation failed: ' .
         $e->getMessage()
     );
 
@@ -280,7 +414,7 @@ try {
         [
             'success' => false,
             'message' =>
-                'The payment session was cancelled, but the checkout could not be cleared.',
+                'Unable to cancel checkout.',
         ]
     );
 }

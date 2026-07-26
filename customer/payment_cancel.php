@@ -3,23 +3,95 @@
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ .
+    '/../includes/payment_draft_helper.php';
 require_once __DIR__ . '/../includes/csrf.php';
 
 $user_id = current_user_id();
 
-$pending_order =
-    $_SESSION['pending_order'] ?? null;
+$payment_draft_id = filter_var(
+    $_SESSION['payment_draft_id'] ?? null,
+    FILTER_VALIDATE_INT,
+    [
+        'options' => [
+            'min_range' => 1,
+        ],
+    ]
+);
+
+if ($payment_draft_id === false) {
+    $payment_draft_id = null;
+}
+
+$pending_order = null;
+
+if ($payment_draft_id !== null) {
+    $pending_order = loadPaymentDraft(
+        $pdo,
+        (int) $payment_draft_id,
+        $user_id
+    );
+
+    if (
+        $pending_order !== null &&
+        !in_array(
+            $pending_order['status'],
+            [
+                'pending',
+                'checkout_open',
+            ],
+            true
+        )
+    ) {
+        $pending_order = null;
+    }
+}
+
+if ($pending_order === null) {
+    $payment_draft_id =
+        findActivePaymentDraftId(
+            $pdo,
+            $user_id
+        );
+
+    if ($payment_draft_id !== null) {
+        $pending_order = loadPaymentDraft(
+            $pdo,
+            $payment_draft_id,
+            $user_id
+        );
+    }
+}
 
 $has_pending_checkout =
-    is_array($pending_order) &&
-    (int) ($pending_order['user_id'] ?? 0)
-        === $user_id;
+    $pending_order !== null;
 
-$stripe_session_id =
-    $_SESSION['stripe_session_id'] ?? '';
+$stripe_session_id = '';
+
+if ($has_pending_checkout) {
+    $_SESSION['payment_draft_id'] =
+        (int) $pending_order[
+            'payment_draft_id'
+        ];
+
+    $stripe_session_id = trim(
+        (string) (
+            $pending_order[
+                'stripe_session_id'
+            ] ?? ''
+        )
+    );
+} else {
+    unset($_SESSION['pending_order']);
+    unset($_SESSION['payment_draft_id']);
+    unset($_SESSION['payment_lock']);
+    unset($_SESSION['stripe_session_id']);
+    unset($_SESSION['stripe_checkout_url']);
+    unset($_SESSION['stripe_expires_at']);
+}
 
 $has_stripe_session =
-    is_string($stripe_session_id) &&
     $stripe_session_id !== '';
 
 $continue_payment_url =

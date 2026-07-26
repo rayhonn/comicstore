@@ -4,17 +4,69 @@ require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ .
+    '/../includes/payment_draft_helper.php';
 
 $user_id = current_user_id();
 
-$pending_checkout =
-    $_SESSION['pending_order'] ?? null;
+$payment_draft_id = filter_var(
+    $_SESSION['payment_draft_id'] ?? null,
+    FILTER_VALIDATE_INT,
+    [
+        'options' => [
+            'min_range' => 1,
+        ],
+    ]
+);
+
+if ($payment_draft_id === false) {
+    $payment_draft_id = null;
+}
+
+$pending_checkout = null;
+
+if ($payment_draft_id !== null) {
+    $pending_checkout =
+        loadPaymentDraft(
+            $pdo,
+            (int) $payment_draft_id,
+            $user_id
+        );
+
+    if (
+        $pending_checkout !== null &&
+        !in_array(
+            $pending_checkout['status'],
+            [
+                'pending',
+                'checkout_open',
+            ],
+            true
+        )
+    ) {
+        $pending_checkout = null;
+    }
+}
+
+if ($pending_checkout === null) {
+    $payment_draft_id =
+        findActivePaymentDraftId(
+            $pdo,
+            $user_id
+        );
+
+    if ($payment_draft_id !== null) {
+        $pending_checkout =
+            loadPaymentDraft(
+                $pdo,
+                $payment_draft_id,
+                $user_id
+            );
+    }
+}
 
 $has_pending_checkout =
-    is_array($pending_checkout) &&
-    (int) (
-        $pending_checkout['user_id'] ?? 0
-    ) === $user_id;
+    $pending_checkout !== null;
 
 $pending_checkout_total = 0.0;
 $pending_checkout_item_count = 0;
@@ -24,36 +76,49 @@ $continue_payment_url = '';
 $continue_payment_label = '';
 $pending_checkout_status = '';
 
-$stripe_session_id =
-    $_SESSION['stripe_session_id'] ?? '';
-
-$stripe_expires_at = filter_var(
-    $_SESSION['stripe_expires_at'] ?? null,
-    FILTER_VALIDATE_INT
-);
-
-$has_saved_stripe_session =
-    is_string($stripe_session_id) &&
-    $stripe_session_id !== '';
+$stripe_session_id = '';
+$stripe_expires_at = null;
+$has_saved_stripe_session = false;
 
 if ($has_pending_checkout) {
+    $payment_draft_id =
+        (int) $pending_checkout[
+            'payment_draft_id'
+        ];
+
+    $_SESSION['payment_draft_id'] =
+        $payment_draft_id;
+
     $pending_checkout_total =
-        (float) (
-            $pending_checkout['total'] ?? 0
-        );
+        (float) $pending_checkout[
+            'total'
+        ];
 
     $pending_checkout_item_count =
-        is_array(
-            $pending_checkout['items'] ?? null
+        count(
+            $pending_checkout['items']
+        );
+
+    $stripe_session_id = trim(
+        (string) (
+            $pending_checkout[
+                'stripe_session_id'
+            ] ?? ''
         )
-            ? count($pending_checkout['items'])
-            : 0;
+    );
+
+    $stripe_expires_at =
+        $pending_checkout[
+            'stripe_expires_at'
+        ];
+
+    $has_saved_stripe_session =
+        $stripe_session_id !== '';
 
     if ($has_saved_stripe_session) {
         $pending_checkout_deadline =
-            $stripe_expires_at !== false &&
-            $stripe_expires_at !== null
-                ? (int) $stripe_expires_at
+            is_int($stripe_expires_at)
+                ? $stripe_expires_at
                 : 0;
 
         $continue_payment_url =
@@ -62,23 +127,10 @@ if ($has_pending_checkout) {
         $pending_checkout_status =
             'Stripe payment has not been completed.';
     } else {
-        $payment_lock =
-            $_SESSION['payment_lock'] ?? null;
-
-        $locked_at = is_array($payment_lock)
-            ? filter_var(
-                $payment_lock['locked_at'] ?? null,
-                FILTER_VALIDATE_INT
-            )
-            : false;
-
-        if (
-            $locked_at !== false &&
-            $locked_at !== null
-        ) {
-            $pending_checkout_deadline =
-                (int) $locked_at + 300;
-        }
+        $pending_checkout_deadline =
+            (int) $pending_checkout[
+                'created_at'
+            ] + 300;
 
         $continue_payment_url =
             'payment_gateway.php';
@@ -101,6 +153,13 @@ if ($has_pending_checkout) {
         $continue_payment_label =
             'Continue Payment';
     }
+} else {
+    unset($_SESSION['pending_order']);
+    unset($_SESSION['payment_draft_id']);
+    unset($_SESSION['payment_lock']);
+    unset($_SESSION['stripe_session_id']);
+    unset($_SESSION['stripe_checkout_url']);
+    unset($_SESSION['stripe_expires_at']);
 }
 
 $stmt = $pdo->prepare("

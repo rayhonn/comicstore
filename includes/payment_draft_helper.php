@@ -515,6 +515,127 @@ function expirePaymentDraft(
 }
 
 /**
+ * Cancel an unpaid payment draft and restore its voucher.
+ */
+function cancelPaymentDraft(
+    PDO $pdo,
+    int $draftId,
+    int $userId
+): void {
+    try {
+        $pdo->beginTransaction();
+
+        $lockDraft = $pdo->prepare("
+            SELECT
+                payment_draft_status,
+                payment_draft_voucher_id,
+                payment_draft_order_id
+            FROM payment_drafts
+            WHERE payment_draft_id = ?
+            AND payment_draft_user_id = ?
+            FOR UPDATE
+        ");
+
+        $lockDraft->execute([
+            $draftId,
+            $userId,
+        ]);
+
+        $draft = $lockDraft->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$draft) {
+            throw new RuntimeException(
+                'The payment draft was not found.'
+            );
+        }
+
+        $status = (string) $draft[
+            'payment_draft_status'
+        ];
+
+        if (
+            in_array(
+                $status,
+                [
+                    'cancelled',
+                    'expired',
+                ],
+                true
+            )
+        ) {
+            $pdo->commit();
+            return;
+        }
+
+        if (
+            in_array(
+                $status,
+                [
+                    'paid',
+                    'completed',
+                ],
+                true
+            ) ||
+            $draft[
+                'payment_draft_order_id'
+            ] !== null
+        ) {
+            throw new PaymentDraftException(
+                'Payment has already been completed.'
+            );
+        }
+
+        if (
+            !in_array(
+                $status,
+                [
+                    'pending',
+                    'checkout_open',
+                ],
+                true
+            )
+        ) {
+            throw new RuntimeException(
+                'The payment draft cannot be cancelled.'
+            );
+        }
+
+        $update = $pdo->prepare("
+            UPDATE payment_drafts
+            SET payment_draft_status =
+                    'cancelled',
+                payment_draft_cancelled_at =
+                    NOW()
+            WHERE payment_draft_id = ?
+            AND payment_draft_user_id = ?
+        ");
+
+        $update->execute([
+            $draftId,
+            $userId,
+        ]);
+
+        restorePendingUserVoucher(
+            $pdo,
+            $draft[
+                'payment_draft_voucher_id'
+            ] ?? null,
+            $userId
+        );
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        throw $e;
+    }
+}
+
+/**
  * Persist a validated checkout as a database-backed payment draft.
  */
 function createPaymentDraft(

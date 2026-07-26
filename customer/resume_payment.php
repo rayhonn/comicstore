@@ -6,12 +6,14 @@ require_customer();
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stripe_config.php';
 require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/voucher_helper.php';
+require_once __DIR__ .
+    '/../includes/payment_draft_helper.php';
 require_once __DIR__ . '/../includes/config.php';
 
 function clearResumeSessionState(): void
 {
     unset($_SESSION['pending_order']);
+    unset($_SESSION['payment_draft_id']);
     unset($_SESSION['payment_lock']);
     unset($_SESSION['stripe_session_id']);
     unset($_SESSION['stripe_checkout_url']);
@@ -20,28 +22,94 @@ function clearResumeSessionState(): void
 
 $user_id = current_user_id();
 
-$pending_order =
-    $_SESSION['pending_order'] ?? null;
+$payment_draft_id = filter_var(
+    $_SESSION['payment_draft_id'] ?? null,
+    FILTER_VALIDATE_INT,
+    [
+        'options' => [
+            'min_range' => 1,
+        ],
+    ]
+);
 
-if (
-    !is_array($pending_order) ||
-    (int) ($pending_order['user_id'] ?? 0)
-        !== $user_id
-) {
+if ($payment_draft_id === false) {
+    $payment_draft_id = null;
+}
+
+$payment_draft = null;
+
+if ($payment_draft_id !== null) {
+    $payment_draft = loadPaymentDraft(
+        $pdo,
+        (int) $payment_draft_id,
+        $user_id
+    );
+
+    if (
+        $payment_draft !== null &&
+        !in_array(
+            $payment_draft['status'],
+            [
+                'pending',
+                'checkout_open',
+            ],
+            true
+        )
+    ) {
+        $payment_draft = null;
+    }
+}
+
+if ($payment_draft === null) {
+    $payment_draft_id =
+        findActivePaymentDraftId(
+            $pdo,
+            $user_id
+        );
+
+    if ($payment_draft_id !== null) {
+        $payment_draft = loadPaymentDraft(
+            $pdo,
+            $payment_draft_id,
+            $user_id
+        );
+    }
+}
+
+if ($payment_draft === null) {
     clearResumeSessionState();
 
     redirect_to(
-        app_path('customer/orders.php')
+        app_path(
+            'customer/orders.php'
+        )
     );
 }
 
-$stripe_session_id =
-    $_SESSION['stripe_session_id'] ?? '';
+$payment_draft_id =
+    (int) $payment_draft[
+        'payment_draft_id'
+    ];
 
-if (
-    !is_string($stripe_session_id) ||
-    $stripe_session_id === ''
-) {
+$_SESSION['payment_draft_id'] =
+    $payment_draft_id;
+
+/*
+ * Temporary compatibility for payment_success.php.
+ * Payment validation uses the database draft.
+ */
+$_SESSION['pending_order'] =
+    $payment_draft;
+
+$stripe_session_id = trim(
+    (string) (
+        $payment_draft[
+            'stripe_session_id'
+        ] ?? ''
+    )
+);
+
+if ($stripe_session_id === '') {
     redirect_to(
         app_path(
             'customer/payment_gateway.php'
@@ -51,22 +119,30 @@ if (
 
 if (
     strlen($stripe_session_id) > 255 ||
-    !str_starts_with(
-        $stripe_session_id,
-        'cs_'
+    !preg_match(
+        '/\Acs_[A-Za-z0-9_]+\z/',
+        $stripe_session_id
     )
 ) {
-    restorePendingUserVoucher(
-        $pdo,
-        $pending_order['voucher_id'] ?? null,
-        $user_id
-    );
+    try {
+        expirePaymentDraft(
+            $pdo,
+            $payment_draft_id,
+            $user_id
+        );
+    } catch (Throwable $e) {
+        app_error_log(
+            'Invalid payment draft expiry failed: ' .
+            $e->getMessage()
+        );
+    }
 
     clearResumeSessionState();
 
     redirect_to(
         app_path(
-            'customer/cart.php?payment_invalid=1'
+            'customer/cart.php' .
+            '?payment_invalid=1'
         )
     );
 }
@@ -81,37 +157,54 @@ try {
             $stripe_session_id
         );
 
-    $session_user_id =
-        (string) (
-            $checkout_session
-                ->client_reference_id
-            ?? ''
-        );
+    $session_user_id = (string) (
+        $checkout_session
+            ->client_reference_id
+        ?? ''
+    );
+
+    $metadata_draft_id = (string) (
+        $checkout_session
+            ->metadata
+            ->payment_draft_id
+        ?? ''
+    );
+
+    $metadata_user_id = (string) (
+        $checkout_session
+            ->metadata
+            ->user_id
+        ?? ''
+    );
 
     if (
         $session_user_id !==
-        (string) $user_id
+            (string) $user_id ||
+        $metadata_user_id !==
+            (string) $user_id ||
+        $metadata_draft_id !==
+            (string) $payment_draft_id
     ) {
         throw new RuntimeException(
-            'Stripe Checkout Session user mismatch.'
+            'Stripe Checkout Session ownership mismatch.'
         );
     }
 
     $expected_amount = (int) round(
-        (float) (
-            $pending_order['total'] ?? 0
-        ) * 100
+        (float) $payment_draft[
+            'total'
+        ] * 100
     );
 
-    $session_amount =
-        (int) (
-            $checkout_session->amount_total
-            ?? -1
-        );
+    $session_amount = (int) (
+        $checkout_session->amount_total
+        ?? -1
+    );
 
     if (
         $expected_amount <= 0 ||
-        $session_amount !== $expected_amount
+        $session_amount !==
+            $expected_amount
     ) {
         throw new RuntimeException(
             'Stripe Checkout Session amount mismatch.'
@@ -119,7 +212,9 @@ try {
     }
 
     $expected_currency = strtolower(
-        (string) STRIPE_CURRENCY
+        (string) $payment_draft[
+            'currency'
+        ]
     );
 
     $session_currency = strtolower(
@@ -138,30 +233,29 @@ try {
         );
     }
 
-    $payment_status =
-        (string) (
-            $checkout_session->payment_status
-            ?? ''
-        );
+    $payment_status = (string) (
+        $checkout_session->payment_status
+        ?? ''
+    );
 
-    $session_status =
-        (string) (
-            $checkout_session->status
-            ?? ''
-        );
+    $session_status = (string) (
+        $checkout_session->status
+        ?? ''
+    );
 
-    $session_expires_at =
-        (int) (
-            $checkout_session->expires_at
-            ?? 0
-        );
+    $session_expires_at = (int) (
+        $checkout_session->expires_at
+        ?? 0
+    );
 
     if ($payment_status === 'paid') {
         redirect_to(
             app_path(
                 'customer/payment_success.php' .
                 '?session_id=' .
-                urlencode($stripe_session_id)
+                urlencode(
+                    $stripe_session_id
+                )
             )
         );
     }
@@ -171,11 +265,12 @@ try {
         $payment_status === 'unpaid' &&
         $session_expires_at > time()
     ) {
-        $checkout_url =
+        $checkout_url = trim(
             (string) (
                 $checkout_session->url
                 ?? ''
-            );
+            )
+        );
 
         if (
             $checkout_url === '' ||
@@ -189,6 +284,43 @@ try {
             );
         }
 
+        $payment_intent_id =
+            is_string(
+                $checkout_session
+                    ->payment_intent
+                ?? null
+            )
+                ? $checkout_session
+                    ->payment_intent
+                : null;
+
+        try {
+            attachStripeCheckoutSession(
+                $pdo,
+                $payment_draft_id,
+                $user_id,
+                $stripe_session_id,
+                $checkout_url,
+                $session_expires_at,
+                $payment_intent_id
+            );
+        } catch (Throwable $e) {
+            app_error_log(
+                'Stripe resume draft update failed: ' .
+                $e->getMessage()
+            );
+
+            redirect_to(
+                app_path(
+                    'customer/orders.php' .
+                    '?payment_resume_error=1'
+                )
+            );
+        }
+
+        $_SESSION['stripe_session_id'] =
+            $stripe_session_id;
+
         $_SESSION['stripe_checkout_url'] =
             $checkout_url;
 
@@ -196,14 +328,16 @@ try {
             $session_expires_at;
 
         header(
-            'Location: ' . $checkout_url
+            'Location: ' .
+            $checkout_url
         );
+
         exit;
     }
 
-    restorePendingUserVoucher(
+    expirePaymentDraft(
         $pdo,
-        $pending_order['voucher_id'] ?? null,
+        $payment_draft_id,
         $user_id
     );
 
@@ -224,7 +358,7 @@ try {
     redirect_to(
         app_path(
             'customer/cart.php' .
-                '?payment_unavailable=1'
+            '?payment_unavailable=1'
         )
     );
 } catch (
@@ -238,7 +372,7 @@ try {
     redirect_to(
         app_path(
             'customer/orders.php' .
-                '?payment_resume_error=1'
+            '?payment_resume_error=1'
         )
     );
 } catch (Throwable $e) {
@@ -247,18 +381,25 @@ try {
         $e->getMessage()
     );
 
-    restorePendingUserVoucher(
-        $pdo,
-        $pending_order['voucher_id'] ?? null,
-        $user_id
-    );
+    try {
+        expirePaymentDraft(
+            $pdo,
+            $payment_draft_id,
+            $user_id
+        );
+    } catch (Throwable $cleanupError) {
+        app_error_log(
+            'Invalid payment draft cleanup failed: ' .
+            $cleanupError->getMessage()
+        );
+    }
 
     clearResumeSessionState();
 
     redirect_to(
         app_path(
             'customer/cart.php' .
-                '?payment_invalid=1'
+            '?payment_invalid=1'
         )
     );
 }
