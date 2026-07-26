@@ -73,6 +73,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $token =
                         bin2hex(random_bytes(32));
 
+                    $token_hash =
+                        hash('sha256', $token);
+
                     $expires = gmdate(
                         'Y-m-d H:i:s',
                         strtotime('+1 hour')
@@ -86,13 +89,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare("
                         INSERT INTO password_resets (
                             reset_email,
-                            reset_token,
+                            reset_token_hash,
                             reset_expires_at
                         )
                         VALUES (?, ?, ?)
                     ")->execute([
                         $email,
-                        $token,
+                        $token_hash,
                         $expires,
                     ]);
 
