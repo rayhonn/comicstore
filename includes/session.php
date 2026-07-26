@@ -2,6 +2,8 @@
 
 require_once __DIR__ . '/logger.php';
 
+const APP_SESSION_IDLE_TIMEOUT_SECONDS = 1800;
+
 /**
  * Determine whether the current request is using HTTPS.
  *
@@ -34,6 +36,91 @@ function app_session_cookie_parameters(): array
         'httponly' => true,
         'samesite' => 'Lax',
     ];
+}
+
+/**
+ * Determine whether the session contains an authenticated account.
+ */
+function app_session_is_authenticated(): bool
+{
+    $role = (string) ($_SESSION['role'] ?? '');
+
+    return (
+        !empty($_SESSION['user_id']) &&
+        in_array(
+            $role,
+            [
+                'customer',
+                'admin',
+                'staff',
+                'supplier',
+            ],
+            true
+        )
+    );
+}
+
+/**
+ * Expire authenticated sessions after 30 minutes of inactivity.
+ */
+function app_enforce_session_idle_timeout(): void
+{
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        return;
+    }
+
+    if (!app_session_is_authenticated()) {
+        unset($_SESSION['auth_last_activity_at']);
+        return;
+    }
+
+    $now = time();
+
+    $lastActivity = (int) (
+        $_SESSION['auth_last_activity_at'] ?? 0
+    );
+
+    if (
+        $lastActivity > 0 &&
+        ($now - $lastActivity) >=
+            APP_SESSION_IDLE_TIMEOUT_SECONDS
+    ) {
+        $accountId = (int) $_SESSION['user_id'];
+        $role = (string) $_SESSION['role'];
+
+        $_SESSION = [];
+
+        if (!session_regenerate_id(true)) {
+            app_log(
+                'ERROR',
+                'Session',
+                'Unable to regenerate an expired session ID.',
+                [
+                    'account_id' => $accountId,
+                    'role' => $role,
+                ]
+            );
+
+            session_destroy();
+            return;
+        }
+
+        app_log(
+            'INFO',
+            'Session',
+            'Authenticated session expired after inactivity.',
+            [
+                'account_id' => $accountId,
+                'role' => $role,
+                'idle_timeout_seconds' =>
+                    APP_SESSION_IDLE_TIMEOUT_SECONDS,
+            ]
+        );
+
+        return;
+    }
+
+    $_SESSION['auth_last_activity_at'] = $now;
 }
 
 /**
@@ -72,6 +159,7 @@ function app_refresh_session_cookie(): void
 function start_secure_session(): void
 {
     if (session_status() === PHP_SESSION_ACTIVE) {
+        app_enforce_session_idle_timeout();
         app_refresh_session_cookie();
         return;
     }
@@ -133,5 +221,6 @@ function start_secure_session(): void
         );
     }
 
+    app_enforce_session_idle_timeout();
     app_refresh_session_cookie();
 }
