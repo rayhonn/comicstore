@@ -4,6 +4,8 @@ require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ .
+    '/../includes/payment_draft_helper.php';
 
 $user_id = current_user_id();
 
@@ -40,11 +42,13 @@ if ($has_pending_checkout) {
 
 if (
     $pending_order !== null ||
+    isset($_SESSION['payment_draft_id']) ||
     isset($_SESSION['payment_lock']) ||
     isset($_SESSION['stripe_checkout_url']) ||
     isset($_SESSION['stripe_expires_at'])
 ) {
     unset($_SESSION['pending_order']);
+    unset($_SESSION['payment_draft_id']);
     unset($_SESSION['payment_lock']);
     unset($_SESSION['stripe_session_id']);
     unset($_SESSION['stripe_checkout_url']);
@@ -728,62 +732,101 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if (
-        empty($error) &&
-        $applied_voucher !== null
-    ) {
-        $reserve_voucher = $pdo->prepare("
-            UPDATE user_vouchers
-            SET uv_status = 'pending',
-                uv_pending_at = NOW()
-            WHERE uv_voucher_id = ?
-            AND uv_user_id = ?
-            AND uv_is_used = 0
-            AND uv_status = 'available'
-            AND (
-                uv_expires_at IS NULL
-                OR uv_expires_at >= NOW()
-            )
-        ");
-
-        $reserve_voucher->execute([
-            (int) $applied_voucher[
-                'voucher_id'
-            ],
-            $user_id,
-        ]);
-
-        if ($reserve_voucher->rowCount() !== 1) {
-            $error =
-                'The selected voucher is no longer available.';
-        }
-    }
-
     if (empty($error)) {
-        $_SESSION['pending_order'] = [
-            'user_id'         => $user_id,
-            'total'           => $final_total,
-            'has_physical'    => $has_physical,
-            'address_id'      => $address_id,
-            'shipping_method' => $shipping_method,
-            'shipping_fee'    => $shipping_fee,
+        $pending_order_data = [
+            'user_id' =>
+                $user_id,
+
+            'total' =>
+                $final_total,
+
+            'has_physical' =>
+                $has_physical,
+
+            'address_id' =>
+                $address_id,
+
+            'shipping_method' =>
+                $shipping_method,
+
+            'shipping_fee' =>
+                $shipping_fee,
+
             'original_shipping_fee' =>
                 $original_shipping_fee,
-            'voucher_code'    => $voucher_code_input ?: null,
-            'discount_amount' => $discount_amount,
-            'voucher_id'      => $applied_voucher['voucher_id'] ?? null,
-            'items'           => $items,
-            'shipping_courier'=> $shipping_courier,
-            'shipping_zone'   => $shipping_zone,
+
+            'voucher_code' =>
+                $voucher_code_input ?: null,
+
+            'discount_amount' =>
+                $discount_amount,
+
+            'voucher_id' =>
+                $applied_voucher[
+                    'voucher_id'
+                ] ?? null,
+
+            'items' =>
+                $items,
+
+            'shipping_courier' =>
+                $shipping_courier,
+
+            'shipping_zone' =>
+                $shipping_zone,
         ];
 
-        $_SESSION['payment_lock'] = [
-            'user_id'   => $user_id,
-            'locked_at' => time()
-        ];
+        try {
+            $payment_draft_id =
+                createPaymentDraft(
+                    $pdo,
+                    $user_id,
+                    $pending_order_data,
+                    $items
+                );
+        } catch (PaymentDraftException $e) {
+            $error = $e->getMessage();
+        } catch (Throwable $e) {
+            app_error_log(
+                'Payment draft creation failed: ' .
+                $e->getMessage()
+            );
 
-        header('Location: payment_gateway.php');
-        exit;
+            $error =
+                'Unable to prepare the payment. ' .
+                'Please try again.';
+        }
+
+        if (empty($error)) {
+            $pending_order_data[
+                'payment_draft_id'
+            ] = $payment_draft_id;
+
+            /*
+            * Keep the legacy session snapshot temporarily.
+            * The payment gateway will be migrated to load the
+            * database draft in the next K2 batch.
+            */
+            $_SESSION['pending_order'] =
+                $pending_order_data;
+
+            $_SESSION['payment_draft_id'] =
+                $payment_draft_id;
+
+            $_SESSION['payment_lock'] = [
+                'user_id' =>
+                    $user_id,
+
+                'locked_at' =>
+                    time(),
+            ];
+
+            header(
+                'Location: payment_gateway.php'
+            );
+
+            exit;
+        }
     }
 }
 ?>
