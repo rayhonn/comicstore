@@ -1,10 +1,9 @@
 <?php
-session_start();
-if (!isset($_SESSION['supplier_id']) || $_SESSION['role'] !== 'supplier') {
-    header('Location: login.php');
-    exit;
-}
-require_once '../includes/db.php';
+
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/db.php';
+
+require_supplier();
 
 $supplier_id = $_SESSION['supplier_id'];
 

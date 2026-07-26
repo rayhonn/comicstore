@@ -1,6 +1,9 @@
 <?php
-date_default_timezone_set('Asia/Kuala_Lumpur');
-session_start();
+
+date_default_timezone_set(
+    'Asia/Kuala_Lumpur'
+);
+
 require_once '../includes/db.php';
 require_once '../includes/auth.php';
 require_once '../includes/csrf.php';
