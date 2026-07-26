@@ -9,51 +9,81 @@ require_once __DIR__ .
 
 $user_id = current_user_id();
 
-$pending_order =
-    $_SESSION['pending_order'] ?? null;
-
-$stripe_session_id =
-    $_SESSION['stripe_session_id'] ?? '';
-
-$has_pending_checkout =
-    is_array($pending_order) &&
-    (int) ($pending_order['user_id'] ?? 0)
-        === $user_id;
-
-$has_stripe_session =
-    is_string($stripe_session_id) &&
-    $stripe_session_id !== '';
-
-if ($has_stripe_session) {
-    redirect_to(
-        app_path(
-            'customer/resume_payment.php'
-        )
+$active_payment_draft_id =
+    findActivePaymentDraftId(
+        $pdo,
+        $user_id
     );
+
+if ($active_payment_draft_id !== null) {
+    $active_payment_draft =
+        loadPaymentDraft(
+            $pdo,
+            $active_payment_draft_id,
+            $user_id
+        );
+
+    if ($active_payment_draft !== null) {
+        $_SESSION['payment_draft_id'] =
+            $active_payment_draft_id;
+
+        /*
+         * Temporary compatibility snapshot.
+         * The remaining payment pages will be migrated
+         * to use the database draft.
+         */
+        $_SESSION['pending_order'] =
+            $active_payment_draft;
+
+        $existing_stripe_session_id =
+            trim(
+                (string) (
+                    $active_payment_draft[
+                        'stripe_session_id'
+                    ] ?? ''
+                )
+            );
+
+        if (
+            $existing_stripe_session_id
+            !== ''
+        ) {
+            $_SESSION['stripe_session_id'] =
+                $existing_stripe_session_id;
+
+            $_SESSION[
+                'stripe_checkout_url'
+            ] = $active_payment_draft[
+                'stripe_checkout_url'
+            ];
+
+            $_SESSION[
+                'stripe_expires_at'
+            ] = $active_payment_draft[
+                'stripe_expires_at'
+            ];
+
+            redirect_to(
+                app_path(
+                    'customer/resume_payment.php'
+                )
+            );
+        }
+
+        redirect_to(
+            app_path(
+                'customer/payment_gateway.php'
+            )
+        );
+    }
 }
 
-if ($has_pending_checkout) {
-    redirect_to(
-        app_path(
-            'customer/payment_gateway.php'
-        )
-    );
-}
-
-if (
-    $pending_order !== null ||
-    isset($_SESSION['payment_draft_id']) ||
-    isset($_SESSION['payment_lock']) ||
-    isset($_SESSION['stripe_checkout_url']) ||
-    isset($_SESSION['stripe_expires_at'])
-) {
-    unset($_SESSION['pending_order']);
-    unset($_SESSION['payment_draft_id']);
-    unset($_SESSION['payment_lock']);
-    unset($_SESSION['stripe_session_id']);
-    unset($_SESSION['stripe_checkout_url']);
-    unset($_SESSION['stripe_expires_at']);
-}
+unset($_SESSION['pending_order']);
+unset($_SESSION['payment_draft_id']);
+unset($_SESSION['payment_lock']);
+unset($_SESSION['stripe_session_id']);
+unset($_SESSION['stripe_checkout_url']);
+unset($_SESSION['stripe_expires_at']);
 
 // Get selected items from cart
 $selected_raw = $_GET['selected_items'] ?? $_POST['selected_items'] ?? '';

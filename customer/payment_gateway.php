@@ -7,56 +7,144 @@ require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stripe_config.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/voucher_helper.php';
+require_once __DIR__ .
+    '/../includes/payment_draft_helper.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/config.php';
 
 function clearCheckoutSessionState(): void
 {
     unset($_SESSION['pending_order']);
+    unset($_SESSION['payment_draft_id']);
     unset($_SESSION['payment_lock']);
     unset($_SESSION['stripe_session_id']);
     unset($_SESSION['stripe_checkout_url']);
     unset($_SESSION['stripe_expires_at']);
 }
 
-if (!isset($_SESSION['pending_order'])) {
-    redirect_to(app_path('customer/cart.php'));
-}
-
-$order = $_SESSION['pending_order'];
 $user_id = current_user_id();
 
-if (
-    !is_array($order) ||
-    (int) ($order['user_id'] ?? 0) !== $user_id
-) {
-    clearCheckoutSessionState();
-    redirect_to(app_path('customer/cart.php'));
-}
-
-$total = (float) ($order['total'] ?? 0);
-
-$stripe_session_id =
-    $_SESSION['stripe_session_id'] ?? null;
-
-$stripe_checkout_url =
-    $_SESSION['stripe_checkout_url'] ?? null;
-
-$stripe_expires_at = filter_var(
-    $_SESSION['stripe_expires_at'] ?? null,
-    FILTER_VALIDATE_INT
+$payment_draft_id = filter_var(
+    $_SESSION['payment_draft_id'] ?? null,
+    FILTER_VALIDATE_INT,
+    [
+        'options' => [
+            'min_range' => 1,
+        ],
+    ]
 );
 
+if ($payment_draft_id === false) {
+    $payment_draft_id = null;
+}
+
+$order = null;
+
+if ($payment_draft_id !== null) {
+    $order = loadPaymentDraft(
+        $pdo,
+        (int) $payment_draft_id,
+        $user_id
+    );
+
+    if (
+        $order !== null &&
+        !in_array(
+            $order['status'],
+            [
+                'pending',
+                'checkout_open',
+            ],
+            true
+        )
+    ) {
+        $order = null;
+    }
+}
+
+if ($order === null) {
+    $payment_draft_id =
+        findActivePaymentDraftId(
+            $pdo,
+            $user_id
+        );
+
+    if ($payment_draft_id !== null) {
+        $order = loadPaymentDraft(
+            $pdo,
+            $payment_draft_id,
+            $user_id
+        );
+    }
+}
+
+if ($order === null) {
+    clearCheckoutSessionState();
+
+    redirect_to(
+        app_path(
+            'customer/cart.php'
+        )
+    );
+}
+
+$payment_draft_id =
+    (int) $order[
+        'payment_draft_id'
+    ];
+
+$_SESSION['payment_draft_id'] =
+    $payment_draft_id;
+
+/*
+ * Temporary compatibility for payment_success.php and
+ * resume_payment.php until their migration batch.
+ */
+$_SESSION['pending_order'] = $order;
+
+$total = (float) $order['total'];
+
+$stripe_session_id = trim(
+    (string) (
+        $order[
+            'stripe_session_id'
+        ] ?? ''
+    )
+);
+
+$stripe_checkout_url = trim(
+    (string) (
+        $order[
+            'stripe_checkout_url'
+        ] ?? ''
+    )
+);
+
+$stripe_expires_at =
+    $order['stripe_expires_at'];
+
+if ($stripe_session_id !== '') {
+    $_SESSION['stripe_session_id'] =
+        $stripe_session_id;
+
+    $_SESSION['stripe_checkout_url'] =
+        $stripe_checkout_url;
+
+    $_SESSION['stripe_expires_at'] =
+        $stripe_expires_at;
+} else {
+    unset($_SESSION['stripe_session_id']);
+    unset($_SESSION['stripe_checkout_url']);
+    unset($_SESSION['stripe_expires_at']);
+}
+
 $has_stripe_session_id =
-    is_string($stripe_session_id) &&
     $stripe_session_id !== '';
 
 $has_saved_stripe_session =
     $has_stripe_session_id &&
-    is_string($stripe_checkout_url) &&
     $stripe_checkout_url !== '' &&
-    $stripe_expires_at !== false &&
-    $stripe_expires_at !== null;
+    is_int($stripe_expires_at);
 
 if (
     $has_stripe_session_id &&
@@ -76,60 +164,82 @@ $has_active_stripe_session =
     $has_saved_stripe_session &&
     $stripe_expires_at > time();
 
+$draft_created_at = max(
+    1,
+    (int) (
+        $order['created_at']
+        ?? time()
+    )
+);
+
 if (
     !isset($_SESSION['payment_lock']) ||
-    !is_array($_SESSION['payment_lock']) ||
+    !is_array(
+        $_SESSION['payment_lock']
+    ) ||
     (int) (
-        $_SESSION['payment_lock']['user_id'] ?? 0
-    ) !== $user_id
+        $_SESSION['payment_lock'][
+            'user_id'
+        ] ?? 0
+    ) !== $user_id ||
+    (int) (
+        $_SESSION['payment_lock'][
+            'payment_draft_id'
+        ] ?? 0
+    ) !== $payment_draft_id
 ) {
     $_SESSION['payment_lock'] = [
-        'user_id' => $user_id,
-        'locked_at' => time(),
-    ];
-
-    $voucher_id = filter_var(
-        $order['voucher_id'] ?? null,
-        FILTER_VALIDATE_INT
-    );
-
-    if ($voucher_id) {
-        $set_pending = $pdo->prepare("
-            UPDATE user_vouchers
-            SET uv_status = 'pending',
-                uv_pending_at = NOW()
-            WHERE uv_voucher_id = ?
-            AND uv_user_id = ?
-            AND uv_is_used = 0
-        ");
-
-        $set_pending->execute([
-            $voucher_id,
+        'user_id' =>
             $user_id,
-        ]);
-    }
+
+        'payment_draft_id' =>
+            $payment_draft_id,
+
+        'locked_at' =>
+            $draft_created_at,
+    ];
 }
 
 $lock_locked_at = (int) (
-    $_SESSION['payment_lock']['locked_at']
-    ?? time()
+    $_SESSION['payment_lock'][
+        'locked_at'
+    ] ?? $draft_created_at
 );
 
-$elapsed = time() - $lock_locked_at;
+$elapsed = max(
+    0,
+    time() - $lock_locked_at
+);
 
 if (
     !$has_active_stripe_session &&
     $elapsed >= 300
 ) {
-    restorePendingUserVoucher(
-        $pdo,
-        $order['voucher_id'] ?? null,
-        $user_id
-    );
+    try {
+        expirePaymentDraft(
+            $pdo,
+            $payment_draft_id,
+            $user_id
+        );
+    } catch (Throwable $e) {
+        app_error_log(
+            'Payment draft expiry failed: ' .
+            $e->getMessage()
+        );
+
+        http_response_code(500);
+
+        exit(
+            'Unable to expire the payment.'
+        );
+    }
+
     clearCheckoutSessionState();
 
     redirect_to(
-        app_path('customer/cart.php?timeout=1')
+        app_path(
+            'customer/cart.php?timeout=1'
+        )
     );
 }
 
@@ -143,8 +253,10 @@ if (
 
     if ($has_active_stripe_session) {
         header(
-            'Location: ' . $stripe_checkout_url
+            'Location: ' .
+            $stripe_checkout_url
         );
+
         exit;
     }
 
@@ -158,44 +270,59 @@ if (
     foreach ($order['items'] as $item) {
         $line_items[] = [
             'price_data' => [
-                'currency' => STRIPE_CURRENCY,
+                'currency' =>
+                    $order['currency'],
+
                 'product_data' => [
                     'name' =>
                         $item['product_title'],
+
                     'description' =>
                         ucfirst(
                             $item['product_type']
                         ) .
                         ' - MangaVault',
                 ],
-                'unit_amount' => (int) round(
-                    (float) $item[
-                        'product_price'
-                    ] * 100
-                ),
+
+                'unit_amount' =>
+                    (int) round(
+                        (float) $item[
+                            'product_price'
+                        ] * 100
+                    ),
             ],
-            'quantity' => (int) $item[
-                'cart_item_quantity'
-            ],
+
+            'quantity' =>
+                (int) $item[
+                    'cart_item_quantity'
+                ],
         ];
     }
 
     if (
         !empty($order['has_physical']) &&
-        (float) $order['shipping_fee'] > 0
+        (float) $order[
+            'shipping_fee'
+        ] > 0
     ) {
         $line_items[] = [
             'price_data' => [
-                'currency' => STRIPE_CURRENCY,
+                'currency' =>
+                    $order['currency'],
+
                 'product_data' => [
-                    'name' => 'Shipping Fee',
+                    'name' =>
+                        'Shipping Fee',
                 ],
-                'unit_amount' => (int) round(
-                    (float) $order[
-                        'shipping_fee'
-                    ] * 100
-                ),
+
+                'unit_amount' =>
+                    (int) round(
+                        (float) $order[
+                            'shipping_fee'
+                        ] * 100
+                    ),
             ],
+
             'quantity' => 1,
         ];
     }
@@ -203,17 +330,25 @@ if (
     if (
         !empty($order['voucher_code']) &&
         (float) (
-            $order['discount_amount'] ?? 0
+            $order[
+                'discount_amount'
+            ] ?? 0
         ) > 0
     ) {
         $line_items = [[
             'price_data' => [
-                'currency' => STRIPE_CURRENCY,
+                'currency' =>
+                    $order['currency'],
+
                 'product_data' => [
-                    'name' => 'MangaVault Order',
+                    'name' =>
+                        'MangaVault Order',
+
                     'description' =>
                         'Includes voucher discount (' .
-                        $order['voucher_code'] .
+                        $order[
+                            'voucher_code'
+                        ] .
                         ' -RM' .
                         number_format(
                             (float) $order[
@@ -223,10 +358,13 @@ if (
                         ) .
                         ')',
                 ],
-                'unit_amount' => (int) round(
-                    $total * 100
-                ),
+
+                'unit_amount' =>
+                    (int) round(
+                        $total * 100
+                    ),
             ],
+
             'quantity' => 1,
         ]];
     }
@@ -236,45 +374,102 @@ if (
             time() + 1860;
 
         $checkout_session =
-            \Stripe\Checkout\Session::create([
-                'payment_method_types' => [
-                    'card',
-                ],
-                'line_items' => $line_items,
-                'mode' => 'payment',
-                'client_reference_id' =>
-                    (string) $user_id,
-                'success_url' =>
-                    $app_url .
-                    '/customer/payment_success.php' .
-                    '?session_id=' .
-                    '{CHECKOUT_SESSION_ID}',
-                'cancel_url' =>
-                    $app_url .
-                    '/customer/payment_cancel.php',
-                'expires_at' =>
-                    $session_expires_at,
-                'custom_text' => [
-                    'submit' => [
-                        'message' =>
-                            'This payment session expires in about 30 minutes. You can resume it from My Orders before it expires.',
+            \Stripe\Checkout\Session::create(
+                [
+                    'payment_method_types' => [
+                        'card',
+                    ],
+
+                    'line_items' =>
+                        $line_items,
+
+                    'mode' =>
+                        'payment',
+
+                    'client_reference_id' =>
+                        (string) $user_id,
+
+                    'metadata' => [
+                        'payment_draft_id' =>
+                            (string) $payment_draft_id,
+
+                        'user_id' =>
+                            (string) $user_id,
+                    ],
+
+                    'payment_intent_data' => [
+                        'metadata' => [
+                            'payment_draft_id' =>
+                                (string) $payment_draft_id,
+
+                            'user_id' =>
+                                (string) $user_id,
+                        ],
+                    ],
+
+                    'success_url' =>
+                        $app_url .
+                        '/customer/payment_success.php' .
+                        '?session_id=' .
+                        '{CHECKOUT_SESSION_ID}',
+
+                    'cancel_url' =>
+                        $app_url .
+                        '/customer/payment_cancel.php',
+
+                    'expires_at' =>
+                        $session_expires_at,
+
+                    'custom_text' => [
+                        'submit' => [
+                            'message' =>
+                                'This payment session expires in about 30 minutes. You can resume it from My Orders before it expires.',
+                        ],
                     ],
                 ],
-            ]);
+                [
+                    'idempotency_key' =>
+                        'payment-draft-' .
+                        $payment_draft_id,
+                ]
+            );
+
+        $payment_intent_id =
+            is_string(
+                $checkout_session
+                    ->payment_intent
+                ?? null
+            )
+                ? $checkout_session
+                    ->payment_intent
+                : null;
+
+        attachStripeCheckoutSession(
+            $pdo,
+            $payment_draft_id,
+            $user_id,
+            (string) $checkout_session->id,
+            (string) $checkout_session->url,
+            (int) $checkout_session
+                ->expires_at,
+            $payment_intent_id
+        );
 
         $_SESSION['stripe_session_id'] =
-            $checkout_session->id;
+            (string) $checkout_session->id;
 
         $_SESSION['stripe_checkout_url'] =
-            $checkout_session->url;
+            (string) $checkout_session->url;
 
         $_SESSION['stripe_expires_at'] =
-            (int) $checkout_session->expires_at;
+            (int) $checkout_session
+                ->expires_at;
 
         header(
             'Location: ' .
             $checkout_session->url
         );
+
         exit;
     } catch (
         \Stripe\Exception\ApiErrorException $e
@@ -286,6 +481,14 @@ if (
 
         $stripe_error =
             'Unable to open the Stripe payment page.';
+    } catch (Throwable $e) {
+        app_error_log(
+            'Payment draft Stripe linking failed: ' .
+            $e->getMessage()
+        );
+
+        $stripe_error =
+            'Unable to prepare the Stripe payment.';
     }
 }
 
