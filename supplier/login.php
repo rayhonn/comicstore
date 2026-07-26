@@ -1,34 +1,115 @@
 <?php
-session_start();
-require_once '../includes/db.php';
-require_once '../includes/auth.php';
 
-if (!empty($_SESSION['supplier_id'])) {
-    header('Location: dashboard.php');
-    exit;
+session_start();
+
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ .
+    '/../includes/login_rate_limit.php';
+
+if (
+    !empty($_SESSION['supplier_id']) &&
+    ($_SESSION['role'] ?? '') === 'supplier'
+) {
+    redirect_to(
+        app_path('supplier/dashboard.php')
+    );
 }
 
 $error = '';
+$login_scope = 'supplier_login';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = trim($_POST['username'] ?? '');
-    $password = $_POST['password'] ?? '';
+    $username = trim(
+        (string) ($_POST['username'] ?? '')
+    );
 
-    $stmt = $pdo->prepare("SELECT * FROM suppliers WHERE supplier_username = ? AND supplier_status = 'active'");
-    $stmt->execute([$username]);
-    $supplier = $stmt->fetch(PDO::FETCH_ASSOC);
+    $password = (string) (
+        $_POST['password'] ?? ''
+    );
 
-    if ($supplier && password_verify($password, $supplier['supplier_password'])) {
-        regenerate_session(); // ← session fixation 防护
-
-        $_SESSION['user_id']       = $supplier['supplier_id']; // require_supplier() 依赖这个
-        $_SESSION['supplier_id']   = $supplier['supplier_id'];
-        $_SESSION['supplier_name'] = $supplier['supplier_name'];
-        $_SESSION['role']          = 'supplier';
-
-        header('Location: dashboard.php');
-        exit;
+    if ($username === '' || $password === '') {
+        $error =
+            'Please enter username and password.';
     } else {
-        $error = 'Invalid username or password.';
+        $rate_limit = login_rate_limit_status(
+            $pdo,
+            $login_scope,
+            $username
+        );
+
+        if ($rate_limit['blocked']) {
+            $error =
+                'Too many login attempts. ' .
+                'Please try again in 15 minutes.';
+        } else {
+            $statement = $pdo->prepare("
+                SELECT *
+                FROM suppliers
+                WHERE supplier_username = ?
+                AND supplier_status = 'active'
+            ");
+
+            $statement->execute([$username]);
+
+            $supplier =
+                $statement->fetch(PDO::FETCH_ASSOC);
+
+            if (
+                $supplier &&
+                password_verify(
+                    $password,
+                    $supplier[
+                        'supplier_password'
+                    ]
+                )
+            ) {
+                login_rate_limit_clear_identifier(
+                    $pdo,
+                    $login_scope,
+                    $username
+                );
+
+                regenerate_session();
+
+                $_SESSION['user_id'] =
+                    $supplier['supplier_id'];
+
+                $_SESSION['supplier_id'] =
+                    $supplier['supplier_id'];
+
+                $_SESSION['supplier_name'] =
+                    $supplier['supplier_name'];
+
+                $_SESSION['role'] = 'supplier';
+
+                redirect_to(
+                    app_path(
+                        'supplier/dashboard.php'
+                    )
+                );
+            }
+
+            login_rate_limit_record_failure(
+                $pdo,
+                $login_scope,
+                $username
+            );
+
+            $rate_limit =
+                login_rate_limit_status(
+                    $pdo,
+                    $login_scope,
+                    $username
+                );
+
+            $error =
+                $rate_limit['blocked']
+                    ? 'Too many login attempts. ' .
+                        'Please try again in ' .
+                        '15 minutes.'
+                    : 'Invalid username or password.';
+        }
     }
 }
 ?>

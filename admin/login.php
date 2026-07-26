@@ -1,48 +1,150 @@
 <?php
+
 session_start();
-require_once '../includes/db.php';
-require_once '../includes/auth.php';
 
-$redirect_to = safe_redirect_target($_GET['redirect'] ?? '', 'dashboard.php');
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ .
+    '/../includes/login_rate_limit.php';
 
-if (isset($_SESSION['user_id']) && in_array($_SESSION['role'], ['admin', 'staff'])) {
-    header('Location: ' . ($_SESSION['role'] === 'admin' ? $redirect_to : '../staff/dashboard.php'));
-    exit;
+$redirect_to = safe_redirect_target(
+    $_GET['redirect'] ?? '',
+    'dashboard.php'
+);
+
+if (
+    isset($_SESSION['user_id']) &&
+    in_array(
+        $_SESSION['role'] ?? '',
+        ['admin', 'staff'],
+        true
+    )
+) {
+    redirect_to(
+        $_SESSION['role'] === 'admin'
+            ? $redirect_to
+            : app_path('staff/dashboard.php')
+    );
 }
 
 $error = '';
+$login_scope = 'management_login';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $user_name = trim($_POST['user_name']);
-    $password = $_POST['password'];
+    $user_name = trim(
+        (string) ($_POST['user_name'] ?? '')
+    );
 
-    if (empty($user_name) || empty($password)) {
-        $error = "Please enter username and password.";
+    $password = (string) (
+        $_POST['password'] ?? ''
+    );
+
+    if ($user_name === '' || $password === '') {
+        $error =
+            'Please enter username and password.';
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE (user_name = ? OR user_gmail = ? OR user_staff_id = ?) AND user_is_active = 1 AND user_role IN ('admin', 'staff')");
-        $stmt->execute([$user_name, $user_name, $user_name]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        $rate_limit = login_rate_limit_status(
+            $pdo,
+            $login_scope,
+            $user_name
+        );
 
-        if ($user && password_verify($password, $user['user_password_hash'])) {
-            $pdo->prepare("UPDATE users SET user_last_login = NOW() WHERE user_id = ?")
-                ->execute([$user['user_id']]);
-
-            regenerate_session(); // ← session fixation 防护
-
-            $_SESSION['user_id']         = $user['user_id'];
-            $_SESSION['user_name']       = $user['user_name'];
-            $_SESSION['user_first_name'] = $user['user_first_name'];
-            $_SESSION['role']            = $user['user_role'];
-            $_SESSION['admin_level']     = $user['user_admin_level'] ?? 'senior_admin';
-
-            if ($user['user_role'] === 'admin') {
-                header('Location: ' . $redirect_to);
-            } else {
-                header('Location: ../staff/dashboard.php');
-            }
-            exit;
+        if ($rate_limit['blocked']) {
+            $error =
+                'Too many login attempts. ' .
+                'Please try again in 15 minutes.';
         } else {
-            $error = "Invalid credentials or insufficient permissions.";
+            $statement = $pdo->prepare("
+                SELECT *
+                FROM users
+                WHERE (
+                    user_name = ?
+                    OR user_gmail = ?
+                    OR user_staff_id = ?
+                )
+                AND user_is_active = 1
+                AND user_role IN ('admin', 'staff')
+            ");
+
+            $statement->execute([
+                $user_name,
+                $user_name,
+                $user_name,
+            ]);
+
+            $user =
+                $statement->fetch(PDO::FETCH_ASSOC);
+
+            if (
+                $user &&
+                password_verify(
+                    $password,
+                    $user['user_password_hash']
+                )
+            ) {
+                login_rate_limit_clear_identifier(
+                    $pdo,
+                    $login_scope,
+                    $user_name
+                );
+
+                $pdo->prepare("
+                    UPDATE users
+                    SET user_last_login = NOW()
+                    WHERE user_id = ?
+                ")->execute([
+                    $user['user_id'],
+                ]);
+
+                regenerate_session();
+
+                $_SESSION['user_id'] =
+                    $user['user_id'];
+
+                $_SESSION['user_name'] =
+                    $user['user_name'];
+
+                $_SESSION['user_first_name'] =
+                    $user['user_first_name'];
+
+                $_SESSION['role'] =
+                    $user['user_role'];
+
+                $_SESSION['admin_level'] =
+                    $user['user_admin_level'] ??
+                    'senior_admin';
+
+                if (
+                    $user['user_role'] === 'admin'
+                ) {
+                    redirect_to($redirect_to);
+                }
+
+                redirect_to(
+                    app_path('staff/dashboard.php')
+                );
+            }
+
+            login_rate_limit_record_failure(
+                $pdo,
+                $login_scope,
+                $user_name
+            );
+
+            $rate_limit =
+                login_rate_limit_status(
+                    $pdo,
+                    $login_scope,
+                    $user_name
+                );
+
+            $error =
+                $rate_limit['blocked']
+                    ? 'Too many login attempts. ' .
+                        'Please try again in ' .
+                        '15 minutes.'
+                    : 'Invalid credentials or ' .
+                        'insufficient permissions.';
         }
     }
 }

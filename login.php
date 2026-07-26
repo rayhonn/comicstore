@@ -1,41 +1,126 @@
 <?php
+
 session_start();
-require_once 'includes/db.php';
-require_once 'includes/auth.php';
+
+require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/login_rate_limit.php';
 
 $error = '';
+$login_scope = 'customer_login';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $user_name = trim($_POST['user_name']);
-    $password = $_POST['password'];
+    $user_name = trim(
+        (string) ($_POST['user_name'] ?? '')
+    );
 
-    if (empty($user_name) || empty($password)) {
-        $error = "Please enter username and password.";
+    $password = (string) (
+        $_POST['password'] ?? ''
+    );
+
+    if ($user_name === '' || $password === '') {
+        $error =
+            'Please enter username and password.';
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE (user_name = ? OR user_gmail = ?) AND user_is_active = 1");
-        $stmt->execute([$user_name, $user_name]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        $rate_limit = login_rate_limit_status(
+            $pdo,
+            $login_scope,
+            $user_name
+        );
 
-        if ($user && password_verify($password, $user['user_password_hash'])) {
-            $pdo->prepare("UPDATE users SET user_last_login = NOW() WHERE user_id = ?")
-                ->execute([$user['user_id']]);
-
-            regenerate_session(); // ← session fixation 防护
-
-            $_SESSION['user_id']         = $user['user_id'];
-            $_SESSION['user_name']       = $user['user_name'];
-            $_SESSION['user_first_name'] = $user['user_first_name'];
-            $_SESSION['role']            = $user['user_role'];
-
-            if ($user['user_role'] === 'customer') {
-                header('Location: index.php');
-            } else {
-                destroy_session();
-                $error = "Please use the admin portal to login.";
-            }
-            exit;
+        if ($rate_limit['blocked']) {
+            $error =
+                'Too many login attempts. ' .
+                'Please try again in 15 minutes.';
         } else {
-            $error = "Invalid username or password.";
+            $statement = $pdo->prepare("
+                SELECT *
+                FROM users
+                WHERE (
+                    user_name = ?
+                    OR user_gmail = ?
+                )
+                AND user_is_active = 1
+            ");
+
+            $statement->execute([
+                $user_name,
+                $user_name,
+            ]);
+
+            $user =
+                $statement->fetch(PDO::FETCH_ASSOC);
+
+            if (
+                $user &&
+                password_verify(
+                    $password,
+                    $user['user_password_hash']
+                )
+            ) {
+                login_rate_limit_clear_identifier(
+                    $pdo,
+                    $login_scope,
+                    $user_name
+                );
+
+                $pdo->prepare("
+                    UPDATE users
+                    SET user_last_login = NOW()
+                    WHERE user_id = ?
+                ")->execute([
+                    $user['user_id'],
+                ]);
+
+                regenerate_session();
+
+                $_SESSION['user_id'] =
+                    $user['user_id'];
+
+                $_SESSION['user_name'] =
+                    $user['user_name'];
+
+                $_SESSION['user_first_name'] =
+                    $user['user_first_name'];
+
+                $_SESSION['role'] =
+                    $user['user_role'];
+
+                if (
+                    $user['user_role'] ===
+                    'customer'
+                ) {
+                    redirect_to(
+                        app_path('index.php')
+                    );
+                }
+
+                destroy_session();
+
+                $error =
+                    'Please use the admin portal ' .
+                    'to login.';
+            } else {
+                login_rate_limit_record_failure(
+                    $pdo,
+                    $login_scope,
+                    $user_name
+                );
+
+                $rate_limit =
+                    login_rate_limit_status(
+                        $pdo,
+                        $login_scope,
+                        $user_name
+                    );
+
+                $error =
+                    $rate_limit['blocked']
+                        ? 'Too many login attempts. ' .
+                            'Please try again in ' .
+                            '15 minutes.'
+                        : 'Invalid username or password.';
+            }
         }
     }
 }
