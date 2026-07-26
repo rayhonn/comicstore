@@ -1,5 +1,10 @@
 <?php
+
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/session.php';
+
+start_secure_session();
+
 /**
  * Unified authentication and session helpers.
  *
@@ -8,9 +13,6 @@ require_once __DIR__ . '/config.php';
  * require_customer();
  */
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
 
 function app_base_path(): string
 {
@@ -273,17 +275,23 @@ function destroy_session(): void
     $_SESSION = [];
 
     if (ini_get('session.use_cookies')) {
-        $cookieParameters = session_get_cookie_params();
+        $parameters =
+            app_session_cookie_parameters();
 
         setcookie(
             session_name(),
             '',
-            time() - 3600,
-            $cookieParameters['path'],
-            $cookieParameters['domain'],
-            $cookieParameters['secure'],
-            $cookieParameters['httponly']
+            [
+                'expires' => time() - 3600,
+                'path' => $parameters['path'],
+                'domain' => $parameters['domain'],
+                'secure' => $parameters['secure'],
+                'httponly' => $parameters['httponly'],
+                'samesite' => $parameters['samesite'],
+            ]
         );
+
+        unset($_COOKIE[session_name()]);
     }
 
     session_destroy();
