@@ -1,6 +1,10 @@
 <?php
-session_start();
-require_once '../includes/db.php';
+
+require_once __DIR__ . '/../includes/session.php';
+
+start_secure_session();
+
+require_once __DIR__ . '/../includes/db.php';
 
 // Get FAQs grouped by category
 $faqs_stmt = $pdo->query("SELECT * FROM faqs WHERE faq_is_active = 1 ORDER BY faq_category, faq_order ASC");
