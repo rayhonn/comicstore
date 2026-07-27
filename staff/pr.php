@@ -5,10 +5,46 @@ require_staff();
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
 
-if (isset($_GET['download_pdf'])) {
-    require_once '../vendor/autoload.php';
+$PR_REASON_MAX_LENGTH = 2000;
 
-    $pr_pdf_id = $_GET['download_pdf'];
+function normalizePrReason(mixed $value): string
+{
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid requisition reason.');
+    }
+
+    $reason = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($reason, 'UTF-8')
+        : strlen($reason);
+
+    if ($length > $GLOBALS['PR_REASON_MAX_LENGTH']) {
+        throw new RuntimeException(
+            'The requisition reason cannot exceed 2000 characters.'
+        );
+    }
+
+    return $reason;
+}
+
+if (isset($_GET['download_pdf'])) {
+    $pr_pdf_id = filter_input(
+        INPUT_GET,
+        'download_pdf',
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    if ($pr_pdf_id === false || $pr_pdf_id === null) {
+        header('Location: pr.php');
+        exit;
+    }
+
+    require_once '../vendor/autoload.php';
     $pr_pdf = $pdo->prepare("
         SELECT pr.*, p.product_title, p.product_volume_number,
         CONCAT_WS(' ', u1.user_first_name, u1.user_last_name) AS requested_by_name,
@@ -100,45 +136,206 @@ $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_pr'])) {
     csrf_verify();
-    $product_id = $_POST['product_id'] ?? '';
-    $quantity = intval($_POST['quantity'] ?? 0);
-    $reason = trim($_POST['reason'] ?? '');
 
-    if (!$product_id || $quantity <= 0) {
-        $error = 'Please select a product and enter a valid quantity.';
-    } else {
-        $last = $pdo->query("SELECT pr_id FROM purchase_requisitions ORDER BY pr_id DESC LIMIT 1")->fetchColumn();
-        $pr_number = 'PR-' . str_pad(($last ?? 0) + 1, 4, '0', STR_PAD_LEFT);
+    $product_id = filter_input(
+        INPUT_POST,
+        'product_id',
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
 
-        $pdo->prepare("
-            INSERT INTO purchase_requisitions (pr_number, pr_product_id, pr_suggested_quantity, pr_reason, pr_requested_by)
+    $quantity = filter_input(
+        INPUT_POST,
+        'quantity',
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    try {
+        if (
+            $product_id === false ||
+            $product_id === null ||
+            $quantity === false ||
+            $quantity === null
+        ) {
+            throw new RuntimeException(
+                'Please select a product and enter a valid quantity.'
+            );
+        }
+
+        $reason = normalizePrReason(
+            $_POST['reason'] ?? ''
+        );
+
+        $product_check = $pdo->prepare("
+            SELECT p.product_id
+            FROM products p
+            JOIN product_physical pp
+                ON pp.physical_product_id = p.product_id
+            WHERE p.product_id = ?
+            AND p.product_type = 'physical'
+            AND p.product_is_available = 1
+        ");
+        $product_check->execute([$product_id]);
+
+        if (!$product_check->fetchColumn()) {
+            throw new RuntimeException(
+                'The selected product is unavailable.'
+            );
+        }
+
+        $pdo->beginTransaction();
+
+        $temporary_number =
+            'TMP-PR-' . bin2hex(random_bytes(6));
+
+        $insert_pr = $pdo->prepare("
+            INSERT INTO purchase_requisitions (
+                pr_number,
+                pr_product_id,
+                pr_suggested_quantity,
+                pr_reason,
+                pr_requested_by
+            )
             VALUES (?, ?, ?, ?, ?)
-        ")->execute([$pr_number, $product_id, $quantity, $reason, $_SESSION['user_id']]);
+        ");
+        $insert_pr->execute([
+            $temporary_number,
+            $product_id,
+            $quantity,
+            $reason,
+            (int) $_SESSION['user_id'],
+        ]);
 
-        $_SESSION['flash_success'] = "$pr_number submitted for admin approval.";
+        $pr_id = (int) $pdo->lastInsertId();
+        $pr_number =
+            'PR-' .
+            str_pad(
+                (string) $pr_id,
+                4,
+                '0',
+                STR_PAD_LEFT
+            );
+
+        $set_pr_number = $pdo->prepare("
+            UPDATE purchase_requisitions
+            SET pr_number = ?
+            WHERE pr_id = ?
+            AND pr_number = ?
+        ");
+        $set_pr_number->execute([
+            $pr_number,
+            $pr_id,
+            $temporary_number,
+        ]);
+
+        if ($set_pr_number->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Unable to generate the purchase requisition number.'
+            );
+        }
+
+        $pdo->commit();
+
+        $_SESSION['flash_success'] =
+            "$pr_number submitted for admin approval.";
+
         header('Location: pr.php');
         exit;
+    } catch (RuntimeException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        $error = $e->getMessage();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        app_error_log(
+            'Purchase requisition submission failed: ' .
+            $e->getMessage()
+        );
+
+        $error =
+            'Unable to submit the purchase requisition. Please try again.';
     }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_draft'])) {
     csrf_verify();
-    $pr_id = $_POST['pr_id'];
-    $quantity = intval($_POST['quantity'] ?? 0);
-    $reason = trim($_POST['reason'] ?? '');
 
-    if ($quantity <= 0) {
-        $_SESSION['flash_success'] = 'Please enter a valid quantity.';
-        header('Location: pr.php'); exit;
+    $pr_id = filter_input(
+        INPUT_POST,
+        'pr_id',
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    $quantity = filter_input(
+        INPUT_POST,
+        'quantity',
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    try {
+        if (
+            $pr_id === false ||
+            $pr_id === null ||
+            $quantity === false ||
+            $quantity === null
+        ) {
+            throw new RuntimeException(
+                'Please enter a valid draft and quantity.'
+            );
+        }
+
+        $reason = normalizePrReason(
+            $_POST['reason'] ?? ''
+        );
+
+        $claim_draft = $pdo->prepare("
+            UPDATE purchase_requisitions
+            SET pr_status = 'pending',
+                pr_requested_by = ?,
+                pr_suggested_quantity = ?,
+                pr_reason = ?
+            WHERE pr_id = ?
+            AND pr_status = 'draft'
+        ");
+        $claim_draft->execute([
+            (int) $_SESSION['user_id'],
+            $quantity,
+            $reason,
+            $pr_id,
+        ]);
+
+        $_SESSION['flash_success'] =
+            $claim_draft->rowCount() === 1
+                ? 'Draft claimed and submitted for admin approval.'
+                : 'Draft not found or already claimed.';
+    } catch (RuntimeException $e) {
+        $_SESSION['flash_error'] = $e->getMessage();
     }
 
-    $pdo->prepare("
-        UPDATE purchase_requisitions
-        SET pr_status = 'pending', pr_requested_by = ?, pr_suggested_quantity = ?, pr_reason = ?
-        WHERE pr_id = ? AND pr_status = 'draft'
-    ")->execute([$_SESSION['user_id'], $quantity, $reason, $pr_id]);
-
-    $_SESSION['flash_success'] = 'Draft claimed and submitted for admin approval.';
     header('Location: pr.php');
     exit;
 }
@@ -148,7 +345,32 @@ if (isset($_SESSION['flash_success'])) {
     unset($_SESSION['flash_success']);
 }
 
-$preselect_product_id = $_GET['product_id'] ?? null;
+if (isset($_SESSION['flash_error'])) {
+    $error = $_SESSION['flash_error'];
+    unset($_SESSION['flash_error']);
+}
+
+$preselect_product_id = null;
+
+if (isset($_GET['product_id'])) {
+    $validated_product_id = filter_input(
+        INPUT_GET,
+        'product_id',
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    if (
+        $validated_product_id !== false &&
+        $validated_product_id !== null
+    ) {
+        $preselect_product_id = $validated_product_id;
+    }
+}
 
 $products = $pdo->query("
     SELECT p.product_id, p.product_title, p.product_volume_number, p.product_cover_image, pp.physical_stock_quantity, pp.physical_low_stock_threshold
@@ -221,9 +443,9 @@ $drafts = $pdo->query("
                 <div class="bg-white rounded-xl p-4 flex items-center justify-between">
                     <div>
                         <p class="text-sm font-semibold text-gray-800"><?= htmlspecialchars($d['product_title']) ?></p>
-                        <p class="text-xs text-gray-400">Current stock: <?= $d['physical_stock_quantity'] ?? '—' ?> · Suggested: <?= $d['pr_suggested_quantity'] ?> units</p>
+                        <p class="text-xs text-gray-400">Current stock: <?= $d['physical_stock_quantity'] !== null ? (int) $d['physical_stock_quantity'] : '—' ?> · Suggested: <?= (int) $d['pr_suggested_quantity'] ?> units</p>
                     </div>
-                    <button onclick='openClaimModal(<?= json_encode($d) ?>)'
+                    <button onclick='openClaimModal(<?= json_encode($d, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>)'
                             class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors">
                         Review & Submit
                     </button>
@@ -263,10 +485,10 @@ $drafts = $pdo->query("
                     <tr class="border-b border-gray-50">
                         <td class="px-5 py-4 font-semibold text-sm text-gray-800"><?= htmlspecialchars($pr['pr_number']) ?></td>
                         <td class="px-5 py-4 text-sm text-gray-600"><?= htmlspecialchars($pr['product_title']) ?></td>
-                        <td class="px-5 py-4 text-center text-sm text-gray-600"><?= $pr['pr_suggested_quantity'] ?></td>
+                        <td class="px-5 py-4 text-center text-sm text-gray-600"><?= (int) $pr['pr_suggested_quantity'] ?></td>
                         <td class="px-5 py-4 text-center">
-                            <span class="<?= $status_colors[$pr['pr_status']] ?> text-xs px-3 py-1 rounded-full font-semibold capitalize">
-                                <?= $pr['pr_status'] ?>
+                            <span class="<?= $status_colors[$pr['pr_status']] ?? 'bg-gray-100 text-gray-600' ?> text-xs px-3 py-1 rounded-full font-semibold capitalize">
+                                <?= htmlspecialchars($pr['pr_status'], ENT_QUOTES, 'UTF-8') ?>
                             </span>
                             <?php if ($pr['pr_status'] === 'rejected' && $pr['pr_review_note']): ?>
                             <p class="text-xs text-red-400 mt-1"><?= htmlspecialchars($pr['pr_review_note']) ?></p>
@@ -274,7 +496,7 @@ $drafts = $pdo->query("
                         </td>
                         <td class="px-5 py-4 text-xs text-gray-400"><?= date('d M Y', strtotime($pr['pr_created_at'])) ?></td>
                         <td class="px-5 py-4 text-center">
-                            <a href="pr.php?download_pdf=<?= $pr['pr_id'] ?>" class="text-xs text-blue-600 hover:underline font-semibold">📄</a>
+                            <a href="pr.php?download_pdf=<?= (int) $pr['pr_id'] ?>" class="text-xs text-blue-600 hover:underline font-semibold">📄</a>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -304,7 +526,7 @@ $drafts = $pdo->query("
                             <span id="prLabel" class="text-gray-400 flex-1 truncate">Select a product...</span>
                             <svg class="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                         </button>
-                        <input type="hidden" name="product_id" id="prProductId" required value="<?= htmlspecialchars($preselect_product_id ?? '') ?>">
+                        <input type="hidden" name="product_id" id="prProductId" required value="<?= $preselect_product_id !== null ? (int) $preselect_product_id : '' ?>">
                         <div id="prDropdown" class="hidden absolute z-50 mt-1 w-full bg-white border-2 border-gray-100 rounded-xl shadow-xl max-h-60 overflow-hidden flex flex-col">
                             <input type="text" placeholder="🔍 Search..." oninput="filterPrDropdown(this.value)"
                                 class="w-full px-3 py-2 border-b border-gray-100 text-sm focus:outline-none">
@@ -315,13 +537,13 @@ $drafts = $pdo->query("
 
                 <div class="mb-4">
                     <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Suggested Quantity *</label>
-                    <input type="number" name="quantity" min="1" required placeholder="e.g. 20"
+                    <input type="number" name="quantity" min="1" step="1" required placeholder="e.g. 20"
                            class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400">
                 </div>
 
                 <div class="mb-5">
                     <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Reason</label>
-                    <textarea name="reason" rows="3" placeholder="e.g. Stock running low, frequent customer requests..."
+                    <textarea name="reason" rows="3" maxlength="2000" placeholder="e.g. Stock running low, frequent customer requests..."
                               class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 resize-none"></textarea>
                 </div>
 
@@ -358,13 +580,13 @@ $drafts = $pdo->query("
 
                 <div class="mb-4">
                     <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Quantity *</label>
-                    <input type="number" name="quantity" id="claim_quantity" min="1" required
+                    <input type="number" name="quantity" id="claim_quantity" min="1" step="1" required
                            class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-purple-400">
                 </div>
 
                 <div class="mb-5">
                     <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Reason</label>
-                    <textarea name="reason" id="claim_reason" rows="3"
+                    <textarea name="reason" id="claim_reason" rows="3" maxlength="2000"
                               class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-purple-400 resize-none"></textarea>
                 </div>
 
@@ -385,13 +607,13 @@ $drafts = $pdo->query("
     <script>
 const prAllProducts = <?= json_encode(array_map(function($p) {
     return [
-        'id' => $p['product_id'],
+        'id' => (int) $p['product_id'],
         'title' => $p['product_title'],
-        'stock' => $p['physical_stock_quantity'],
-        'threshold' => $p['physical_low_stock_threshold'],
+        'stock' => (int) $p['physical_stock_quantity'],
+        'threshold' => (int) $p['physical_low_stock_threshold'],
         'cover' => $p['product_cover_image'] ?? null,
     ];
-}, $products)) ?>;
+}, $products), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 
 function toggleProductDropdown() {
     document.getElementById('prDropdown').classList.toggle('hidden');

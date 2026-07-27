@@ -2,13 +2,50 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
 require_admin();
 
+$PO_RATING_COMMENT_MAX_LENGTH = 2000;
+
+function normalizePoRatingComment(mixed $value): string
+{
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid rating comment.');
+    }
+
+    $comment = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($comment, 'UTF-8')
+        : strlen($comment);
+
+    if ($length > $GLOBALS['PO_RATING_COMMENT_MAX_LENGTH']) {
+        throw new RuntimeException(
+            'The rating comment cannot exceed 2000 characters.'
+        );
+    }
+
+    return $comment;
+}
+
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
-$po_id = $_GET['id'] ?? null;
-if (!$po_id) { header('Location: purchase_orders.php'); exit; }
+$po_id = filter_input(
+    INPUT_GET,
+    'id',
+    FILTER_VALIDATE_INT,
+    [
+        'options' => [
+            'min_range' => 1,
+        ],
+    ]
+);
+
+if ($po_id === false || $po_id === null) {
+    header('Location: purchase_orders.php');
+    exit;
+}
 
 $po = $pdo->prepare("
     SELECT po.*, s.supplier_name, s.supplier_contact_person, s.supplier_phone, s.supplier_email, s.supplier_address,
@@ -31,6 +68,32 @@ $items = $pdo->prepare("
 $items->execute([$po_id]);
 $items = $items->fetchAll(PDO::FETCH_ASSOC);
 
+foreach ($items as &$item) {
+    $quantity = (int) $item['po_item_quantity'];
+    $unit_price_sen = moneyDecimalToSen(
+        (string) $item['po_item_unit_price']
+    );
+
+    if (
+        $quantity <= 0 ||
+        $unit_price_sen >
+            intdiv(9999999999, $quantity)
+    ) {
+        throw new RuntimeException(
+            'A purchase order item has an invalid amount.'
+        );
+    }
+
+    $item['unit_price_sen'] = $unit_price_sen;
+    $item['subtotal_sen'] =
+        $unit_price_sen * $quantity;
+}
+unset($item);
+
+$po_total_sen = moneyDecimalToSen(
+    (string) $po['po_total_amount']
+);
+
 $gri = $pdo->prepare("
     SELECT gri.*, p.product_title, pi.po_item_unit_price
     FROM goods_received_items gri
@@ -41,7 +104,36 @@ $gri = $pdo->prepare("
 ");
 $gri->execute([$po_id]);
 $rejected_items = $gri->fetchAll(PDO::FETCH_ASSOC);
-$rejected_total = array_sum(array_map(fn($r) => $r['gri_rejected_quantity'] * $r['po_item_unit_price'], $rejected_items));
+$rejected_total_sen = 0;
+
+foreach ($rejected_items as &$rejected_item) {
+    $rejected_quantity =
+        (int) $rejected_item['gri_rejected_quantity'];
+    $rejected_unit_price_sen = moneyDecimalToSen(
+        (string) $rejected_item['po_item_unit_price']
+    );
+
+    if (
+        $rejected_quantity <= 0 ||
+        $rejected_unit_price_sen >
+            intdiv(
+                9999999999 - $rejected_total_sen,
+                $rejected_quantity
+            )
+    ) {
+        throw new RuntimeException(
+            'A rejected purchase order item has an invalid amount.'
+        );
+    }
+
+    $rejected_item['rejected_value_sen'] =
+        $rejected_unit_price_sen *
+        $rejected_quantity;
+
+    $rejected_total_sen +=
+        $rejected_item['rejected_value_sen'];
+}
+unset($rejected_item);
 
 $related_return = $pdo->prepare("
     SELECT return_id, return_number, return_status, return_resolution_type
@@ -63,7 +155,7 @@ if (isset($_GET['download_pdf'])) {
     <html>
     <head><meta charset='UTF-8'></head>
     <body style='font-family: Arial, sans-serif; margin:0; padding:30px; color:#111827;'>
-        
+
         <div style='background:#1e2d4a; padding:24px; border-radius:8px; margin-bottom:30px;'>
             <h1 style='color:#ffffff; font-size:22px; margin:0; font-weight:900;'>MANGA<span style='color:#ef4444;'>VAULT</span></h1>
             <p style='color:rgba(255,255,255,0.7); font-size:12px; margin:4px 0 0;'>Purchase Order</p>
@@ -95,24 +187,32 @@ if (isset($_GET['download_pdf'])) {
         $html .= "
             <tr style='border-bottom:1px solid #e5e7eb;'>
                 <td style='padding:10px 12px; font-size:12px;'>" . htmlspecialchars($item['product_title']) . ($item['product_volume_number'] ? ' (Vol.' . $item['product_volume_number'] . ')' : '') . "</td>
-                <td style='padding:10px 12px; font-size:12px; text-align:center;'>" . $item['po_item_quantity'] . "</td>
-                <td style='padding:10px 12px; font-size:12px; text-align:right;'>RM " . number_format($item['po_item_unit_price'], 2) . "</td>
-                <td style='padding:10px 12px; font-size:12px; text-align:right; font-weight:600;'>RM " . number_format($item['po_item_unit_price'] * $item['po_item_quantity'], 2) . "</td>
+                <td style='padding:10px 12px; font-size:12px; text-align:center;'>" . (int) $item['po_item_quantity'] . "</td>
+                <td style='padding:10px 12px; font-size:12px; text-align:right;'>RM " . moneyFormatSen($item['unit_price_sen']) . "</td>
+                <td style='padding:10px 12px; font-size:12px; text-align:right; font-weight:600;'>RM " . moneyFormatSen($item['subtotal_sen']) . "</td>
             </tr>";
     }
 
     $html .= "
             <tr style='background:#fef2f2;'>
                 <td colspan='3' style='padding:12px; font-size:14px; font-weight:900;'>Total</td>
-                <td style='padding:12px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . number_format($po['po_total_amount'], 2) . "</td>
+                <td style='padding:12px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . moneyFormatSen($po_total_sen) . "</td>
             </tr>
         </table>";
 
     if (count($rejected_items) > 0) {
         $rejected_rows = '';
         foreach ($rejected_items as $ri) {
-            $amt = $ri['gri_rejected_quantity'] * $ri['po_item_unit_price'];
-            $rejected_rows .= "<tr><td style='padding:8px 12px; font-size:11px;'>" . htmlspecialchars($ri['product_title']) . "</td><td style='padding:8px 12px; font-size:11px; text-align:center;'>" . $ri['gri_rejected_quantity'] . "</td><td style='padding:8px 12px; font-size:11px;'>" . htmlspecialchars($ri['gri_reject_reason'] ?? '—') . "</td><td style='padding:8px 12px; font-size:11px; text-align:right;'>RM " . number_format($amt, 2) . "</td></tr>";
+            $rejected_rows .=
+                "<tr><td style='padding:8px 12px; font-size:11px;'>" .
+                htmlspecialchars($ri['product_title']) .
+                "</td><td style='padding:8px 12px; font-size:11px; text-align:center;'>" .
+                (int) $ri['gri_rejected_quantity'] .
+                "</td><td style='padding:8px 12px; font-size:11px;'>" .
+                htmlspecialchars($ri['gri_reject_reason'] ?? '—') .
+                "</td><td style='padding:8px 12px; font-size:11px; text-align:right;'>RM " .
+                moneyFormatSen($ri['rejected_value_sen']) .
+                "</td></tr>";
         }
         $html .= "
         <div style='background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:14px; margin-bottom:24px;'>
@@ -127,7 +227,7 @@ if (isset($_GET['download_pdf'])) {
                 $rejected_rows
                 <tr style='background:#fee2e2;'>
                     <td colspan='3' style='padding:8px 12px; font-size:11px; font-weight:700; color:#991b1b;'>Total Excluded</td>
-                    <td style='padding:8px 12px; font-size:11px; font-weight:700; color:#991b1b; text-align:right;'>RM " . number_format($rejected_total, 2) . "</td>
+                    <td style='padding:8px 12px; font-size:11px; font-weight:700; color:#991b1b; text-align:right;'>RM " . moneyFormatSen($rejected_total_sen) . "</td>
                 </tr>
             </table>
         </div>";
@@ -172,17 +272,61 @@ if (isset($_GET['download_pdf'])) {
     exit;
 }
 
-// Handle rating submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_rating'])) {
-    $rating = intval($_POST['rating'] ?? 0);
-    $comment = trim($_POST['rating_comment'] ?? '');
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['submit_rating'])
+) {
+    csrf_verify();
 
-    if ($rating >= 1 && $rating <= 5) {
-        $pdo->prepare("UPDATE purchase_orders SET po_rating = ?, po_rating_comment = ?, po_rated_at = NOW() WHERE po_id = ?")
-            ->execute([$rating, $comment, $po_id]);
-        header('Location: po_detail.php?id=' . $po_id);
-        exit;
+    $rating = filter_input(
+        INPUT_POST,
+        'rating',
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+                'max_range' => 5,
+            ],
+        ]
+    );
+
+    try {
+        if ($rating === false || $rating === null) {
+            throw new RuntimeException(
+                'Please select a rating from 1 to 5.'
+            );
+        }
+
+        $comment = normalizePoRatingComment(
+            $_POST['rating_comment'] ?? ''
+        );
+
+        $update_rating = $pdo->prepare("
+            UPDATE purchase_orders
+            SET po_rating = ?,
+                po_rating_comment = ?,
+                po_rated_at = NOW()
+            WHERE po_id = ?
+            AND po_status = 'completed'
+            AND po_rating IS NULL
+        ");
+        $update_rating->execute([
+            $rating,
+            $comment,
+            $po_id,
+        ]);
+    } catch (RuntimeException $e) {
+        app_error_log(
+            'Purchase order rating rejected: ' .
+            $e->getMessage()
+        );
     }
+
+    header(
+        'Location: po_detail.php?id=' .
+        $po_id
+    );
+    exit;
 }
 
 $status_colors = [
@@ -221,8 +365,8 @@ $status_colors = [
                 <p class="text-xs text-purple-500 mt-1">📌 <?= htmlspecialchars($po['po_notes']) ?></p>
                 <?php endif; ?>
             </div>
-            <span class="<?= $status_colors[$po['po_status']] ?> text-sm px-4 py-2 rounded-full font-semibold capitalize">
-                <?= $po['po_status'] ?>
+            <span class="<?= $status_colors[$po['po_status']] ?? 'bg-gray-100 text-gray-600' ?> text-sm px-4 py-2 rounded-full font-semibold capitalize">
+                <?= htmlspecialchars($po['po_status'], ENT_QUOTES, 'UTF-8') ?>
             </span>
         </div>
 
@@ -250,21 +394,21 @@ $status_colors = [
                         <?php endif; ?>
                     </div>
                     <div class="text-right">
-                        <p class="text-sm font-bold text-red-600"><?= $ri['gri_rejected_quantity'] ?> units</p>
-                        <p class="text-xs text-gray-400">RM <?= number_format($ri['gri_rejected_quantity'] * $ri['po_item_unit_price'], 2) ?></p>
+                        <p class="text-sm font-bold text-red-600"><?= (int) $ri['gri_rejected_quantity'] ?> units</p>
+                        <p class="text-xs text-gray-400">RM <?= moneyFormatSen($ri['rejected_value_sen']) ?></p>
                     </div>
                 </div>
                 <?php endforeach; ?>
             </div>
             <div class="flex justify-between items-center pt-3 border-t border-red-200">
                 <span class="text-sm font-semibold text-red-700">Total Excluded from Payment</span>
-                <span class="text-base font-black text-red-600">RM <?= number_format($rejected_total, 2) ?></span>
+                <span class="text-base font-black text-red-600">RM <?= moneyFormatSen($rejected_total_sen) ?></span>
             </div>
             <?php if ($related_return): ?>
             <div class="mt-3 pt-3 border-t border-red-200">
             <a href="supplier_returns.php" class="text-xs text-red-700 hover:underline font-semibold">
                     ↩️ View Return <?= htmlspecialchars($related_return['return_number']) ?> —
-                    <?= ['pending' => 'Awaiting Supplier Response', 'acknowledged' => 'Needs Resolution', 'escalated' => 'Disputed (Senior Admin)', 'resolved' => 'Resolved'][$related_return['return_status']] ?>
+                    <?= htmlspecialchars((['pending' => 'Awaiting Supplier Response', 'acknowledged' => 'Needs Resolution', 'escalated' => 'Disputed (Senior Admin)', 'resolved' => 'Resolved'][$related_return['return_status']] ?? 'Unknown Status'), ENT_QUOTES, 'UTF-8') ?>
                 </a>
             </div>
             <?php endif; ?>
@@ -301,21 +445,21 @@ $status_colors = [
                                 </div>
                             </div>
                         </td>
-                        <td class="px-5 py-4 text-center text-sm font-semibold text-gray-700"><?= $item['po_item_quantity'] ?></td>
+                        <td class="px-5 py-4 text-center text-sm font-semibold text-gray-700"><?= (int) $item['po_item_quantity'] ?></td>
                         <td class="px-5 py-4 text-center text-sm">
                             <span class="<?= $item['po_item_received_quantity'] >= $item['po_item_quantity'] ? 'text-green-600' : ($item['po_item_received_quantity'] > 0 ? 'text-orange-500' : 'text-gray-400') ?> font-semibold">
-                                <?= $item['po_item_received_quantity'] ?> / <?= $item['po_item_quantity'] ?>
+                                <?= (int) $item['po_item_received_quantity'] ?> / <?= (int) $item['po_item_quantity'] ?>
                             </span>
                         </td>
-                        <td class="px-5 py-4 text-right text-sm text-gray-700">RM <?= number_format($item['po_item_unit_price'], 2) ?></td>
-                        <td class="px-5 py-4 text-right text-sm font-bold text-gray-800">RM <?= number_format($item['po_item_unit_price'] * $item['po_item_quantity'], 2) ?></td>
+                        <td class="px-5 py-4 text-right text-sm text-gray-700">RM <?= moneyFormatSen($item['unit_price_sen']) ?></td>
+                        <td class="px-5 py-4 text-right text-sm font-bold text-gray-800">RM <?= moneyFormatSen($item['subtotal_sen']) ?></td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
                 <tfoot>
                     <tr class="bg-gray-50">
                         <td colspan="4" class="px-5 py-3 text-right text-sm font-bold text-gray-700">Total</td>
-                        <td class="px-5 py-3 text-right text-base font-black text-red-600">RM <?= number_format($po['po_total_amount'], 2) ?></td>
+                        <td class="px-5 py-3 text-right text-base font-black text-red-600">RM <?= moneyFormatSen($po_total_sen) ?></td>
                     </tr>
                 </tfoot>
             </table>
@@ -338,6 +482,7 @@ $status_colors = [
             <?php endif; ?>
             <?php else: ?>
             <form method="POST">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="submit_rating" value="1">
                 <div class="mb-3">
                     <div class="flex gap-1" id="ratingStars">
@@ -348,7 +493,7 @@ $status_colors = [
                     </div>
                     <input type="hidden" name="rating" id="ratingInput" value="0">
                 </div>
-                <textarea name="rating_comment" rows="2" placeholder="Optional comment about this supplier's performance (quality, delivery time, communication, etc.)"
+                <textarea name="rating_comment" rows="2" maxlength="2000" placeholder="Optional comment about this supplier's performance (quality, delivery time, communication, etc.)"
                         class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none mb-3"></textarea>
                 <button type="submit" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors">
                     Submit Rating
@@ -360,18 +505,18 @@ $status_colors = [
 
         <div class="flex gap-3">
             <?php if ($po['po_status'] === 'sent'): ?>
-            <a href="?id=<?= $po_id ?>&confirm=1" onclick="event.preventDefault(); document.getElementById('confirmForm').submit();"
+            <a href="?id=<?= (int) $po_id ?>&confirm=1" onclick="event.preventDefault(); document.getElementById('confirmForm').submit();"
                class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
                 ✓ Confirm Order
             </a>
             <?php endif; ?>
             <?php if ($po['po_status'] === 'confirmed'): ?>
-            <a href="goods_received.php?po_id=<?= $po_id ?>"
+            <a href="goods_received.php?po_id=<?= (int) $po_id ?>"
                class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
                 📦 Receive Goods
             </a>
             <?php endif; ?>
-            <a href="?id=<?= $po_id ?>&download_pdf=1"
+            <a href="?id=<?= (int) $po_id ?>&download_pdf=1"
                 class="bg-gray-700 hover:bg-gray-800 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
                 📄 Download PO (PDF)
             </a>
@@ -381,7 +526,7 @@ $status_colors = [
         </div>
 
         <form id="confirmForm" method="GET" action="purchase_orders.php" class="hidden">
-            <input type="hidden" name="confirm" value="<?= $po_id ?>">
+            <input type="hidden" name="confirm" value="<?= (int) $po_id ?>">
         </form>
 
     </div>
