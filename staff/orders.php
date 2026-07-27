@@ -312,7 +312,16 @@ $counts['all'] = array_sum($counts);
                 </div>
 
                 <?php
-                $items = $pdo->prepare("SELECT oi.*, oi.order_item_product_title AS product_title, p.product_cover_image FROM order_items oi JOIN products p ON oi.order_item_product_id = p.product_id WHERE oi.order_item_order_id = ?");
+                $items = $pdo->prepare("
+                    SELECT
+                        oi.*,
+                        oi.order_item_product_title
+                            AS product_title,
+                        oi.order_item_product_cover_image
+                            AS product_cover_image
+                    FROM order_items oi
+                    WHERE oi.order_item_order_id = ?
+                ");
                 $items->execute([$order['order_id']]);
                 $items = $items->fetchAll(PDO::FETCH_ASSOC);
                 ?>
