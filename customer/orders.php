@@ -4,6 +4,7 @@ require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 require_once __DIR__ .
     '/../includes/payment_draft_helper.php';
 
@@ -68,7 +69,7 @@ if ($pending_checkout === null) {
 $has_pending_checkout =
     $pending_checkout !== null;
 
-$pending_checkout_total = 0.0;
+$pending_checkout_total_sen = 0;
 $pending_checkout_item_count = 0;
 $pending_checkout_deadline = 0;
 $pending_checkout_expired = false;
@@ -89,10 +90,12 @@ if ($has_pending_checkout) {
     $_SESSION['payment_draft_id'] =
         $payment_draft_id;
 
-    $pending_checkout_total =
-        (float) $pending_checkout[
-            'total'
-        ];
+    $pending_checkout_total_sen =
+        moneyDecimalToSen(
+            (string) $pending_checkout[
+                'total'
+            ]
+        );
 
     $pending_checkout_item_count =
         count(
@@ -333,9 +336,8 @@ if ($filter !== 'all') {
                                         class="text-2xl font-black text-red-600"
                                     >
                                         RM
-                                        <?= number_format(
-                                            $pending_checkout_total,
-                                            2
+                                        <?= moneyFormatSen(
+                                            $pending_checkout_total_sen
                                         ) ?>
                                     </p>
 
@@ -501,7 +503,16 @@ if ($filter !== 'all') {
                                     </a>
                                     <?php endif; ?>
                                 </div>
-                                <p class="font-bold text-red-600">RM <?= number_format($order['order_total_amount'], 2) ?></p>
+                                <p class="font-bold text-red-600">
+                                    RM
+                                    <?= moneyFormatSen(
+                                        moneyDecimalToSen(
+                                            (string) $order[
+                                                'order_total_amount'
+                                            ]
+                                        )
+                                    ) ?>
+                                </p>
                             </div>
 
                             <!-- Order Items -->
@@ -536,7 +547,16 @@ if ($filter !== 'all') {
                                     <div class="flex-1 min-w-0">
                                         <p class="font-semibold text-sm text-gray-800 truncate"><?= htmlspecialchars($item['product_title']) ?></p>
                                         <p class="text-xs text-gray-400"><?= $item['order_item_type'] === 'ebook' ? '📱 E-Book' : '📦 Physical' ?> × <?= $item['order_item_quantity'] ?></p>
-                                        <p class="text-sm font-bold text-red-600 mt-1">RM <?= number_format($item['order_item_price'], 2) ?></p>
+                                        <p class="text-sm font-bold text-red-600 mt-1">
+                                            RM
+                                            <?= moneyFormatSen(
+                                                moneyDecimalToSen(
+                                                    (string) $item[
+                                                        'order_item_price'
+                                                    ]
+                                                )
+                                            ) ?>
+                                        </p>
                                     </div>
                                     <div class="flex-shrink-0">
                                         <?php if ($item['order_item_type'] === 'ebook' && $item['ebook_file_path']): ?>
