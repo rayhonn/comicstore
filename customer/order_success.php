@@ -63,6 +63,20 @@ $stmt2 = $pdo->prepare("
 ");
 $stmt2->execute([$order_id]);
 $items = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+
+$payment_method_labels = [
+    'stripe_card' =>
+        'Credit / Debit Card (Stripe)',
+];
+
+$payment_method_code = (string) (
+    $order['order_payment_method'] ?? ''
+);
+
+$payment_method_label =
+    $payment_method_labels[
+        $payment_method_code
+    ] ?? 'Not recorded';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -170,14 +184,19 @@ $items = $stmt2->fetchAll(PDO::FETCH_ASSOC);
         <?php endif; ?>
 
         <!-- Payment Method -->
-        <?php if (!empty($order['order_payment_method'])): ?>
         <div class="bg-white rounded-2xl shadow-sm p-6 mb-6 slide-up-delay-2">
             <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                <span>💳</span> Payment Method
+                <span>💳</span>
+                Payment Method
             </h3>
-            <p class="text-sm text-gray-600"><?= htmlspecialchars(ucwords(str_replace('_', ' ', $order['order_payment_method']))) ?></p>
+            <p class="text-sm text-gray-600">
+                <?= htmlspecialchars(
+                    $payment_method_label,
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?>
+            </p>
         </div>
-        <?php endif; ?>
         
         <!-- Action Buttons -->
         <div class="flex gap-3 slide-up-delay-3 mb-3">

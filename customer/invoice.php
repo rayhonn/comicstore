@@ -72,6 +72,20 @@ $items = $items->fetchAll(PDO::FETCH_ASSOC);
 $subtotal = $order['order_total_amount'] - ($order['order_shipping_fee'] ?? 0);
 $order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
 
+$payment_method_labels = [
+    'stripe_card' =>
+        'Credit / Debit Card (Stripe)',
+];
+
+$payment_method_code = (string) (
+    $order['order_payment_method'] ?? ''
+);
+
+$payment_method_label =
+    $payment_method_labels[
+        $payment_method_code
+    ] ?? 'Not recorded';
+
 $status_colors = [
     'pending'    => ['bg' => '#fef9c3', 'text' => '#854d0e', 'dot' => '#ca8a04'],
     'processing' => ['bg' => '#dbeafe', 'text' => '#1e40af', 'dot' => '#3b82f6'],
@@ -190,12 +204,19 @@ $sc = $status_colors[$order['order_status']] ?? $status_colors['pending'];
                     </div>
                 </div>
 
-                <?php if (!empty($order['order_payment_method'])): ?>
                 <div>
-                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Payment Method</p>
-                    <p class="font-semibold text-gray-700">💳 <?= htmlspecialchars(ucwords(str_replace('_', ' ', $order['order_payment_method']))) ?></p>
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                        Payment Method
+                    </p>
+                    <p class="font-semibold text-gray-700">
+                        💳
+                        <?= htmlspecialchars(
+                            $payment_method_label,
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                    </p>
                 </div>
-                <?php endif; ?>
 
                 <!-- Divider -->
                 <div class="border-t-2 border-gray-50 mb-6"></div>
