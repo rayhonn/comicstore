@@ -1,82 +1,75 @@
 <?php
+
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
-$user_id = $_SESSION['user_id'];
-$order_id = $_GET['order_id'] ?? null;
+$user_id = current_user_id();
 
-if (!$order_id) {
+$order_id = filter_input(
+    INPUT_GET,
+    'order_id',
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
+
+if ($order_id === false || $order_id === null) {
     header('Location: orders.php');
     exit;
 }
 
-// Get order details
-$stmt = $pdo->prepare("
+$order_id = (int) $order_id;
+
+$order_stmt = $pdo->prepare("
     SELECT
         o.*,
-        o.order_address_recipient_name
-            AS address_recipient_name,
-        o.order_address_taman
-            AS address_taman,
-        o.order_address_street
-            AS address_street,
-        o.order_address_city
-            AS address_city,
-        o.order_address_state
-            AS address_state,
-        o.order_address_postal_code
-            AS address_postal_code,
-        o.order_address_country
-            AS address_country,
-        o.order_address_phone
-            AS address_phone
+        a.address_recipient_name,
+        a.address_taman,
+        a.address_street,
+        a.address_city,
+        a.address_state,
+        a.address_postal_code,
+        a.address_country,
+        a.address_phone
     FROM orders o
+    LEFT JOIN addresses a
+        ON o.order_address_id = a.address_id
     WHERE o.order_id = ?
-      AND o.order_user_id = ?
-    LIMIT 1
+    AND o.order_user_id = ?
 ");
-$stmt->execute([$order_id, $user_id]);
-$order = $stmt->fetch(PDO::FETCH_ASSOC);
+$order_stmt->execute([
+    $order_id,
+    $user_id,
+]);
+$order = $order_stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$order) {
     header('Location: orders.php');
     exit;
 }
 
-// Get order items
-$stmt2 = $pdo->prepare("
+$item_stmt = $pdo->prepare("
     SELECT
         oi.*,
-        oi.order_item_product_title
-            AS product_title,
-        oi.order_item_product_cover_image
-            AS product_cover_image,
+        oi.order_item_product_title AS product_title,
+        p.product_cover_image,
         pe.ebook_file_path,
         pe.ebook_download_limit
     FROM order_items oi
+    JOIN products p
+        ON oi.order_item_product_id = p.product_id
     LEFT JOIN product_ebook pe
-        ON oi.order_item_product_id =
-            pe.ebook_product_id
+        ON p.product_id = pe.ebook_product_id
     WHERE oi.order_item_order_id = ?
 ");
-$stmt2->execute([$order_id]);
-$items = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+$item_stmt->execute([$order_id]);
+$items = $item_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$payment_method_labels = [
-    'stripe_card' =>
-        'Credit / Debit Card (Stripe)',
-];
-
-$payment_method_code = (string) (
-    $order['order_payment_method'] ?? ''
+$order_total_sen = moneyDecimalToSen(
+    (string) $order['order_total_amount']
 );
-
-$payment_method_label =
-    $payment_method_labels[
-        $payment_method_code
-    ] ?? 'Not recorded';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -123,7 +116,7 @@ $payment_method_label =
                 </svg>
             </div>
 
-            <p class="text-sm text-gray-400 font-medium mb-1">Order #<?= str_pad($order_id, 4, '0', STR_PAD_LEFT) ?></p>
+            <p class="text-sm text-gray-400 font-medium mb-1">Order #<?= str_pad((string) $order_id, 4, '0', STR_PAD_LEFT) ?></p>
             <h1 class="text-3xl font-black text-gray-800 mb-3">Order Confirmed!</h1>
             <p class="text-gray-500 text-sm max-w-sm mx-auto leading-relaxed">
                 Thank you for your purchase! We've received your order and will process it shortly.
@@ -145,10 +138,10 @@ $payment_method_label =
                     <div class="flex-1">
                         <p class="font-semibold text-sm text-gray-800"><?= htmlspecialchars($item['product_title']) ?></p>
                         <p class="text-xs text-gray-400"><?= $item['order_item_type'] === 'ebook' ? '📱 E-Book' : '📦 Physical' ?> × <?= $item['order_item_quantity'] ?></p>
-                        <p class="text-red-600 font-bold text-sm">RM <?= number_format($item['order_item_price'], 2) ?></p>
+                        <p class="text-red-600 font-bold text-sm">RM <?= moneyFormatSen(moneyDecimalToSen((string) $item['order_item_price'])) ?></p>
                     </div>
                     <?php if ($item['order_item_type'] === 'ebook' && $item['ebook_file_path']): ?>
-                        <a href="download.php?item_id=<?= $item['order_item_id'] ?>"
+                        <a href="download.php?item_id=<?= (int) $item['order_item_id'] ?>"
                            class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors flex-shrink-0">
                             ↓ Download
                         </a>
@@ -159,7 +152,7 @@ $payment_method_label =
 
             <div class="border-t border-gray-100 mt-4 pt-4 flex justify-between items-center">
                 <span class="font-bold text-gray-700">Total Paid</span>
-                <span class="font-black text-xl text-red-600">RM <?= number_format($order['order_total_amount'], 2) ?></span>
+                <span class="font-black text-xl text-red-600">RM <?= moneyFormatSen($order_total_sen) ?></span>
             </div>
         </div>
 
@@ -184,23 +177,18 @@ $payment_method_label =
         <?php endif; ?>
 
         <!-- Payment Method -->
+        <?php if (!empty($order['order_payment_method'])): ?>
         <div class="bg-white rounded-2xl shadow-sm p-6 mb-6 slide-up-delay-2">
             <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                <span>💳</span>
-                Payment Method
+                <span>💳</span> Payment Method
             </h3>
-            <p class="text-sm text-gray-600">
-                <?= htmlspecialchars(
-                    $payment_method_label,
-                    ENT_QUOTES,
-                    'UTF-8'
-                ) ?>
-            </p>
+            <p class="text-sm text-gray-600"><?= htmlspecialchars($order['order_payment_method']) ?></p>
         </div>
+        <?php endif; ?>
         
         <!-- Action Buttons -->
         <div class="flex gap-3 slide-up-delay-3 mb-3">
-            <a href="invoice.php?order_id=<?= $order_id ?>"
+            <a href="invoice.php?order_id=<?= (int) $order_id ?>"
                 class="flex-1 text-center bg-[#1e2d4a] hover:bg-[#162338] text-white font-bold py-3 rounded-xl text-sm transition-colors duration-200 flex items-center justify-center gap-2">
                 🧾 Download Invoice
             </a>

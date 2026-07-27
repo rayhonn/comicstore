@@ -1,85 +1,188 @@
 <?php
+
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
 
-$search = trim($_GET['search'] ?? '');
-$category_id = $_GET['category_id'] ?? '';
-$genre_id = $_GET['genre_id'] ?? '';
-$type = $_GET['type'] ?? '';
+$search_raw = $_GET['search'] ?? '';
 
-// Fetch all matching products
+if (!is_string($search_raw)) {
+    $search_raw = '';
+}
+
+$search = trim($search_raw);
+$search_length = function_exists('mb_strlen')
+    ? mb_strlen($search, 'UTF-8')
+    : strlen($search);
+
+if ($search_length > 100) {
+    $search = '';
+}
+
+function optionalPositiveFilterId(
+    mixed $value
+): ?int {
+    if ($value === null || $value === '') {
+        return null;
+    }
+
+    $validated = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
+
+    return
+        $validated === false ||
+        $validated === null
+            ? null
+            : (int) $validated;
+}
+
+$category_id = optionalPositiveFilterId(
+    $_GET['category_id'] ?? null
+);
+$genre_id = optionalPositiveFilterId(
+    $_GET['genre_id'] ?? null
+);
+
+$type_raw = $_GET['type'] ?? '';
+$type =
+    is_string($type_raw) &&
+    in_array(
+        $type_raw,
+        ['', 'physical', 'ebook'],
+        true
+    )
+        ? $type_raw
+        : '';
+
 $sql = "
-    SELECT DISTINCT p.*, c.category_name,
-    pp.physical_stock_quantity,
-    pe.ebook_download_limit
+    SELECT DISTINCT
+        p.*,
+        c.category_name,
+        pp.physical_stock_quantity,
+        pe.ebook_download_limit
     FROM products p
-    LEFT JOIN categories c ON p.product_category_id = c.category_id
-    LEFT JOIN product_physical pp ON p.product_id = pp.physical_product_id
-    LEFT JOIN product_ebook pe ON p.product_id = pe.ebook_product_id
-    LEFT JOIN product_genres pg ON p.product_id = pg.product_genres_product_id
+    LEFT JOIN categories c
+        ON p.product_category_id = c.category_id
+    LEFT JOIN product_physical pp
+        ON p.product_id = pp.physical_product_id
+    LEFT JOIN product_ebook pe
+        ON p.product_id = pe.ebook_product_id
+    LEFT JOIN product_genres pg
+        ON p.product_id =
+            pg.product_genres_product_id
     WHERE p.product_is_available = 1
 ";
+
 $params = [];
 
-if ($search) {
-    $sql .= " AND (p.product_title LIKE ? OR p.product_series LIKE ? OR p.product_author LIKE ?)";
-    $params[] = "%$search%";
-    $params[] = "%$search%";
-    $params[] = "%$search%";
+if ($search !== '') {
+    $sql .= "
+        AND (
+            p.product_title LIKE ?
+            OR p.product_series LIKE ?
+            OR p.product_author LIKE ?
+        )
+    ";
+    $params = array_fill(0, 3, '%' . $search . '%');
 }
-if ($category_id) {
+
+if ($category_id !== null) {
     $sql .= " AND p.product_category_id = ?";
     $params[] = $category_id;
 }
-if ($genre_id) {
-    $sql .= " AND pg.product_genres_genre_id = ?";
+
+if ($genre_id !== null) {
+    $sql .= "
+        AND pg.product_genres_genre_id = ?
+    ";
     $params[] = $genre_id;
 }
-if ($type) {
+
+if ($type !== '') {
     $sql .= " AND p.product_type = ?";
     $params[] = $type;
 }
+
 $sql .= " ORDER BY p.product_created_at DESC";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
-$raw_products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$raw_products =
+    $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Group by series + volume — merge physical & ebook into one card
 $grouped = [];
-foreach ($raw_products as $p) {
-    // Use series+volume as key, or product_id if no series
-    $key = $p['product_series']
-        ? $p['product_series'] . '||' . ($p['product_volume_number'] ?? '0')
-        : 'solo_' . $p['product_id'];
+
+foreach ($raw_products as $product) {
+    $key =
+        $product['product_series']
+            ? $product['product_series'] .
+                '||' .
+                ($product['product_volume_number'] ?? '0')
+            : 'solo_' . (int) $product['product_id'];
 
     if (!isset($grouped[$key])) {
         $grouped[$key] = [
             'physical' => null,
-            'ebook'    => null,
+            'ebook' => null,
         ];
     }
-    $grouped[$key][$p['product_type']] = $p;
+
+    if (
+        in_array(
+            $product['product_type'],
+            ['physical', 'ebook'],
+            true
+        )
+    ) {
+        $grouped[$key][$product['product_type']] =
+            $product;
+    }
 }
 
-// Build final product list — one entry per card
 $products = [];
+
 foreach ($grouped as $entry) {
-    // Prefer physical as the "main" card, fallback to ebook
-    $main = $entry['physical'] ?? $entry['ebook'];
-    $main['has_physical'] = $entry['physical'] !== null;
-    $main['has_ebook']    = $entry['ebook'] !== null;
-    $main['physical_id']  = $entry['physical']['product_id'] ?? null;
-    $main['ebook_id']     = $entry['ebook']['product_id'] ?? null;
-    $main['ebook_price']  = $entry['ebook']['product_price'] ?? null;
+    $main =
+        $entry['physical'] ??
+        $entry['ebook'];
+
+    if (!$main) {
+        continue;
+    }
+
+    $main['has_physical'] =
+        $entry['physical'] !== null;
+    $main['has_ebook'] =
+        $entry['ebook'] !== null;
+    $main['physical_id'] =
+        isset($entry['physical']['product_id'])
+            ? (int) $entry['physical']['product_id']
+            : null;
+    $main['ebook_id'] =
+        isset($entry['ebook']['product_id'])
+            ? (int) $entry['ebook']['product_id']
+            : null;
+    $main['ebook_price'] =
+        $entry['ebook']['product_price'] ?? null;
+
     $products[] = $main;
 }
 
-$categories = $pdo->query("SELECT * FROM categories ORDER BY category_name")->fetchAll(PDO::FETCH_ASSOC);
-$genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO::FETCH_ASSOC);
+$categories = $pdo->query("
+    SELECT category_id, category_name
+    FROM categories
+    ORDER BY category_name
+")->fetchAll(PDO::FETCH_ASSOC);
 
+$genres = $pdo->query("
+    SELECT genre_id, genre_name
+    FROM genres
+    ORDER BY genre_name
+")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -99,13 +202,13 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
         <!-- Search & Filter -->
         <div class="bg-white rounded-xl shadow-sm p-4 mb-6">
             <form method="GET" class="flex flex-wrap gap-3 items-center">
-                <input type="text" name="search" placeholder="Search title, series, author..."
+                <input type="text" name="search" maxlength="100" placeholder="Search title, series, author..."
                        value="<?= htmlspecialchars($search) ?>"
                        class="flex-1 min-w-48 px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500">
                 <select name="category_id" class="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500">
                     <option value="">All Categories</option>
                     <?php foreach ($categories as $cat): ?>
-                        <option value="<?= $cat['category_id'] ?>" <?= $category_id == $cat['category_id'] ? 'selected' : '' ?>>
+                        <option value="<?= (int) $cat['category_id'] ?>" <?= $category_id === (int) $cat['category_id'] ? 'selected' : '' ?>>
                             <?= htmlspecialchars($cat['category_name']) ?>
                         </option>
                     <?php endforeach; ?>
@@ -113,7 +216,7 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
                 <select name="genre_id" class="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500">
                     <option value="">All Genres</option>
                     <?php foreach ($genres as $genre): ?>
-                        <option value="<?= $genre['genre_id'] ?>" <?= $genre_id == $genre['genre_id'] ? 'selected' : '' ?>>
+                        <option value="<?= (int) $genre['genre_id'] ?>" <?= $genre_id === (int) $genre['genre_id'] ? 'selected' : '' ?>>
                             <?= htmlspecialchars($genre['genre_name']) ?>
                         </option>
                     <?php endforeach; ?>
@@ -400,12 +503,7 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
 
     // Load AI Recommendations
     <?php if (!$search && !$category_id && !$genre_id && !$type): ?>
-
-    const recommendationUrl = <?= json_encode(app_path('customer/get_recommendations.php')) ?>;
-    const productDetailUrl = <?= json_encode(app_path('customer/product_detail.php')) ?>;
-    const imageBaseUrl = <?= json_encode(app_path('assets/images/')) ?>;
-
-    fetch(recommendationUrl, {
+    fetch('/comicstore/customer/get_recommendations.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'type=home'
@@ -426,11 +524,11 @@ $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO:
                 : '<span class="text-xs text-blue-600 font-semibold">E-Book</span>';
         
             return `
-            <a href="${productDetailUrl}?id=${p.product_id}"
+            <a href="/comicstore/customer/product_detail.php?id=${p.product_id}"
                 class="group bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col">
                 <div class="relative flex-shrink-0" style="height:200px;">
                     ${p.product_cover_image
-                        ? `<img src="${imageBaseUrl}${p.product_cover_image}"
+                        ? `<img src="/comicstore/assets/images/${p.product_cover_image}"
                                 class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
                         : `<div class="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">No Image</div>`
                     }

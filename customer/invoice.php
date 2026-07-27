@@ -1,99 +1,128 @@
 <?php
+
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
-$user_id = $_SESSION['user_id'];
-$order_id = $_GET['order_id'] ?? null;
+$user_id = current_user_id();
 
-if (!$order_id) {
+$order_id = filter_input(
+    INPUT_GET,
+    'order_id',
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
+
+if ($order_id === false || $order_id === null) {
     header('Location: orders.php');
     exit;
 }
 
-// Get order - must belong to this user
-$order = $pdo->prepare("
+$order_id = (int) $order_id;
+
+$order_stmt = $pdo->prepare("
     SELECT
         o.*,
         u.user_first_name,
         u.user_last_name,
         u.user_gmail,
         u.user_phone,
-        o.order_address_recipient_name
-            AS address_recipient_name,
-        o.order_address_taman
-            AS address_taman,
-        o.order_address_street
-            AS address_street,
-        o.order_address_city
-            AS address_city,
-        o.order_address_state
-            AS address_state,
-        o.order_address_postal_code
-            AS address_postal_code,
-        o.order_address_country
-            AS address_country,
-        o.order_address_phone
-            AS address_phone
+        a.address_recipient_name,
+        a.address_taman,
+        a.address_street,
+        a.address_city,
+        a.address_state,
+        a.address_postal_code,
+        a.address_country,
+        a.address_phone
     FROM orders o
     JOIN users u
         ON o.order_user_id = u.user_id
+    LEFT JOIN addresses a
+        ON o.order_address_id = a.address_id
     WHERE o.order_id = ?
-      AND o.order_user_id = ?
-    LIMIT 1
+    AND o.order_user_id = ?
 ");
-$order->execute([$order_id, $user_id]);
-$order = $order->fetch(PDO::FETCH_ASSOC);
+$order_stmt->execute([
+    $order_id,
+    $user_id,
+]);
+$order = $order_stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$order) {
     header('Location: orders.php');
     exit;
 }
 
-// Get order items
-$items = $pdo->prepare("
+$item_stmt = $pdo->prepare("
     SELECT
         oi.*,
-        oi.order_item_product_title
-            AS product_title,
-        oi.order_item_product_cover_image
-            AS product_cover_image,
-        oi.order_item_product_author
-            AS product_author,
-        oi.order_item_type
-            AS product_type
+        oi.order_item_product_title AS product_title,
+        p.product_cover_image,
+        p.product_author,
+        p.product_type
     FROM order_items oi
+    JOIN products p
+        ON oi.order_item_product_id = p.product_id
     WHERE oi.order_item_order_id = ?
 ");
-$items->execute([$order_id]);
-$items = $items->fetchAll(PDO::FETCH_ASSOC);
+$item_stmt->execute([$order_id]);
+$items = $item_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$subtotal = $order['order_total_amount'] - ($order['order_shipping_fee'] ?? 0);
-$order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
-
-$payment_method_labels = [
-    'stripe_card' =>
-        'Credit / Debit Card (Stripe)',
-];
-
-$payment_method_code = (string) (
-    $order['order_payment_method'] ?? ''
+$total_sen = moneyDecimalToSen(
+    (string) $order['order_total_amount']
 );
+$shipping_sen = moneyDecimalToSen(
+    (string) ($order['order_shipping_fee'] ?? '0')
+);
+$discount_sen = moneyDecimalToSen(
+    (string) ($order['order_discount_amount'] ?? '0')
+);
+$subtotal_before_discount_sen =
+    $total_sen - $shipping_sen + $discount_sen;
 
-$payment_method_label =
-    $payment_method_labels[
-        $payment_method_code
-    ] ?? 'Not recorded';
+$order_num =
+    '#' .
+    str_pad(
+        (string) $order_id,
+        4,
+        '0',
+        STR_PAD_LEFT
+    );
 
 $status_colors = [
-    'pending'    => ['bg' => '#fef9c3', 'text' => '#854d0e', 'dot' => '#ca8a04'],
-    'processing' => ['bg' => '#dbeafe', 'text' => '#1e40af', 'dot' => '#3b82f6'],
-    'shipped'    => ['bg' => '#f3e8ff', 'text' => '#6b21a8', 'dot' => '#9333ea'],
-    'delivered'  => ['bg' => '#dcfce7', 'text' => '#166534', 'dot' => '#16a34a'],
-    'cancelled'  => ['bg' => '#fee2e2', 'text' => '#991b1b', 'dot' => '#ef4444'],
+    'pending' => [
+        'bg' => '#fef9c3',
+        'text' => '#854d0e',
+        'dot' => '#ca8a04',
+    ],
+    'processing' => [
+        'bg' => '#dbeafe',
+        'text' => '#1e40af',
+        'dot' => '#3b82f6',
+    ],
+    'shipped' => [
+        'bg' => '#f3e8ff',
+        'text' => '#6b21a8',
+        'dot' => '#9333ea',
+    ],
+    'delivered' => [
+        'bg' => '#dcfce7',
+        'text' => '#166534',
+        'dot' => '#16a34a',
+    ],
+    'cancelled' => [
+        'bg' => '#fee2e2',
+        'text' => '#991b1b',
+        'dot' => '#ef4444',
+    ],
 ];
-$sc = $status_colors[$order['order_status']] ?? $status_colors['pending'];
+
+$sc =
+    $status_colors[$order['order_status']]
+    ?? $status_colors['pending'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -204,19 +233,12 @@ $sc = $status_colors[$order['order_status']] ?? $status_colors['pending'];
                     </div>
                 </div>
 
+                <?php if (!empty($order['order_payment_method'])): ?>
                 <div>
-                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                        Payment Method
-                    </p>
-                    <p class="font-semibold text-gray-700">
-                        💳
-                        <?= htmlspecialchars(
-                            $payment_method_label,
-                            ENT_QUOTES,
-                            'UTF-8'
-                        ) ?>
-                    </p>
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Payment Method</p>
+                    <p class="font-semibold text-gray-700">💳 <?= htmlspecialchars($order['order_payment_method']) ?></p>
                 </div>
+                <?php endif; ?>
 
                 <!-- Divider -->
                 <div class="border-t-2 border-gray-50 mb-6"></div>
@@ -262,8 +284,8 @@ $sc = $status_colors[$order['order_status']] ?? $status_colors['pending'];
                                         </span>
                                     </td>
                                     <td class="px-4 py-4 text-center text-sm text-gray-600"><?= $item['order_item_quantity'] ?></td>
-                                    <td class="px-4 py-4 text-right text-sm text-gray-600">RM <?= number_format($item['order_item_price'], 2) ?></td>
-                                    <td class="px-4 py-4 text-right text-sm font-semibold text-gray-800">RM <?= number_format($item['order_item_price'] * $item['order_item_quantity'], 2) ?></td>
+                                    <td class="px-4 py-4 text-right text-sm text-gray-600">RM <?= moneyFormatSen(moneyDecimalToSen((string) $item['order_item_price'])) ?></td>
+                                    <td class="px-4 py-4 text-right text-sm font-semibold text-gray-800">RM <?= moneyFormatSen(moneyDecimalToSen((string) $item['order_item_price']) * (int) $item['order_item_quantity']) ?></td>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -276,24 +298,24 @@ $sc = $status_colors[$order['order_status']] ?? $status_colors['pending'];
                     <div class="w-full max-w-xs space-y-2">
                         <div class="flex justify-between text-sm text-gray-500">
                             <span>Subtotal</span>
-                            <span>RM <?= number_format($subtotal + ($order['order_discount_amount'] ?? 0), 2) ?></span>
+                            <span>RM <?= moneyFormatSen($subtotal_before_discount_sen) ?></span>
                         </div>
                         <?php if ($order['order_has_physical']): ?>
                         <div class="flex justify-between text-sm text-gray-500">
                             <span>Shipping (<?= ucfirst($order['order_shipping_method'] ?? 'standard') ?>)</span>
-                            <span>RM <?= number_format($order['order_shipping_fee'] ?? 0, 2) ?></span>
+                            <span>RM <?= moneyFormatSen($shipping_sen) ?></span>
                         </div>
                         <?php endif; ?>
                         <?php if (!empty($order['order_voucher_code']) && $order['order_discount_amount'] > 0): ?>
                         <div class="flex justify-between text-sm text-green-600">
                             <span>🎟️ Voucher (<?= htmlspecialchars($order['order_voucher_code']) ?>)</span>
-                            <span>-RM <?= number_format($order['order_discount_amount'], 2) ?></span>
+                            <span>-RM <?= moneyFormatSen($discount_sen) ?></span>
                         </div>
                         <?php endif; ?>
                         <div class="border-t-2 border-gray-100 pt-3">
                             <div class="flex justify-between">
                                 <span class="font-black text-gray-800 text-lg">Total Paid</span>
-                                <span class="font-black text-red-600 text-lg">RM <?= number_format($order['order_total_amount'], 2) ?></span>
+                                <span class="font-black text-red-600 text-lg">RM <?= moneyFormatSen($total_sen) ?></span>
                             </div>
                         </div>
                     </div>

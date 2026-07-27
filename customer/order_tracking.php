@@ -1,60 +1,82 @@
 <?php
+
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
-$order_id = $_GET['order_id'] ?? null;
-if (!$order_id) { header('Location: orders.php'); exit; }
+$user_id = current_user_id();
 
-$order = $pdo->prepare("
+$order_id = filter_input(
+    INPUT_GET,
+    'order_id',
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
+
+if ($order_id === false || $order_id === null) {
+    header('Location: orders.php');
+    exit;
+}
+
+$order_id = (int) $order_id;
+
+$order_stmt = $pdo->prepare("
     SELECT
         o.*,
-        o.order_address_recipient_name
-            AS address_recipient_name,
-        o.order_address_taman
-            AS address_taman,
-        o.order_address_street
-            AS address_street,
-        o.order_address_city
-            AS address_city,
-        o.order_address_state
-            AS address_state,
-        o.order_address_postal_code
-            AS address_postal_code,
-        o.order_address_country
-            AS address_country,
-        o.order_address_phone
-            AS address_phone
+        a.address_recipient_name,
+        a.address_street,
+        a.address_city,
+        a.address_postal_code,
+        a.address_country,
+        a.address_phone
     FROM orders o
+    LEFT JOIN addresses a
+        ON o.order_address_id = a.address_id
     WHERE o.order_id = ?
-      AND o.order_user_id = ?
-    LIMIT 1
+    AND o.order_user_id = ?
 ");
-$order->execute([$order_id, $_SESSION['user_id']]);
-$order = $order->fetch(PDO::FETCH_ASSOC);
+$order_stmt->execute([
+    $order_id,
+    $user_id,
+]);
+$order = $order_stmt->fetch(PDO::FETCH_ASSOC);
 
-if (!$order) { header('Location: orders.php'); exit; }
+if (!$order) {
+    header('Location: orders.php');
+    exit;
+}
 
-$items = $pdo->prepare("
+$item_stmt = $pdo->prepare("
     SELECT
         oi.*,
-        oi.order_item_product_title
-            AS product_title,
-        oi.order_item_product_cover_image
-            AS product_cover_image,
-        oi.order_item_type
-            AS product_type
+        oi.order_item_product_title AS product_title,
+        p.product_cover_image,
+        p.product_type
     FROM order_items oi
+    JOIN products p
+        ON oi.order_item_product_id = p.product_id
     WHERE oi.order_item_order_id = ?
 ");
-$items->execute([$order_id]);
-$items = $items->fetchAll(PDO::FETCH_ASSOC);
+$item_stmt->execute([$order_id]);
+$items = $item_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
-$order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
 
-// Build timeline steps
+$order_num =
+    '#' .
+    str_pad(
+        (string) $order_id,
+        4,
+        '0',
+        STR_PAD_LEFT
+    );
+
+$order_total_sen = moneyDecimalToSen(
+    (string) $order['order_total_amount']
+);
+
 $steps = [
     [
         'key' => 'ordered',
@@ -70,7 +92,8 @@ $steps = [
         'desc' => 'Payment has been verified',
         'icon' => '💳',
         'time' => null,
-        'done' => $order['order_payment_status'] === 'confirmed',
+        'done' =>
+            $order['order_payment_status'] === 'confirmed',
     ],
     [
         'key' => 'processing',
@@ -78,17 +101,27 @@ $steps = [
         'desc' => 'Your order is being prepared',
         'icon' => '📦',
         'time' => $order['order_processing_at'],
-        'done' => in_array($order['order_status'], ['processing', 'shipped', 'delivered']),
+        'done' => in_array(
+            $order['order_status'],
+            ['processing', 'shipped', 'delivered'],
+            true
+        ),
     ],
     [
         'key' => 'shipped',
         'label' => 'Shipped',
-        'desc' => $order['order_tracking_number'] 
-            ? 'Tracking: ' . $order['order_tracking_number'] 
-            : 'On the way to you',
+        'desc' =>
+            $order['order_tracking_number']
+                ? 'Tracking: ' .
+                    $order['order_tracking_number']
+                : 'On the way to you',
         'icon' => '🚚',
         'time' => $order['order_shipped_at'],
-        'done' => in_array($order['order_status'], ['shipped', 'delivered']),
+        'done' => in_array(
+            $order['order_status'],
+            ['shipped', 'delivered'],
+            true
+        ),
     ],
     [
         'key' => 'delivered',
@@ -96,14 +129,17 @@ $steps = [
         'desc' => 'Package delivered successfully',
         'icon' => '✅',
         'time' => $order['order_delivered_at'],
-        'done' => $order['order_status'] === 'delivered',
+        'done' =>
+            $order['order_status'] === 'delivered',
     ],
 ];
 
-// Find current active step
 $current_step = 0;
-foreach ($steps as $i => $step) {
-    if ($step['done']) $current_step = $i;
+
+foreach ($steps as $index => $step) {
+    if ($step['done']) {
+        $current_step = $index;
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -163,7 +199,7 @@ foreach ($steps as $i => $step) {
                 </div>
                 <div class="text-right">
                     <p class="text-white/60 text-xs mb-1">Total</p>
-                    <p class="text-2xl font-black">RM <?= number_format($order['order_total_amount'], 2) ?></p>
+                    <p class="text-2xl font-black">RM <?= moneyFormatSen($order_total_sen) ?></p>
                     <?php if ($order['order_tracking_number']): ?>
                     <p class="text-white/70 text-xs mt-1">📦 <?= htmlspecialchars($order['order_tracking_number']) ?></p>
                     <?php endif; ?>
@@ -272,7 +308,7 @@ foreach ($steps as $i => $step) {
                         <p class="font-semibold text-sm text-gray-800 truncate"><?= htmlspecialchars($item['product_title']) ?></p>
                         <p class="text-xs text-gray-400"><?= $item['product_type'] === 'ebook' ? '📱 E-Book' : '📦 Physical' ?> × <?= $item['order_item_quantity'] ?></p>
                     </div>
-                    <p class="font-bold text-sm text-red-600 flex-shrink-0">RM <?= number_format($item['order_item_price'] * $item['order_item_quantity'], 2) ?></p>
+                    <p class="font-bold text-sm text-red-600 flex-shrink-0">RM <?= moneyFormatSen(moneyDecimalToSen((string) $item['order_item_price']) * (int) $item['order_item_quantity']) ?></p>
                 </div>
                 <?php endforeach; ?>
             </div>
