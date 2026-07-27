@@ -2,37 +2,178 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_admin_or_staff();
 
 $error = '';
 $success = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'add') {
-        $name = trim($_POST['genre_name']);
-        $desc = trim($_POST['genre_description']);
-        if (empty($name)) {
-            $error = "Genre name is required.";
-        } else {
-            $pdo->prepare("INSERT INTO genres (genre_name, genre_description) VALUES (?, ?)")
-                ->execute([$name, $desc]);
-            $success = "Genre added successfully!";
+function normalizeGenreText(
+    mixed $value,
+    string $label,
+    int $maxLength,
+    bool $required = false
+): string {
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
+
+    $value = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($value, 'UTF-8')
+        : strlen($value);
+
+    if ($required && $value === '') {
+        throw new RuntimeException($label . ' is required.');
+    }
+
+    if ($length > $maxLength) {
+        throw new RuntimeException(
+            $label . ' cannot exceed ' .
+            $maxLength .
+            ' characters.'
+        );
+    }
+
+    return $value;
+}
+
+function normalizeGenreId(mixed $value): int
+{
+    $id = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    if ($id === false || $id === null) {
+        throw new RuntimeException(
+            'Invalid genre.'
+        );
+    }
+
+    return $id;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
+    $action = $_POST['action'] ?? null;
+
+    try {
+        if (
+            !is_string($action) ||
+            !in_array(
+                $action,
+                ['add', 'edit', 'delete'],
+                true
+            )
+        ) {
+            throw new RuntimeException(
+                'Invalid genre action.'
+            );
         }
-    } elseif ($_POST['action'] === 'edit') {
-        $pdo->prepare("UPDATE genres SET genre_name = ?, genre_description = ? WHERE genre_id = ?")
-            ->execute([trim($_POST['genre_name']), trim($_POST['genre_description']), $_POST['genre_id']]);
-        $success = "Genre updated!";
-    } elseif ($_POST['action'] === 'delete') {
-        $pdo->prepare("DELETE FROM genres WHERE genre_id = ?")->execute([$_POST['genre_id']]);
-        $success = "Genre deleted.";
+
+        if ($action === 'add' || $action === 'edit') {
+            $genre_id = null;
+
+            if ($action === 'edit') {
+                $genre_id = normalizeGenreId(
+                    $_POST['genre_id'] ?? null
+                );
+
+                $check = $pdo->prepare(
+                    'SELECT genre_id
+                     FROM genres
+                     WHERE genre_id = ?'
+                );
+                $check->execute([$genre_id]);
+
+                if (!$check->fetchColumn()) {
+                    throw new RuntimeException(
+                        'Genre not found.'
+                    );
+                }
+            }
+
+            $name = normalizeGenreText(
+                $_POST['genre_name'] ?? '',
+                'Genre name',
+                50,
+                true
+            );
+
+            $description = normalizeGenreText(
+                $_POST['genre_description'] ?? '',
+                'Genre description',
+                2000
+            );
+
+            if ($action === 'add') {
+                $insert = $pdo->prepare(
+                    'INSERT INTO genres (
+                        genre_name,
+                        genre_description
+                    ) VALUES (?, ?)'
+                );
+                $insert->execute([
+                    $name,
+                    $description,
+                ]);
+
+                $success =
+                    'Genre added successfully!';
+            } else {
+                $update = $pdo->prepare(
+                    'UPDATE genres
+                     SET genre_name = ?,
+                         genre_description = ?
+                     WHERE genre_id = ?'
+                );
+                $update->execute([
+                    $name,
+                    $description,
+                    $genre_id,
+                ]);
+
+                $success = 'Genre updated!';
+            }
+        } else {
+            $genre_id = normalizeGenreId(
+                $_POST['genre_id'] ?? null
+            );
+
+            $delete = $pdo->prepare(
+                'DELETE FROM genres
+                 WHERE genre_id = ?'
+            );
+            $delete->execute([$genre_id]);
+
+            if ($delete->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Genre not found.'
+                );
+            }
+
+            $success = 'Genre deleted.';
+        }
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
     }
 }
 
 $genres = $pdo->query("
-    SELECT g.*, COUNT(pg.product_genres_product_id) as product_count
+    SELECT
+        g.*,
+        COUNT(pg.product_genres_product_id) AS product_count
     FROM genres g
-    LEFT JOIN product_genres pg ON g.genre_id = pg.product_genres_genre_id
+    LEFT JOIN product_genres pg
+        ON g.genre_id = pg.product_genres_genre_id
     GROUP BY g.genre_id
     ORDER BY g.genre_name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
@@ -112,8 +253,9 @@ $genres = $pdo->query("
                                     ✏️ Edit
                                 </button>
                                 <form method="POST" class="inline">
+                                    <?php csrf_field(); ?>
                                     <input type="hidden" name="action" value="delete">
-                                    <input type="hidden" name="genre_id" value="<?= $genre['genre_id'] ?>">
+                                    <input type="hidden" name="genre_id" value="<?= (int) $genre['genre_id'] ?>">
                                     <button type="submit" onclick="return confirm('Delete this genre?')"
                                             class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
                                         🗑️ Delete
@@ -137,16 +279,17 @@ $genres = $pdo->query("
                 <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <form method="POST" class="p-5 space-y-4">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="genre_id" id="formId">
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Genre Name *</label>
-                    <input type="text" name="genre_name" id="formName" required
+                    <input type="text" name="genre_name" id="formName" maxlength="50" required
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white transition-colors">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Description</label>
-                    <input type="text" name="genre_description" id="formDesc"
+                    <input type="text" name="genre_description" id="formDesc" maxlength="2000"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white transition-colors">
                 </div>
                 <div class="flex gap-3">

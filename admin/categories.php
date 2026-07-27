@@ -2,37 +2,178 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_admin_or_staff();
 
 $error = '';
 $success = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'add') {
-        $name = trim($_POST['category_name']);
-        $desc = trim($_POST['category_description']);
-        if (empty($name)) {
-            $error = "Category name is required.";
-        } else {
-            $pdo->prepare("INSERT INTO categories (category_name, category_description) VALUES (?, ?)")
-                ->execute([$name, $desc]);
-            $success = "Category added successfully!";
+function normalizeCategoryText(
+    mixed $value,
+    string $label,
+    int $maxLength,
+    bool $required = false
+): string {
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
+
+    $value = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($value, 'UTF-8')
+        : strlen($value);
+
+    if ($required && $value === '') {
+        throw new RuntimeException($label . ' is required.');
+    }
+
+    if ($length > $maxLength) {
+        throw new RuntimeException(
+            $label . ' cannot exceed ' .
+            $maxLength .
+            ' characters.'
+        );
+    }
+
+    return $value;
+}
+
+function normalizeCategoryId(mixed $value): int
+{
+    $id = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    if ($id === false || $id === null) {
+        throw new RuntimeException(
+            'Invalid category.'
+        );
+    }
+
+    return $id;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
+    $action = $_POST['action'] ?? null;
+
+    try {
+        if (
+            !is_string($action) ||
+            !in_array(
+                $action,
+                ['add', 'edit', 'delete'],
+                true
+            )
+        ) {
+            throw new RuntimeException(
+                'Invalid category action.'
+            );
         }
-    } elseif ($_POST['action'] === 'edit') {
-        $pdo->prepare("UPDATE categories SET category_name = ?, category_description = ? WHERE category_id = ?")
-            ->execute([trim($_POST['category_name']), trim($_POST['category_description']), $_POST['category_id']]);
-        $success = "Category updated!";
-    } elseif ($_POST['action'] === 'delete') {
-        $pdo->prepare("DELETE FROM categories WHERE category_id = ?")->execute([$_POST['category_id']]);
-        $success = "Category deleted.";
+
+        if ($action === 'add' || $action === 'edit') {
+            $category_id = null;
+
+            if ($action === 'edit') {
+                $category_id = normalizeCategoryId(
+                    $_POST['category_id'] ?? null
+                );
+
+                $check = $pdo->prepare(
+                    'SELECT category_id
+                     FROM categories
+                     WHERE category_id = ?'
+                );
+                $check->execute([$category_id]);
+
+                if (!$check->fetchColumn()) {
+                    throw new RuntimeException(
+                        'Category not found.'
+                    );
+                }
+            }
+
+            $name = normalizeCategoryText(
+                $_POST['category_name'] ?? '',
+                'Category name',
+                50,
+                true
+            );
+
+            $description = normalizeCategoryText(
+                $_POST['category_description'] ?? '',
+                'Category description',
+                2000
+            );
+
+            if ($action === 'add') {
+                $insert = $pdo->prepare(
+                    'INSERT INTO categories (
+                        category_name,
+                        category_description
+                    ) VALUES (?, ?)'
+                );
+                $insert->execute([
+                    $name,
+                    $description,
+                ]);
+
+                $success =
+                    'Category added successfully!';
+            } else {
+                $update = $pdo->prepare(
+                    'UPDATE categories
+                     SET category_name = ?,
+                         category_description = ?
+                     WHERE category_id = ?'
+                );
+                $update->execute([
+                    $name,
+                    $description,
+                    $category_id,
+                ]);
+
+                $success = 'Category updated!';
+            }
+        } else {
+            $category_id = normalizeCategoryId(
+                $_POST['category_id'] ?? null
+            );
+
+            $delete = $pdo->prepare(
+                'DELETE FROM categories
+                 WHERE category_id = ?'
+            );
+            $delete->execute([$category_id]);
+
+            if ($delete->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Category not found.'
+                );
+            }
+
+            $success = 'Category deleted.';
+        }
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
     }
 }
 
 $categories = $pdo->query("
-    SELECT c.*, COUNT(p.product_id) as product_count
+    SELECT
+        c.*,
+        COUNT(p.product_id) AS product_count
     FROM categories c
-    LEFT JOIN products p ON c.category_id = p.product_category_id
+    LEFT JOIN products p
+        ON c.category_id = p.product_category_id
     GROUP BY c.category_id
     ORDER BY c.category_name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
@@ -112,6 +253,7 @@ $categories = $pdo->query("
                                     ✏️ Edit
                                 </button>
                                 <form method="POST" class="inline">
+                                    <?php csrf_field(); ?>
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="category_id" value="<?= $cat['category_id'] ?>">
                                     <button type="submit" onclick="return confirm('Delete this category? Products will lose their category.')"
@@ -137,16 +279,17 @@ $categories = $pdo->query("
                 <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <form method="POST" class="p-5 space-y-4">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="category_id" id="formId">
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Category Name *</label>
-                    <input type="text" name="category_name" id="formName" required
+                    <input type="text" name="category_name" id="formName" maxlength="50" required
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white transition-colors">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Description</label>
-                    <input type="text" name="category_description" id="formDesc"
+                    <input type="text" name="category_description" id="formDesc" maxlength="2000"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white transition-colors">
                 </div>
                 <div class="flex gap-3">

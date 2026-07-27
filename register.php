@@ -1,84 +1,296 @@
 <?php
 
-require_once 'includes/db.php';
-require_once 'includes/notifications.php';
+require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/csrf.php';
+require_once __DIR__ . '/includes/notifications.php';
 
 $error = '';
 $success = '';
 
+function normalizeRegistrationText(
+    mixed $value,
+    string $label,
+    int $maxLength,
+    bool $required = false
+): string {
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
+
+    $value = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($value, 'UTF-8')
+        : strlen($value);
+
+    if ($required && $value === '') {
+        throw new RuntimeException($label . ' is required.');
+    }
+
+    if ($length > $maxLength) {
+        throw new RuntimeException(
+            $label . ' cannot exceed ' .
+            $maxLength .
+            ' characters.'
+        );
+    }
+
+    return $value;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $user_name = trim($_POST['user_name']);
-    $user_gmail = trim($_POST['user_gmail']);
-    $password = $_POST['password'];
-    $confirm_password = $_POST['confirm_password'];
-    $user_first_name = trim($_POST['user_first_name']);
-    $user_last_name = trim($_POST['user_last_name']);
-    $user_phone = trim($_POST['user_phone']);
-    $user_dob = trim($_POST['user_dob']);
+    csrf_verify();
 
-    if (empty($user_name) || empty($user_gmail) || empty($password) || empty($user_first_name) || empty($user_dob)) {
-        $error = "All required fields must be filled.";
-    } elseif ($password !== $confirm_password) {
-        $error = "Passwords do not match.";
-    } elseif (!preg_match('/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/', $password)) {
-        $error = "Password must be at least 8 characters with uppercase, lowercase, number and symbol.";
-    } elseif ($user_phone && !preg_match('/^01[0-9]{8,9}$/', $user_phone)) {
-        $error = "Please enter a valid Malaysian phone number (e.g. 01234567890).";
-    } elseif (empty($user_dob)) {
-        $error = "Date of birth is required.";
-    } else {
-        // Validate age (must be at least 13)
-        $dob = new DateTime($user_dob);
-        $today = new DateTime();
-        $age = $today->diff($dob)->y;
-        if ($age < 13) {
-            $error = "You must be at least 13 years old to register.";
-        } else {
-            $stmt = $pdo->prepare("SELECT user_id FROM users WHERE user_name = ? OR user_gmail = ?");
-            $stmt->execute([$user_name, $user_gmail]);
-            if ($stmt->rowCount() > 0) {
-                $error = "Username or email already exists.";
-            } else {
-                $hashed = password_hash($password, PASSWORD_DEFAULT);
-                $pdo->prepare("INSERT INTO users (user_name, user_gmail, user_password_hash, user_first_name, user_last_name, user_phone, user_dob, user_role) VALUES (?, ?, ?, ?, ?, ?, ?, 'customer')")
-                    ->execute([$user_name, $user_gmail, $hashed, $user_first_name, $user_last_name, $user_phone, $user_dob]);
+    try {
+        $userName = normalizeRegistrationText(
+            $_POST['user_name'] ?? '',
+            'Username',
+            50,
+            true
+        );
+        $email = normalizeRegistrationText(
+            $_POST['user_gmail'] ?? '',
+            'Email',
+            100,
+            true
+        );
+        $firstName = normalizeRegistrationText(
+            $_POST['user_first_name'] ?? '',
+            'First name',
+            50,
+            true
+        );
+        $lastName = normalizeRegistrationText(
+            $_POST['user_last_name'] ?? '',
+            'Last name',
+            50
+        );
+        $phone = normalizeRegistrationText(
+            $_POST['user_phone'] ?? '',
+            'Phone number',
+            20
+        );
+        $dobInput = normalizeRegistrationText(
+            $_POST['user_dob'] ?? '',
+            'Date of birth',
+            10,
+            true
+        );
 
-                $new_user_id = $pdo->lastInsertId();
+        $password = $_POST['password'] ?? null;
+        $confirmPassword =
+            $_POST['confirm_password'] ?? null;
 
-                // Welcome notifications with voucher info
-                sendNotification($pdo, $new_user_id,
-                    'Welcome to MangaVault! 🎉',
-                    "Hi $user_first_name! Your account has been created successfully. Start exploring thousands of manga titles now!",
-                    'system'
-                );
-                sendNotification($pdo, $new_user_id,
-                    '🎟️ Welcome Gift — 10% OFF!',
-                    "Use code WELCOME10 for 10% off your first order (min RM20, max RM15 discount). Happy shopping!",
-                    'promo'
-                );
-                sendNotification($pdo, $new_user_id,
-                    '🎁 New Member Special — 20% OFF!',
-                    "Exclusive for new members! Use code NEWUSER20 for 20% off (min RM50, max RM20 discount). One-time use only!",
-                    'promo'
-                );
-                sendNotification($pdo, $new_user_id,
-                    '🎊 New Member Gift — 50% OFF!',
-                    "Welcome gift! Use code NEWMEMBER50 for 50% off your first order (min RM30, max RM25 discount). Valid for 1 month only!",
-                    'promo'
-                );
-
-                // Auto-claim welcome vouchers with 1 month expiry
-                $welcome_vouchers = $pdo->prepare("SELECT voucher_id FROM vouchers WHERE voucher_code IN ('WELCOME10', 'NEWUSER20', 'NEWMEMBER50') AND              voucher_is_active = 1");
-                $welcome_vouchers->execute();
-                $expires_at = date('Y-m-d H:i:s', strtotime('+1 month'));
-                foreach ($welcome_vouchers->fetchAll(PDO::FETCH_ASSOC) as $wv) {
-                    $pdo->prepare("INSERT IGNORE INTO user_vouchers (uv_user_id, uv_voucher_id, uv_expires_at) VALUES (?, ?, ?)")
-                        ->execute([$new_user_id, $wv['voucher_id'], $expires_at]);
-                }
-
-                $success = "Registration successful! You can now login.";
-            }
+        if (
+            !is_string($password) ||
+            !is_string($confirmPassword)
+        ) {
+            throw new RuntimeException(
+                'Invalid password input.'
+            );
         }
+
+        if (
+            strlen($password) > 72 ||
+            strlen($confirmPassword) > 72
+        ) {
+            throw new RuntimeException(
+                'Password cannot exceed 72 characters.'
+            );
+        }
+
+        if ($password !== $confirmPassword) {
+            throw new RuntimeException(
+                'Passwords do not match.'
+            );
+        }
+
+        if (
+            !preg_match(
+                '/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)' .
+                '(?=.*[\W_]).{8,72}$/',
+                $password
+            )
+        ) {
+            throw new RuntimeException(
+                'Password must be 8-72 characters ' .
+                'with uppercase, lowercase, number ' .
+                'and symbol.'
+            );
+        }
+
+        if (
+            !filter_var(
+                $email,
+                FILTER_VALIDATE_EMAIL
+            )
+        ) {
+            throw new RuntimeException(
+                'Please enter a valid email address.'
+            );
+        }
+
+        if (
+            $phone !== '' &&
+            !preg_match('/^01[0-9]{8,9}$/', $phone)
+        ) {
+            throw new RuntimeException(
+                'Please enter a valid Malaysian phone number.'
+            );
+        }
+
+        $dob = DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            $dobInput
+        );
+        $dobErrors = DateTimeImmutable::getLastErrors();
+
+        if (
+            !$dob ||
+            (
+                is_array($dobErrors) &&
+                (
+                    $dobErrors['warning_count'] > 0 ||
+                    $dobErrors['error_count'] > 0
+                )
+            ) ||
+            $dob->format('Y-m-d') !== $dobInput
+        ) {
+            throw new RuntimeException(
+                'Please enter a valid date of birth.'
+            );
+        }
+
+        $today = new DateTimeImmutable('today');
+
+        if ($dob > $today) {
+            throw new RuntimeException(
+                'Date of birth cannot be in the future.'
+            );
+        }
+
+        if ($today->diff($dob)->y < 13) {
+            throw new RuntimeException(
+                'You must be at least 13 years old to register.'
+            );
+        }
+
+        $check = $pdo->prepare(
+            'SELECT user_id
+             FROM users
+             WHERE user_name = ?
+             OR user_gmail = ?'
+        );
+        $check->execute([$userName, $email]);
+
+        if ($check->fetchColumn()) {
+            throw new RuntimeException(
+                'Username or email already exists.'
+            );
+        }
+
+        $insert = $pdo->prepare(
+            "INSERT INTO users (
+                user_name,
+                user_gmail,
+                user_password_hash,
+                user_first_name,
+                user_last_name,
+                user_phone,
+                user_dob,
+                user_role
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'customer')"
+        );
+        $insert->execute([
+            $userName,
+            $email,
+            password_hash(
+                $password,
+                PASSWORD_DEFAULT
+            ),
+            $firstName,
+            $lastName,
+            $phone,
+            $dobInput,
+        ]);
+
+        $newUserId = (int) $pdo->lastInsertId();
+
+        sendNotification(
+            $pdo,
+            $newUserId,
+            'Welcome to MangaVault! 🎉',
+            'Hi ' . $firstName .
+            '! Your account has been created successfully. ' .
+            'Start exploring thousands of manga titles now!',
+            'system'
+        );
+        sendNotification(
+            $pdo,
+            $newUserId,
+            '🎟️ Welcome Gift — 10% OFF!',
+            'Use code WELCOME10 for 10% off your first order ' .
+            '(min RM20, max RM15 discount). Happy shopping!',
+            'promo'
+        );
+        sendNotification(
+            $pdo,
+            $newUserId,
+            '🎁 New Member Special — 20% OFF!',
+            'Exclusive for new members! Use code NEWUSER20 ' .
+            'for 20% off (min RM50, max RM20 discount). ' .
+            'One-time use only!',
+            'promo'
+        );
+        sendNotification(
+            $pdo,
+            $newUserId,
+            '🎊 New Member Gift — 50% OFF!',
+            'Welcome gift! Use code NEWMEMBER50 for 50% off ' .
+            'your first order (min RM30, max RM25 discount). ' .
+            'Valid for 1 month only!',
+            'promo'
+        );
+
+        $welcomeVouchers = $pdo->prepare(
+            "SELECT voucher_id
+             FROM vouchers
+             WHERE voucher_code IN (
+                'WELCOME10',
+                'NEWUSER20',
+                'NEWMEMBER50'
+             )
+             AND voucher_is_active = 1"
+        );
+        $welcomeVouchers->execute();
+
+        $expiresAt = date(
+            'Y-m-d H:i:s',
+            strtotime('+1 month')
+        );
+
+        $claimVoucher = $pdo->prepare(
+            'INSERT IGNORE INTO user_vouchers (
+                uv_user_id,
+                uv_voucher_id,
+                uv_expires_at
+             ) VALUES (?, ?, ?)'
+        );
+
+        foreach (
+            $welcomeVouchers->fetchAll(PDO::FETCH_ASSOC)
+            as $voucher
+        ) {
+            $claimVoucher->execute([
+                $newUserId,
+                (int) $voucher['voucher_id'],
+                $expiresAt,
+            ]);
+        }
+
+        $success =
+            'Registration successful! You can now login.';
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
     }
 }
 ?>
@@ -133,16 +345,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
 
         <form method="POST" class="space-y-3" id="registerForm">
+            <?php csrf_field(); ?>
             <div class="flex gap-3">
                 <div class="flex-1">
                     <label class="block text-sm font-medium text-gray-600 mb-1">First Name <span class="text-red-500">*</span></label>
-                    <input type="text" name="user_first_name"
+                    <input type="text" name="user_first_name" maxlength="50"
                            class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
                            placeholder="John" required>
                 </div>
                 <div class="flex-1">
                     <label class="block text-sm font-medium text-gray-600 mb-1">Last Name</label>
-                    <input type="text" name="user_last_name"
+                    <input type="text" name="user_last_name" maxlength="50"
                            class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
                            placeholder="Doe">
                 </div>
@@ -150,7 +363,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div>
                 <label class="block text-sm font-medium text-gray-600 mb-1">Username <span class="text-red-500">*</span></label>
-                <input type="text" name="user_name"
+                <input type="text" name="user_name" maxlength="50"
                        class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
                        placeholder="mangalover91" required>
                 <p class="text-xs text-gray-400 mt-1">Used to identify your account publicly</p>
@@ -158,7 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div>
                 <label class="block text-sm font-medium text-gray-600 mb-1">Email Address <span class="text-red-500">*</span></label>
-                <input type="email" name="user_gmail"
+                <input type="email" name="user_gmail" maxlength="100"
                        class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
                        placeholder="you@example.com" required>
             </div>
@@ -186,7 +399,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div>
                 <label class="block text-sm font-medium text-gray-600 mb-1">Password <span class="text-red-500">*</span></label>
-                <input type="password" name="password" id="passwordInput"
+                <input type="password" name="password" id="passwordInput" minlength="8" maxlength="72"
                        class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
                        placeholder="Min 8 chars, uppercase, number & symbol" required>
                 <div id="passwordStrength" class="mt-2 space-y-1 hidden">
@@ -210,7 +423,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div>
                 <label class="block text-sm font-medium text-gray-600 mb-1">Confirm Password <span class="text-red-500">*</span></label>
-                <input type="password" name="confirm_password" id="confirmInput"
+                <input type="password" name="confirm_password" id="confirmInput" minlength="8" maxlength="72"
                        class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
                        placeholder="Repeat password" required>
                 <p id="confirmMsg" class="text-xs mt-1 hidden"></p>

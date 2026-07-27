@@ -2,62 +2,349 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_admin();
 
 $error = '';
 $success = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'add') {
-        $user_name = trim($_POST['user_name']);
-        $user_gmail = trim($_POST['user_gmail']);
-        $password = $_POST['password'];
-        $first = trim($_POST['user_first_name']);
-        $last = trim($_POST['user_last_name']);
-        $phone = trim($_POST['user_phone']);
+function normalizeStaffText(
+    mixed $value,
+    string $label,
+    int $maxLength,
+    bool $required = false
+): string {
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
 
-        if (empty($user_name) || empty($user_gmail) || empty($password) || empty($first)) {
-            $error = "All required fields must be filled.";
-        } else {
-            $check = $pdo->prepare("SELECT user_id FROM users WHERE user_name = ? OR user_gmail = ?");
-            $check->execute([$user_name, $user_gmail]);
-            if ($check->rowCount() > 0) {
-                $error = "Username or email already exists.";
-            } else {
-                // Generate staff ID: YYMM + 3 random digits
-                $yymm = date('ym');
-                do {
-                    $random = str_pad(rand(0, 999), 3, '0', STR_PAD_LEFT);
-                    $staff_id = $yymm . $random;
-                    $check_id = $pdo->prepare("SELECT user_id FROM users WHERE user_staff_id = ?");
-                    $check_id->execute([$staff_id]);
-                } while ($check_id->rowCount() > 0);
+    $value = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($value, 'UTF-8')
+        : strlen($value);
 
-                $pdo->prepare("INSERT INTO users (user_name, user_gmail, user_password_hash, user_first_name, user_last_name, user_phone, user_role, user_staff_id) VALUES (?, ?, ?, ?, ?, ?, 'staff', ?)")
-                    ->execute([$user_name, $user_gmail, password_hash($password, PASSWORD_DEFAULT), $first, $last, $phone, $staff_id]);
-                $pdo->prepare("INSERT INTO admin_logs (log_admin_id, log_action, log_target_type, log_target_id, log_details) VALUES (?, 'add_staff', 'user', ?, ?)")
-                    ->execute([$_SESSION['user_id'], $pdo->lastInsertId(), "Added staff: $user_name"]);
-                $success = "Staff account created!";
+    if ($required && $value === '') {
+        throw new RuntimeException($label . ' is required.');
+    }
+
+    if ($length > $maxLength) {
+        throw new RuntimeException(
+            $label . ' cannot exceed ' .
+            $maxLength .
+            ' characters.'
+        );
+    }
+
+    return $value;
+}
+
+function normalizeStaffUserId(mixed $value): int
+{
+    $userId = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    if ($userId === false || $userId === null) {
+        throw new RuntimeException(
+            'Invalid staff account.'
+        );
+    }
+
+    return $userId;
+}
+
+function validateStaffPassword(
+    mixed $value,
+    string $label
+): string {
+    if (!is_string($value)) {
+        throw new RuntimeException(
+            'Invalid ' . $label . '.'
+        );
+    }
+
+    $length = strlen($value);
+
+    if ($length < 8 || $length > 72) {
+        throw new RuntimeException(
+            $label .
+            ' must be between 8 and 72 characters.'
+        );
+    }
+
+    if (
+        !preg_match(
+            '/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)' .
+            '(?=.*[\W_]).{8,72}$/',
+            $value
+        )
+    ) {
+        throw new RuntimeException(
+            $label .
+            ' must include uppercase, lowercase, ' .
+            'number and symbol.'
+        );
+    }
+
+    return $value;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
+    $action = $_POST['action'] ?? null;
+
+    try {
+        if (
+            !is_string($action) ||
+            !in_array(
+                $action,
+                ['add', 'toggle', 'reset_password'],
+                true
+            )
+        ) {
+            throw new RuntimeException(
+                'Invalid staff management action.'
+            );
+        }
+
+        if ($action === 'add') {
+            $userName = normalizeStaffText(
+                $_POST['user_name'] ?? '',
+                'Username',
+                50,
+                true
+            );
+            $email = normalizeStaffText(
+                $_POST['user_gmail'] ?? '',
+                'Email',
+                100,
+                true
+            );
+            $firstName = normalizeStaffText(
+                $_POST['user_first_name'] ?? '',
+                'First name',
+                50,
+                true
+            );
+            $lastName = normalizeStaffText(
+                $_POST['user_last_name'] ?? '',
+                'Last name',
+                50
+            );
+            $phone = normalizeStaffText(
+                $_POST['user_phone'] ?? '',
+                'Phone number',
+                20
+            );
+            $password = validateStaffPassword(
+                $_POST['password'] ?? null,
+                'Password'
+            );
+
+            if (
+                !filter_var(
+                    $email,
+                    FILTER_VALIDATE_EMAIL
+                )
+            ) {
+                throw new RuntimeException(
+                    'Please enter a valid email address.'
+                );
             }
-        }
-    } elseif ($_POST['action'] === 'toggle') {
-        $pdo->prepare("UPDATE users SET user_is_active = ? WHERE user_id = ? AND user_role = 'staff'")
-            ->execute([$_POST['is_active'], $_POST['user_id']]);
-        $success = "Staff account updated.";
-    } elseif ($_POST['action'] === 'reset_password') {
-        $new_password = $_POST['new_password'];
-        if (strlen($new_password) < 6) {
-            $error = "Password must be at least 6 characters.";
+
+            if (
+                $phone !== '' &&
+                !preg_match('/^01[0-9]{8,9}$/', $phone)
+            ) {
+                throw new RuntimeException(
+                    'Please enter a valid Malaysian phone number.'
+                );
+            }
+
+            $check = $pdo->prepare(
+                'SELECT user_id
+                 FROM users
+                 WHERE user_name = ?
+                 OR user_gmail = ?'
+            );
+            $check->execute([$userName, $email]);
+
+            if ($check->fetchColumn()) {
+                throw new RuntimeException(
+                    'Username or email already exists.'
+                );
+            }
+
+            do {
+                $staffId =
+                    date('ym') .
+                    str_pad(
+                        (string) random_int(0, 999),
+                        3,
+                        '0',
+                        STR_PAD_LEFT
+                    );
+
+                $checkId = $pdo->prepare(
+                    'SELECT user_id
+                     FROM users
+                     WHERE user_staff_id = ?'
+                );
+                $checkId->execute([$staffId]);
+            } while ($checkId->fetchColumn());
+
+            $pdo->beginTransaction();
+
+            try {
+                $insert = $pdo->prepare(
+                    "INSERT INTO users (
+                        user_name,
+                        user_gmail,
+                        user_password_hash,
+                        user_first_name,
+                        user_last_name,
+                        user_phone,
+                        user_role,
+                        user_staff_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'staff', ?)"
+                );
+                $insert->execute([
+                    $userName,
+                    $email,
+                    password_hash(
+                        $password,
+                        PASSWORD_DEFAULT
+                    ),
+                    $firstName,
+                    $lastName,
+                    $phone,
+                    $staffId,
+                ]);
+
+                $newUserId = (int) $pdo->lastInsertId();
+
+                $log = $pdo->prepare(
+                    "INSERT INTO admin_logs (
+                        log_admin_id,
+                        log_action,
+                        log_target_type,
+                        log_target_id,
+                        log_details
+                    ) VALUES (
+                        ?,
+                        'add_staff',
+                        'user',
+                        ?,
+                        ?
+                    )"
+                );
+                $log->execute([
+                    (int) $_SESSION['user_id'],
+                    $newUserId,
+                    'Added staff: ' . $userName,
+                ]);
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+
+                throw $e;
+            }
+
+            $success = 'Staff account created!';
+        } elseif ($action === 'toggle') {
+            $userId = normalizeStaffUserId(
+                $_POST['user_id'] ?? null
+            );
+
+            $isActive = filter_var(
+                $_POST['is_active'] ?? null,
+                FILTER_VALIDATE_INT,
+                [
+                    'options' => [
+                        'min_range' => 0,
+                        'max_range' => 1,
+                    ],
+                ]
+            );
+
+            if ($isActive === false || $isActive === null) {
+                throw new RuntimeException(
+                    'Invalid staff account status.'
+                );
+            }
+
+            $toggle = $pdo->prepare(
+                "UPDATE users
+                 SET user_is_active = ?
+                 WHERE user_id = ?
+                 AND user_role = 'staff'"
+            );
+            $toggle->execute([
+                $isActive,
+                $userId,
+            ]);
+
+            if ($toggle->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Staff account not found or unchanged.'
+                );
+            }
+
+            $success = 'Staff account updated.';
         } else {
-            $pdo->prepare("UPDATE users SET user_password_hash = ? WHERE user_id = ? AND user_role = 'staff'")
-                ->execute([password_hash($new_password, PASSWORD_DEFAULT), $_POST['user_id']]);
-            $success = "Password reset successfully.";
+            $userId = normalizeStaffUserId(
+                $_POST['user_id'] ?? null
+            );
+            $newPassword = validateStaffPassword(
+                $_POST['new_password'] ?? null,
+                'New password'
+            );
+
+            $reset = $pdo->prepare(
+                "UPDATE users
+                 SET user_password_hash = ?
+                 WHERE user_id = ?
+                 AND user_role = 'staff'"
+            );
+            $reset->execute([
+                password_hash(
+                    $newPassword,
+                    PASSWORD_DEFAULT
+                ),
+                $userId,
+            ]);
+
+            if ($reset->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Staff account not found.'
+                );
+            }
+
+            $success =
+                'Password reset successfully.';
         }
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
     }
 }
 
-$staff = $pdo->query("SELECT * FROM users WHERE user_role = 'staff' ORDER BY user_created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+$staff = $pdo->query(
+    "SELECT *
+     FROM users
+     WHERE user_role = 'staff'
+     ORDER BY user_created_at DESC"
+)->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -150,15 +437,16 @@ $staff = $pdo->query("SELECT * FROM users WHERE user_role = 'staff' ORDER BY use
                         <td class="px-5 py-4">
                             <div class="flex gap-2">
                                 <form method="POST" class="inline">
+                                    <?php csrf_field(); ?>
                                     <input type="hidden" name="action" value="toggle">
-                                    <input type="hidden" name="user_id" value="<?= $s['user_id'] ?>">
+                                    <input type="hidden" name="user_id" value="<?= (int) $s['user_id'] ?>">
                                     <input type="hidden" name="is_active" value="<?= $s['user_is_active'] ? 0 : 1 ?>">
                                     <button type="submit"
                                             class="text-xs px-3 py-1.5 border rounded-lg transition-colors <?= $s['user_is_active'] ? 'border-red-200 text-red-600 hover:bg-red-50' : 'border-green-200 text-green-600 hover:bg-green-50' ?>">
                                         <?= $s['user_is_active'] ? 'Deactivate' : 'Activate' ?>
                                     </button>
                                 </form>
-                                <button onclick="openResetModal(<?= $s['user_id'] ?>, '<?= htmlspecialchars($s['user_name']) ?>')"
+                                <button onclick="openResetModal(<?= (int) $s['user_id'] ?>, '<?= htmlspecialchars($s['user_name']) ?>')"
                                         class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">
                                     🔑 Reset PW
                                 </button>
@@ -180,37 +468,38 @@ $staff = $pdo->query("SELECT * FROM users WHERE user_role = 'staff' ORDER BY use
                 <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <form method="POST" class="p-5 space-y-4">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="action" value="add">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">First Name *</label>
-                        <input type="text" name="user_first_name" required
+                        <input type="text" name="user_first_name" maxlength="50" required
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Last Name</label>
-                        <input type="text" name="user_last_name"
+                        <input type="text" name="user_last_name" maxlength="50"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Username *</label>
-                    <input type="text" name="user_name" required
+                    <input type="text" name="user_name" maxlength="50" required
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Email *</label>
-                    <input type="email" name="user_gmail" required
+                    <input type="email" name="user_gmail" maxlength="100" required
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Phone</label>
-                    <input type="text" name="user_phone"
+                    <input type="text" name="user_phone" maxlength="11"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Password *</label>
-                    <input type="password" name="password" required
+                    <input type="password" name="password" minlength="8" maxlength="72" required
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div class="flex gap-3">
@@ -229,11 +518,12 @@ $staff = $pdo->query("SELECT * FROM users WHERE user_role = 'staff' ORDER BY use
             <h3 class="font-black text-gray-800 mb-1">Reset Password</h3>
             <p class="text-sm text-gray-400 mb-4">For: <span id="resetUsername" class="font-semibold text-gray-700"></span></p>
             <form method="POST" class="space-y-4">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="action" value="reset_password">
                 <input type="hidden" name="user_id" id="resetUserId">
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">New Password *</label>
-                    <input type="password" name="new_password" required placeholder="Min 6 characters"
+                    <input type="password" name="new_password" minlength="8" maxlength="72" required placeholder="8-72 characters"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div class="flex gap-3">
