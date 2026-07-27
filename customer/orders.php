@@ -165,13 +165,15 @@ if ($has_pending_checkout) {
 $stmt = $pdo->prepare("
     SELECT
         o.*,
-        a.address_recipient_name,
-        a.address_street,
-        a.address_city,
-        a.address_taman
+        o.order_address_recipient_name
+            AS address_recipient_name,
+        o.order_address_taman
+            AS address_taman,
+        o.order_address_street
+            AS address_street,
+        o.order_address_city
+            AS address_city
     FROM orders o
-    LEFT JOIN addresses a
-        ON o.order_address_id = a.address_id
     WHERE o.order_user_id = ?
     ORDER BY o.order_created_at DESC
 ");
