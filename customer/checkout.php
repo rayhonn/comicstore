@@ -428,6 +428,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
     $address_id = null;
+    $address_snapshot = null;
 
     $shipping_method = trim(
         (string) (
@@ -624,10 +625,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'Please select a valid shipping address.';
             } else {
                 $address_check = $pdo->prepare("
-                    SELECT address_id
+                    SELECT
+                        address_id,
+                        address_recipient_name,
+                        address_taman,
+                        address_street,
+                        address_city,
+                        address_state,
+                        address_postal_code,
+                        address_country,
+                        address_phone
                     FROM addresses
                     WHERE address_id = ?
                     AND address_user_id = ?
+                    LIMIT 1
                 ");
 
                 $address_check->execute([
@@ -635,12 +646,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $user_id,
                 ]);
 
-                if (!$address_check->fetchColumn()) {
+                $saved_address = $address_check->fetch(
+                    PDO::FETCH_ASSOC
+                );
+
+                if (!$saved_address) {
                     $error =
                         'The selected shipping address is invalid.';
                 } else {
                     $address_id =
-                        (int) $submitted_address_id;
+                        (int) $saved_address['address_id'];
+
+                    $address_snapshot = [
+                        'recipient_name' => trim(
+                            (string) $saved_address[
+                                'address_recipient_name'
+                            ]
+                        ),
+                        'taman' => trim(
+                            (string) (
+                                $saved_address[
+                                    'address_taman'
+                                ] ?? ''
+                            )
+                        ),
+                        'street' => trim(
+                            (string) $saved_address[
+                                'address_street'
+                            ]
+                        ),
+                        'city' => trim(
+                            (string) $saved_address[
+                                'address_city'
+                            ]
+                        ),
+                        'state' => trim(
+                            (string) $saved_address[
+                                'address_state'
+                            ]
+                        ),
+                        'postal_code' => trim(
+                            (string) $saved_address[
+                                'address_postal_code'
+                            ]
+                        ),
+                        'country' => trim(
+                            (string) $saved_address[
+                                'address_country'
+                            ]
+                        ),
+                        'phone' => trim(
+                            (string) $saved_address[
+                                'address_phone'
+                            ]
+                        ),
+                    ];
                 }
             }
         } elseif ($address_option === 'new') {
@@ -755,11 +815,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $address_id =
                     (int) $pdo->lastInsertId();
+
+                $address_snapshot = [
+                    'recipient_name' => $recipient,
+                    'taman' => $taman,
+                    'street' => $street,
+                    'city' => $city,
+                    'state' => $state,
+                    'postal_code' => $postal,
+                    'country' => $country,
+                    'phone' => $phone,
+                ];
             }
         } else {
             $error =
                 'Please select a shipping address.';
         }
+    }
+
+    if (
+        $has_physical &&
+        empty($error) &&
+        $address_snapshot === null
+    ) {
+        $error =
+            'Unable to prepare the shipping address.';
     }
 
     if (empty($error)) {
@@ -775,6 +855,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             'address_id' =>
                 $address_id,
+
+            'address_snapshot' =>
+                $address_snapshot,
 
             'shipping_method' =>
                 $shipping_method,

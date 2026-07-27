@@ -280,6 +280,14 @@ function finalizePaidPaymentDraft(
                 payment_draft_total_amount,
                 payment_draft_has_physical,
                 payment_draft_address_id,
+                payment_draft_address_recipient_name,
+                payment_draft_address_taman,
+                payment_draft_address_street,
+                payment_draft_address_city,
+                payment_draft_address_state,
+                payment_draft_address_postal_code,
+                payment_draft_address_country,
+                payment_draft_address_phone,
                 payment_draft_shipping_method,
                 payment_draft_shipping_fee,
                 payment_draft_courier,
@@ -541,6 +549,105 @@ function finalizePaidPaymentDraft(
             );
         }
 
+        $hasPhysical =
+            (int) $draft[
+                'payment_draft_has_physical'
+            ] === 1;
+
+        $addressRecipientName = null;
+        $addressTaman = null;
+        $addressStreet = null;
+        $addressCity = null;
+        $addressState = null;
+        $addressPostalCode = null;
+        $addressCountry = null;
+        $addressPhone = null;
+
+        if ($hasPhysical) {
+            $addressRecipientName = trim(
+                (string) (
+                    $draft[
+                        'payment_draft_address_recipient_name'
+                    ] ?? ''
+                )
+            );
+
+            $addressTaman = trim(
+                (string) (
+                    $draft[
+                        'payment_draft_address_taman'
+                    ] ?? ''
+                )
+            );
+
+            if ($addressTaman === '') {
+                $addressTaman = null;
+            }
+
+            $addressStreet = trim(
+                (string) (
+                    $draft[
+                        'payment_draft_address_street'
+                    ] ?? ''
+                )
+            );
+
+            $addressCity = trim(
+                (string) (
+                    $draft[
+                        'payment_draft_address_city'
+                    ] ?? ''
+                )
+            );
+
+            $addressState = trim(
+                (string) (
+                    $draft[
+                        'payment_draft_address_state'
+                    ] ?? ''
+                )
+            );
+
+            $addressPostalCode = trim(
+                (string) (
+                    $draft[
+                        'payment_draft_address_postal_code'
+                    ] ?? ''
+                )
+            );
+
+            $addressCountry = trim(
+                (string) (
+                    $draft[
+                        'payment_draft_address_country'
+                    ] ?? ''
+                )
+            );
+
+            $addressPhone = trim(
+                (string) (
+                    $draft[
+                        'payment_draft_address_phone'
+                    ] ?? ''
+                )
+            );
+
+            if (
+                $addressRecipientName === '' ||
+                $addressStreet === '' ||
+                $addressCity === '' ||
+                $addressState === '' ||
+                $addressPostalCode === '' ||
+                $addressCountry === '' ||
+                $addressPhone === ''
+            ) {
+                throw new PaymentFinalizationException(
+                    'The payment draft shipping address is incomplete.'
+                );
+            }
+        }
+
+
         $confirmToken = bin2hex(
             random_bytes(32)
         );
@@ -551,6 +658,14 @@ function finalizePaidPaymentDraft(
                 order_total_amount,
                 order_has_physical,
                 order_address_id,
+                order_address_recipient_name,
+                order_address_taman,
+                order_address_street,
+                order_address_city,
+                order_address_state,
+                order_address_postal_code,
+                order_address_country,
+                order_address_phone,
                 order_shipping_method,
                 order_shipping_fee,
                 order_courier,
@@ -564,7 +679,8 @@ function finalizePaidPaymentDraft(
                 order_discount_amount
             )
             VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 'pending_confirmation',
                 ?,
                 DATE_ADD(NOW(), INTERVAL 5 MINUTE),
@@ -577,12 +693,18 @@ function finalizePaidPaymentDraft(
             $draft[
                 'payment_draft_total_amount'
             ],
-            (int) $draft[
-                'payment_draft_has_physical'
-            ],
+            $hasPhysical ? 1 : 0,
             $draft[
                 'payment_draft_address_id'
             ],
+            $addressRecipientName,
+            $addressTaman,
+            $addressStreet,
+            $addressCity,
+            $addressState,
+            $addressPostalCode,
+            $addressCountry,
+            $addressPhone,
             $draft[
                 'payment_draft_shipping_method'
             ],

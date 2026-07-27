@@ -59,6 +59,14 @@ function loadPaymentDraft(
             payment_draft_total_amount,
             payment_draft_has_physical,
             payment_draft_address_id,
+            payment_draft_address_recipient_name,
+            payment_draft_address_taman,
+            payment_draft_address_street,
+            payment_draft_address_city,
+            payment_draft_address_state,
+            payment_draft_address_postal_code,
+            payment_draft_address_country,
+            payment_draft_address_phone,
             payment_draft_shipping_method,
             payment_draft_shipping_fee,
             payment_draft_original_shipping_fee,
@@ -195,6 +203,46 @@ function loadPaymentDraft(
                 : (int) $row[
                     'payment_draft_address_id'
                 ],
+
+        'address_snapshot' =>
+            (int) $row[
+                'payment_draft_has_physical'
+            ] === 1
+                ? [
+                    'recipient_name' =>
+                        $row[
+                            'payment_draft_address_recipient_name'
+                        ],
+                    'taman' =>
+                        $row[
+                            'payment_draft_address_taman'
+                        ],
+                    'street' =>
+                        $row[
+                            'payment_draft_address_street'
+                        ],
+                    'city' =>
+                        $row[
+                            'payment_draft_address_city'
+                        ],
+                    'state' =>
+                        $row[
+                            'payment_draft_address_state'
+                        ],
+                    'postal_code' =>
+                        $row[
+                            'payment_draft_address_postal_code'
+                        ],
+                    'country' =>
+                        $row[
+                            'payment_draft_address_country'
+                        ],
+                    'phone' =>
+                        $row[
+                            'payment_draft_address_phone'
+                        ],
+                ]
+                : null,
 
         'shipping_method' =>
             $row[
@@ -671,6 +719,119 @@ function createPaymentDraft(
         );
     }
 
+    $hasPhysical = !empty(
+        $draft['has_physical']
+    );
+
+    $addressId = filter_var(
+        $draft['address_id'] ?? null,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    if ($addressId === false) {
+        $addressId = null;
+    }
+
+    $addressSnapshot =
+        $draft['address_snapshot'] ?? null;
+
+    $addressRecipientName = null;
+    $addressTaman = null;
+    $addressStreet = null;
+    $addressCity = null;
+    $addressState = null;
+    $addressPostalCode = null;
+    $addressCountry = null;
+    $addressPhone = null;
+
+    if ($hasPhysical) {
+        if (
+            $addressId === null ||
+            !is_array($addressSnapshot)
+        ) {
+            throw new PaymentDraftException(
+                'The shipping address is invalid.'
+            );
+        }
+
+        $addressRecipientName = trim(
+            (string) (
+                $addressSnapshot[
+                    'recipient_name'
+                ] ?? ''
+            )
+        );
+
+        $addressTaman = trim(
+            (string) (
+                $addressSnapshot['taman'] ?? ''
+            )
+        );
+
+        if ($addressTaman === '') {
+            $addressTaman = null;
+        }
+
+        $addressStreet = trim(
+            (string) (
+                $addressSnapshot['street'] ?? ''
+            )
+        );
+
+        $addressCity = trim(
+            (string) (
+                $addressSnapshot['city'] ?? ''
+            )
+        );
+
+        $addressState = trim(
+            (string) (
+                $addressSnapshot['state'] ?? ''
+            )
+        );
+
+        $addressPostalCode = trim(
+            (string) (
+                $addressSnapshot[
+                    'postal_code'
+                ] ?? ''
+            )
+        );
+
+        $addressCountry = trim(
+            (string) (
+                $addressSnapshot['country'] ?? ''
+            )
+        );
+
+        $addressPhone = trim(
+            (string) (
+                $addressSnapshot['phone'] ?? ''
+            )
+        );
+
+        if (
+            $addressRecipientName === '' ||
+            $addressStreet === '' ||
+            $addressCity === '' ||
+            $addressState === '' ||
+            $addressPostalCode === '' ||
+            $addressCountry === '' ||
+            $addressPhone === ''
+        ) {
+            throw new PaymentDraftException(
+                'The shipping address is incomplete.'
+            );
+        }
+    } else {
+        $addressId = null;
+    }
+
     try {
         $pdo->beginTransaction();
 
@@ -768,6 +929,14 @@ function createPaymentDraft(
                 payment_draft_total_amount,
                 payment_draft_has_physical,
                 payment_draft_address_id,
+                payment_draft_address_recipient_name,
+                payment_draft_address_taman,
+                payment_draft_address_street,
+                payment_draft_address_city,
+                payment_draft_address_state,
+                payment_draft_address_postal_code,
+                payment_draft_address_country,
+                payment_draft_address_phone,
                 payment_draft_shipping_method,
                 payment_draft_shipping_fee,
                 payment_draft_original_shipping_fee,
@@ -779,7 +948,8 @@ function createPaymentDraft(
             )
             VALUES (
                 ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?
             )
         ");
 
@@ -790,12 +960,16 @@ function createPaymentDraft(
                 (float) $draft['total'],
                 2
             ),
-            !empty(
-                $draft['has_physical']
-            )
-                ? 1
-                : 0,
-            $draft['address_id'] ?: null,
+            $hasPhysical ? 1 : 0,
+            $addressId,
+            $addressRecipientName,
+            $addressTaman,
+            $addressStreet,
+            $addressCity,
+            $addressState,
+            $addressPostalCode,
+            $addressCountry,
+            $addressPhone,
             $draft['shipping_method'],
             round(
                 (float) $draft[
