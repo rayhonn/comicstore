@@ -3,6 +3,7 @@
 require_once '../includes/db.php';
 require_once '../includes/auth.php';
 require_once '../includes/csrf.php';
+require_once '../includes/money_helper.php';
 
 require_admin();
 
@@ -10,6 +11,90 @@ date_default_timezone_set('Asia/Kuala_Lumpur');
 
 $success = '';
 $error = '';
+
+function normalizeVoucherAmounts(
+    array $input,
+    string $type
+): array {
+    if (
+        !in_array(
+            $type,
+            [
+                'percentage',
+                'fixed',
+            ],
+            true
+        )
+    ) {
+        throw new InvalidArgumentException(
+            'Please select a valid voucher type.'
+        );
+    }
+
+    try {
+        $value = moneyNormalizeDecimal(
+            (string) (
+                $input['voucher_value'] ?? ''
+            )
+        );
+
+        $minOrderRaw = trim(
+            (string) (
+                $input['voucher_min_order'] ?? ''
+            )
+        );
+
+        $minimumOrder = moneyNormalizeDecimal(
+            $minOrderRaw === ''
+                ? '0'
+                : $minOrderRaw
+        );
+
+        $maxDiscountRaw = trim(
+            (string) (
+                $input['voucher_max_discount'] ?? ''
+            )
+        );
+
+        $maximumDiscount =
+            $maxDiscountRaw === ''
+                ? null
+                : moneyNormalizeDecimal(
+                    $maxDiscountRaw
+                );
+
+        $valueSen = moneyDecimalToSen(
+            $value
+        );
+    } catch (MoneyValueException $e) {
+        throw new InvalidArgumentException(
+            'Please enter valid voucher amounts with up to two decimal places.',
+            0,
+            $e
+        );
+    }
+
+    if ($valueSen < 1) {
+        throw new InvalidArgumentException(
+            'Voucher value must be at least 0.01.'
+        );
+    }
+
+    if (
+        $type === 'percentage' &&
+        $valueSen > 10000
+    ) {
+        throw new InvalidArgumentException(
+            'Percentage voucher value cannot exceed 100.00.'
+        );
+    }
+
+    return [
+        $value,
+        $minimumOrder,
+        $maximumDiscount,
+    ];
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
@@ -19,17 +104,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'add') {
         $code = strtoupper(trim($_POST['voucher_code']));
         $type = $_POST['voucher_type'];
-        $value = floatval($_POST['voucher_value']);
-        $min_order = floatval($_POST['voucher_min_order'] ?? 0);
-        $max_discount = $_POST['voucher_max_discount'] ? floatval($_POST['voucher_max_discount']) : null;
         $usage_limit = $_POST['voucher_usage_limit'] ? intval($_POST['voucher_usage_limit']) : null;
         $start_date = $_POST['voucher_start_date'] ?: null;
         $end_date = $_POST['voucher_end_date'] ?: null;
         $is_active = isset($_POST['voucher_is_active']) ? 1 : 0;
 
-        if (empty($code) || $value <= 0) {
+        try {
+            [
+                $value,
+                $min_order,
+                $max_discount,
+            ] = normalizeVoucherAmounts(
+                $_POST,
+                $type
+            );
+        } catch (InvalidArgumentException $e) {
+            $error = $e->getMessage();
+        }
+
+        if ($error === '' && empty($code)) {
             $error = 'Code and value are required.';
-        } else {
+        }
+
+        if ($error === '') {
             $check = $pdo->prepare("SELECT voucher_id FROM vouchers WHERE voucher_code = ?");
             $check->execute([$code]);
             if ($check->rowCount() > 0) {
@@ -45,17 +142,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = $_POST['voucher_id'];
         $code = strtoupper(trim($_POST['voucher_code']));
         $type = $_POST['voucher_type'];
-        $value = floatval($_POST['voucher_value']);
-        $min_order = floatval($_POST['voucher_min_order'] ?? 0);
-        $max_discount = $_POST['voucher_max_discount'] ? floatval($_POST['voucher_max_discount']) : null;
         $usage_limit = $_POST['voucher_usage_limit'] ? intval($_POST['voucher_usage_limit']) : null;
         $start_date = $_POST['voucher_start_date'] ?: null;
         $end_date = $_POST['voucher_end_date'] ?: null;
         $is_active = isset($_POST['voucher_is_active']) ? 1 : 0;
 
-        $pdo->prepare("UPDATE vouchers SET voucher_code=?, voucher_type=?, voucher_value=?, voucher_min_order=?, voucher_max_discount=?, voucher_usage_limit=?, voucher_start_date=?, voucher_end_date=?, voucher_is_active=? WHERE voucher_id=?")
-            ->execute([$code, $type, $value, $min_order, $max_discount, $usage_limit, $start_date, $end_date, $is_active, $id]);
-        $success = 'Voucher updated!';
+        try {
+            [
+                $value,
+                $min_order,
+                $max_discount,
+            ] = normalizeVoucherAmounts(
+                $_POST,
+                $type
+            );
+        } catch (InvalidArgumentException $e) {
+            $error = $e->getMessage();
+        }
+
+        if ($error === '' && empty($code)) {
+            $error = 'Code and value are required.';
+        }
+
+        if ($error === '') {
+            $pdo->prepare("UPDATE vouchers SET voucher_code=?, voucher_type=?, voucher_value=?, voucher_min_order=?, voucher_max_discount=?, voucher_usage_limit=?, voucher_start_date=?, voucher_end_date=?, voucher_is_active=? WHERE voucher_id=?")
+                ->execute([$code, $type, $value, $min_order, $max_discount, $usage_limit, $start_date, $end_date, $is_active, $id]);
+            $success = 'Voucher updated!';
+        }
 
     } elseif ($action === 'delete') {
         $pdo->prepare("DELETE FROM vouchers WHERE voucher_id = ?")->execute([$_POST['voucher_id']]);
@@ -139,6 +252,18 @@ $vouchers = $pdo->query("
                 </thead>
                 <tbody>
                     <?php foreach ($vouchers as $v):
+                        $voucher_value_sen = moneyDecimalToSen(
+                            (string) $v['voucher_value']
+                        );
+                        $voucher_min_order_sen = moneyDecimalToSen(
+                            (string) $v['voucher_min_order']
+                        );
+                        $voucher_max_discount_sen =
+                            $v['voucher_max_discount'] === null
+                                ? null
+                                : moneyDecimalToSen(
+                                    (string) $v['voucher_max_discount']
+                                );
                         $now = new DateTime();
                         $is_expired = $v['voucher_end_date'] && new DateTime($v['voucher_end_date']) < $now;
                         $is_maxed = $v['voucher_usage_limit'] && $v['actual_usage'] >= $v['voucher_usage_limit'];
@@ -151,14 +276,25 @@ $vouchers = $pdo->query("
                         </td>
                         <td class="px-5 py-4">
                             <p class="font-bold text-red-600">
-                                <?= $v['voucher_type'] === 'percentage' ? $v['voucher_value'] . '%' : 'RM ' . number_format($v['voucher_value'], 2) ?>
+                                <?= $v['voucher_type'] === 'percentage'
+                                    ? $v['voucher_value'] . '%'
+                                    : 'RM ' . moneyFormatSen(
+                                        $voucher_value_sen
+                                    ) ?>
                             </p>
-                            <?php if ($v['voucher_max_discount']): ?>
-                            <p class="text-xs text-gray-400">Max: RM <?= number_format($v['voucher_max_discount'], 2) ?></p>
+                            <?php if (
+                                $voucher_max_discount_sen !== null &&
+                                $voucher_max_discount_sen > 0
+                            ): ?>
+                            <p class="text-xs text-gray-400">Max: RM <?= moneyFormatSen($voucher_max_discount_sen) ?></p>
                             <?php endif; ?>
                         </td>
                         <td class="px-5 py-4 text-sm text-gray-600">
-                            <?= $v['voucher_min_order'] > 0 ? 'RM ' . number_format($v['voucher_min_order'], 2) : '—' ?>
+                            <?= $voucher_min_order_sen > 0
+                                ? 'RM ' . moneyFormatSen(
+                                    $voucher_min_order_sen
+                                )
+                                : '—' ?>
                         </td>
                         <td class="px-5 py-4 text-sm">
                             <span class="font-semibold text-gray-800"><?= $v['actual_usage'] ?></span>
