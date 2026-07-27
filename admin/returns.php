@@ -3,6 +3,7 @@
 require_once '../includes/db.php';
 require_once '../includes/auth.php';
 require_once '../includes/csrf.php';
+require_once '../includes/money_helper.php';
 require_once '../includes/notifications.php';
 
 require_admin_or_staff();
@@ -194,14 +195,33 @@ if (
 
     try {
         if ($action === 'approved') {
-            $refund_amount = number_format(
-                (float) $return_data[
-                    'order_item_price'
-                ] *
-                (int) $return_data[
-                    'order_item_quantity'
-                ],
-                2
+            $refund_quantity = (int) $return_data[
+                'order_item_quantity'
+            ];
+
+            $refund_unit_price_sen =
+                moneyDecimalToSen(
+                    (string) $return_data[
+                        'order_item_price'
+                    ]
+                );
+
+            if (
+                $refund_quantity <= 0 ||
+                $refund_unit_price_sen >
+                    intdiv(
+                        9999999999,
+                        $refund_quantity
+                    )
+            ) {
+                throw new RuntimeException(
+                    'Return refund amount is invalid.'
+                );
+            }
+
+            $refund_amount = moneyFormatSen(
+                $refund_unit_price_sen *
+                $refund_quantity
             );
 
             sendNotification(
@@ -355,7 +375,16 @@ $counts = [
                         <div class="flex items-center gap-4 text-xs text-gray-400 mb-3">
                             <span>Customer: <span class="font-semibold text-gray-600"><?= htmlspecialchars($r['user_first_name'] . ' ' . $r['user_last_name']) ?></span></span>
                             <span>Qty: <?= $r['order_item_quantity'] ?></span>
-                            <span>RM <?= number_format($r['order_item_price'], 2) ?></span>
+                            <span>
+                                RM
+                                <?= moneyFormatSen(
+                                    moneyDecimalToSen(
+                                        (string) $r[
+                                            'order_item_price'
+                                        ]
+                                    )
+                                ) ?>
+                            </span>
                         </div>
                         <div class="bg-gray-50 rounded-xl p-3 mb-2">
                             <p class="text-xs font-semibold text-gray-500 mb-1">Return Reason:</p>

@@ -3,6 +3,7 @@
 require_once '../includes/db.php';
 require_once '../includes/auth.php';
 require_once '../includes/csrf.php';
+require_once '../includes/money_helper.php';
 require_once '../includes/notifications.php';
 
 require_staff();
@@ -170,14 +171,33 @@ if (
 
     try {
         if ($action === 'approved') {
-            $refund_amount = number_format(
-                (float) $return_data[
-                    'order_item_price'
-                ] *
-                (int) $return_data[
-                    'order_item_quantity'
-                ],
-                2
+            $refund_quantity = (int) $return_data[
+                'order_item_quantity'
+            ];
+
+            $refund_unit_price_sen =
+                moneyDecimalToSen(
+                    (string) $return_data[
+                        'order_item_price'
+                    ]
+                );
+
+            if (
+                $refund_quantity <= 0 ||
+                $refund_unit_price_sen >
+                    intdiv(
+                        9999999999,
+                        $refund_quantity
+                    )
+            ) {
+                throw new RuntimeException(
+                    'Return refund amount is invalid.'
+                );
+            }
+
+            $refund_amount = moneyFormatSen(
+                $refund_unit_price_sen *
+                $refund_quantity
             );
 
             sendNotification(
