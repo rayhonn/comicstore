@@ -62,6 +62,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 )
                 AND user_is_active = 1
                 AND user_role IN ('admin', 'staff')
+                AND (
+                    user_role = 'staff'
+                    OR (
+                        user_role = 'admin'
+                        AND user_admin_level IN (
+                            'staff_admin',
+                            'senior_admin'
+                        )
+                    )
+                )
             ");
 
             $statement->execute([
@@ -108,9 +118,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['role'] =
                     $user['user_role'];
 
-                $_SESSION['admin_level'] =
-                    $user['user_admin_level'] ??
-                    'senior_admin';
+                if (
+                    $user['user_role'] === 'admin'
+                ) {
+                    $_SESSION['admin_level'] =
+                        (string) $user[
+                            'user_admin_level'
+                        ];
+                }
 
                 if (
                     $user['user_role'] === 'admin'
