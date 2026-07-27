@@ -22,6 +22,61 @@ function redirectInvoicePage(string $message): void
     exit;
 }
 
+function requirePositiveRequestId(
+    int $input_type,
+    string $name,
+    string $error_message
+): int {
+    $value = filter_input(
+        $input_type,
+        $name,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    if ($value === false || $value === null) {
+        redirectInvoicePage($error_message);
+    }
+
+    return (int) $value;
+}
+
+function requireInvoiceText(
+    mixed $value,
+    string $label,
+    int $max_length
+): string {
+    if (!is_string($value)) {
+        redirectInvoicePage(
+            "$label is invalid."
+        );
+    }
+
+    $normalized = trim($value);
+
+    if ($normalized === '') {
+        redirectInvoicePage(
+            "$label is required."
+        );
+    }
+
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($normalized, 'UTF-8')
+        : strlen($normalized);
+
+    if ($length > $max_length) {
+        redirectInvoicePage(
+            "$label cannot exceed $max_length characters."
+        );
+    }
+
+    return $normalized;
+}
+
 // Mark mismatched invoice as paid — senior admin only
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
@@ -38,21 +93,17 @@ if (
         );
     }
 
-    $invoice_id = filter_input(
+    $invoice_id = requirePositiveRequestId(
         INPUT_POST,
         'invoice_id',
-        FILTER_VALIDATE_INT
+        'Invalid invoice.'
     );
 
-    $override_reason = trim(
-        $_POST['override_reason'] ?? ''
+    $override_reason = requireInvoiceText(
+        $_POST['override_reason'] ?? null,
+        'Override reason',
+        2000
     );
-
-    if (!$invoice_id || $override_reason === '') {
-        redirectInvoicePage(
-            'A valid invoice and override reason are required.'
-        );
-    }
 
     $stmt = $pdo->prepare(
         "UPDATE supplier_invoices
@@ -85,15 +136,11 @@ if (
 ) {
     csrf_verify();
 
-    $invoice_id = filter_input(
+    $invoice_id = requirePositiveRequestId(
         INPUT_POST,
         'invoice_id',
-        FILTER_VALIDATE_INT
+        'Invalid invoice.'
     );
-
-    if (!$invoice_id) {
-        redirectInvoicePage('Invalid invoice.');
-    }
 
     $stmt = $pdo->prepare(
         "UPDATE supplier_invoices
@@ -120,21 +167,17 @@ if (
 ) {
     csrf_verify();
 
-    $invoice_id = filter_input(
+    $invoice_id = requirePositiveRequestId(
         INPUT_POST,
         'invoice_id',
-        FILTER_VALIDATE_INT
+        'Invalid invoice.'
     );
 
-    $reason = trim(
-        $_POST['reject_reason'] ?? ''
+    $reason = requireInvoiceText(
+        $_POST['reject_reason'] ?? null,
+        'Rejection reason',
+        2000
     );
-
-    if (!$invoice_id || $reason === '') {
-        redirectInvoicePage(
-            'A valid invoice and rejection reason are required.'
-        );
-    }
 
     $stmt = $pdo->prepare(
         "UPDATE supplier_invoices
@@ -163,23 +206,17 @@ if (
 ) {
     csrf_verify();
 
-    $invoice_id = filter_input(
+    $invoice_id = requirePositiveRequestId(
         INPUT_POST,
         'invoice_id',
-        FILTER_VALIDATE_INT
+        'Invalid invoice or credit note.'
     );
 
-    $return_id = filter_input(
+    $return_id = requirePositiveRequestId(
         INPUT_POST,
         'return_id',
-        FILTER_VALIDATE_INT
+        'Invalid invoice or credit note.'
     );
-
-    if (!$invoice_id || !$return_id) {
-        redirectInvoicePage(
-            'Invalid invoice or credit note.'
-        );
-    }
 
     try {
         $pdo->beginTransaction();
@@ -316,15 +353,11 @@ if (
 ) {
     csrf_verify();
 
-    $invoice_id = filter_input(
+    $invoice_id = requirePositiveRequestId(
         INPUT_POST,
         'invoice_id',
-        FILTER_VALIDATE_INT
+        'Invalid invoice.'
     );
-
-    if (!$invoice_id) {
-        redirectInvoicePage('Invalid invoice.');
-    }
 
     try {
         $pdo->beginTransaction();
@@ -405,13 +438,18 @@ if (
 // Handle download receipt
 if (isset($_GET['download_receipt'])) {
     require_once '../vendor/autoload.php';
-        $invoice_id = filter_input(
+    $invoice_id = filter_input(
         INPUT_GET,
         'download_receipt',
-        FILTER_VALIDATE_INT
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
     );
 
-    if (!$invoice_id) {
+    if ($invoice_id === false || $invoice_id === null) {
         header('Location: supplier_invoices.php');
         exit;
     }
@@ -889,7 +927,7 @@ foreach ($available_credits as $c) {
                 <?php csrf_field(); ?>
                 <input type="hidden" name="mark_paid_confirm" value="1">
                 <input type="hidden" name="invoice_id" id="overrideInvoiceId">
-                <textarea name="override_reason" rows="3" required placeholder="Required: Explain why you are proceeding despite the mismatch (e.g. 'Confirmed with supplier via phone — correct amount is RM1,000 due to partial delivery')"
+                <textarea name="override_reason" rows="3" maxlength="2000" required placeholder="Required: Explain why you are proceeding despite the mismatch (e.g. 'Confirmed with supplier via phone — correct amount is RM1,000 due to partial delivery')"
                         class="w-full px-4 py-2.5 border-2 border-red-200 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none mb-4"></textarea>
                 <div class="flex gap-3">
                     <button type="button" onclick="closeOverrideModal()"
@@ -921,7 +959,7 @@ foreach ($available_credits as $c) {
                 <?php csrf_field(); ?>
                 <input type="hidden" name="reject_invoice" value="1">
                 <input type="hidden" name="invoice_id" id="rejectInvoiceId">
-                <textarea name="reject_reason" rows="3" required placeholder="e.g. Amount does not match PO total. Please verify and resubmit."
+                <textarea name="reject_reason" rows="3" maxlength="2000" required placeholder="e.g. Amount does not match PO total. Please verify and resubmit."
                         class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none mb-4"></textarea>
                 <div class="flex gap-3">
                     <button type="button" onclick="closeRejectModal()"

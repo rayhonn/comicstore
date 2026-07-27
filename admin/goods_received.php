@@ -218,6 +218,16 @@ if (
                 );
             }
 
+            $reason_length = function_exists('mb_strlen')
+                ? mb_strlen($reason, 'UTF-8')
+                : strlen($reason);
+
+            if ($reason_length > 255) {
+                throw new RuntimeException(
+                    'A rejection reason cannot exceed 255 characters.'
+                );
+            }
+
             $processed_items[] = [
                 'po_item_id' => $po_item_id,
                 'product_id' =>
@@ -813,6 +823,7 @@ if (
                                         <input
                                             type="text"
                                             name="reject_reason[<?= (int) $item['po_item_id'] ?>]"
+                                            maxlength="255"
                                             placeholder="e.g. Torn cover, water damage"
                                             class="w-full px-3 py-2 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400"
                                         >

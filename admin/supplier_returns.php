@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/money_helper.php';
 
 require_admin();
@@ -47,6 +48,34 @@ function get_return_items($pdo, $return_id) {
     return $items->fetchAll(PDO::FETCH_ASSOC);
 }
 
+function normalizeResolutionNotes(
+    mixed $value
+): string {
+    if (!is_string($value)) {
+        $_SESSION['flash_error'] =
+            'Resolution notes are invalid.';
+
+        header('Location: supplier_returns.php');
+        exit;
+    }
+
+    $notes = trim($value);
+
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($notes, 'UTF-8')
+        : strlen($notes);
+
+    if ($length > 2000) {
+        $_SESSION['flash_error'] =
+            'Resolution notes cannot exceed 2000 characters.';
+
+        header('Location: supplier_returns.php');
+        exit;
+    }
+
+    return $notes;
+}
+
 // ------------------------------------------------------------
 // Action: Issue Credit Note (resolves an acknowledged return)
 // ------------------------------------------------------------
@@ -54,6 +83,8 @@ if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['issue_credit_note'])
 ) {
+    csrf_verify();
+
     $return_id = filter_var(
         $_POST['return_id'] ?? null,
         FILTER_VALIDATE_INT,
@@ -70,10 +101,8 @@ if (
         )
     );
 
-    $notes = trim(
-        (string) (
-            $_POST['resolution_notes'] ?? ''
-        )
+    $notes = normalizeResolutionNotes(
+        $_POST['resolution_notes'] ?? ''
     );
 
     if ($return_id === false) {
@@ -318,6 +347,8 @@ if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['create_replacement_po'])
 ) {
+    csrf_verify();
+
     $return_id = filter_var(
         $_POST['return_id'] ?? null,
         FILTER_VALIDATE_INT,
@@ -328,10 +359,8 @@ if (
         ]
     );
 
-    $notes = trim(
-        (string) (
-            $_POST['resolution_notes'] ?? ''
-        )
+    $notes = normalizeResolutionNotes(
+        $_POST['resolution_notes'] ?? ''
     );
 
     if ($return_id === false) {
@@ -637,6 +666,8 @@ if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['reject_dispute'])
 ) {
+    csrf_verify();
+
     $return_id = filter_var(
         $_POST['return_id'] ?? null,
         FILTER_VALIDATE_INT,
@@ -647,10 +678,8 @@ if (
         ]
     );
 
-    $notes = trim(
-        (string) (
-            $_POST['resolution_notes'] ?? ''
-        )
+    $notes = normalizeResolutionNotes(
+        $_POST['resolution_notes'] ?? ''
     );
 
     if (!$is_senior) {
@@ -1173,8 +1202,9 @@ unset($r);
 
                     <div class="space-y-3">
                         <form method="POST">
+                            <?php csrf_field(); ?>
                             <input type="hidden" name="issue_credit_note" value="1">
-                            <input type="hidden" name="return_id" value="<?= $ret['return_id'] ?>">
+                            <input type="hidden" name="return_id" value="<?= (int) $ret['return_id'] ?>">
                             <div class="border-2 border-gray-100 rounded-xl p-4">
                                 <p class="text-sm font-bold text-gray-700 mb-2">💳 Issue Credit Note</p>
                                 <div class="grid grid-cols-2 gap-2 mb-2">
@@ -1189,7 +1219,7 @@ unset($r);
                                            class="px-3 py-2 border-2 border-gray-100 rounded-lg text-sm focus:outline-none focus:border-blue-400">
                                 </div>
                                 <?php if ($ret['return_status'] === 'escalated'): ?>
-                                <textarea name="resolution_notes" rows="2" required placeholder="Justification for upholding the dispute (required)"
+                                <textarea name="resolution_notes" rows="2" maxlength="2000" required placeholder="Justification for upholding the dispute (required)"
                                           class="w-full px-3 py-2 border-2 border-gray-100 rounded-lg text-xs focus:outline-none focus:border-blue-400 resize-none mb-2"></textarea>
                                 <?php endif; ?>
                                 <button type="submit" class="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold py-2 rounded-lg text-sm transition-colors">
@@ -1199,13 +1229,14 @@ unset($r);
                         </form>
 
                         <form method="POST">
+                            <?php csrf_field(); ?>
                             <input type="hidden" name="create_replacement_po" value="1">
-                            <input type="hidden" name="return_id" value="<?= $ret['return_id'] ?>">
+                            <input type="hidden" name="return_id" value="<?= (int) $ret['return_id'] ?>">
                             <div class="border-2 border-gray-100 rounded-xl p-4">
                                 <p class="text-sm font-bold text-gray-700 mb-2">📦 Create Replacement PO</p>
                                 <p class="text-xs text-gray-400 mb-2">Generates a confirmed PO for the same items/quantities — process via Goods Received once it arrives.</p>
                                 <?php if ($ret['return_status'] === 'escalated'): ?>
-                                <textarea name="resolution_notes" rows="2" required placeholder="Justification for upholding the dispute (required)"
+                                <textarea name="resolution_notes" rows="2" maxlength="2000" required placeholder="Justification for upholding the dispute (required)"
                                           class="w-full px-3 py-2 border-2 border-gray-100 rounded-lg text-xs focus:outline-none focus:border-purple-400 resize-none mb-2"></textarea>
                                 <?php endif; ?>
                                 <button type="submit" class="w-full bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold py-2 rounded-lg text-sm transition-colors">
@@ -1216,12 +1247,13 @@ unset($r);
 
                         <?php if ($ret['return_status'] === 'escalated'): ?>
                         <form method="POST">
+                            <?php csrf_field(); ?>
                             <input type="hidden" name="reject_dispute" value="1">
-                            <input type="hidden" name="return_id" value="<?= $ret['return_id'] ?>">
+                            <input type="hidden" name="return_id" value="<?= (int) $ret['return_id'] ?>">
                             <div class="border-2 border-red-100 rounded-xl p-4">
                                 <p class="text-sm font-bold text-red-700 mb-2">↩️ Reject Dispute — Supplier Was Right</p>
                                 <p class="text-xs text-gray-400 mb-2">Restores stock and PO total as if these items were always good.</p>
-                                <textarea name="resolution_notes" rows="2" required placeholder="Justification for reversing the return (required)"
+                                <textarea name="resolution_notes" rows="2" maxlength="2000" required placeholder="Justification for reversing the return (required)"
                                           class="w-full px-3 py-2 border-2 border-gray-100 rounded-lg text-xs focus:outline-none focus:border-red-400 resize-none mb-2"></textarea>
                                 <button type="submit" class="w-full bg-red-50 hover:bg-red-100 text-red-700 font-semibold py-2 rounded-lg text-sm transition-colors">
                                     Reverse Return & Restore Stock
