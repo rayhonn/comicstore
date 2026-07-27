@@ -21,16 +21,32 @@ if (
     $poId = filter_input(
         INPUT_POST,
         'po_id',
-        FILTER_VALIDATE_INT
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
     );
 
-    if (!$poId) {
-        $_SESSION['flash_error'] = 'Invalid purchase order.';
+    $action = $_POST['po_action'] ?? null;
+
+    if (
+        $poId === false ||
+        $poId === null ||
+        !is_string($action) ||
+        !in_array(
+            $action,
+            ['confirm', 'cancel'],
+            true
+        )
+    ) {
+        $_SESSION['flash_error'] =
+            'Invalid purchase order action.';
+
         header('Location: purchase_orders.php');
         exit;
     }
-
-    $action = $_POST['po_action'];
 
     if ($action === 'confirm') {
         $stmt = $pdo->prepare(
@@ -166,7 +182,7 @@ $pos = $pdo->query("
                         <td class="px-5 py-4 text-xs text-gray-400"><?= date('d M Y', strtotime($po['po_created_at'])) ?></td>
                         <td class="px-5 py-4 text-center">
                             <div class="flex items-center justify-center gap-2">
-                                <a href="po_detail.php?id=<?= $po['po_id'] ?>" class="text-xs text-blue-600 hover:underline font-semibold">View</a>
+                                <a href="po_detail.php?id=<?= (int) $po['po_id'] ?>" class="text-xs text-blue-600 hover:underline font-semibold">View</a>
                                 <?php if ($po['po_status'] === 'sent'): ?>
                                 <span class="text-gray-300">|</span>
                                 <form method="POST" class="inline">
@@ -215,7 +231,7 @@ $pos = $pdo->query("
                                 <?php endif; ?>
                                 <?php if ($po['po_status'] === 'confirmed'): ?>
                                 <span class="text-gray-300">|</span>
-                                <a href="goods_received.php?po_id=<?= $po['po_id'] ?>" class="text-xs text-purple-600 hover:underline font-semibold">Receive Goods</a>
+                                <a href="goods_received.php?po_id=<?= (int) $po['po_id'] ?>" class="text-xs text-purple-600 hover:underline font-semibold">Receive Goods</a>
                                 <?php endif; ?>
                             </div>
                         </td>

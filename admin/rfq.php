@@ -34,8 +34,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_rfq'])) {
 
     $product_ids = is_array($_POST['product_id'] ?? null) ? $_POST['product_id'] : [];
     $quantities = is_array($_POST['quantity'] ?? null) ? $_POST['quantity'] : [];
-    $supplier_ids = is_array($_POST['supplier_ids'] ?? null) ? $_POST['supplier_ids'] : [];
-    $notes = trim((string) ($_POST['notes'] ?? ''));
+    $supplier_ids = is_array($_POST['supplier_ids'] ?? null)
+        ? $_POST['supplier_ids']
+        : [];
+
+    $raw_notes = $_POST['notes'] ?? '';
+
+    if (!is_string($raw_notes)) {
+        $error = 'RFQ notes are invalid.';
+        $notes = '';
+    } else {
+        $notes = trim($raw_notes);
+        $notes_length = function_exists('mb_strlen')
+            ? mb_strlen($notes, 'UTF-8')
+            : strlen($notes);
+
+        if ($notes_length > 2000) {
+            $error =
+                'RFQ notes cannot exceed 2000 characters.';
+        }
+    }
 
     $submitted_pr_id = null;
     if (($_POST['from_pr_id'] ?? '') !== '') {
@@ -344,7 +362,7 @@ $suppliers = $pdo->query("
                         </td>
                         <td class="px-5 py-4 text-xs text-gray-400"><?= date('d M Y', strtotime($r['rfq_created_at'])) ?></td>
                         <td class="px-5 py-4 text-center">
-                            <a href="quotations.php?rfq_id=<?= $r['rfq_id'] ?>" class="text-xs text-blue-600 hover:underline font-semibold">
+                            <a href="quotations.php?rfq_id=<?= (int) $r['rfq_id'] ?>" class="text-xs text-blue-600 hover:underline font-semibold">
                                 View / Enter Quotes →
                             </a>
                         </td>
@@ -370,7 +388,7 @@ $suppliers = $pdo->query("
             <form method="POST" id="rfqForm">
                 <?php csrf_field(); ?>
                 <input type="hidden" name="create_rfq" value="1">
-                <input type="hidden" name="from_pr_id" value="<?= $from_pr_id ?? '' ?>">
+                <input type="hidden" name="from_pr_id" value="<?= $from_pr_id !== null ? (int) $from_pr_id : '' ?>">
 
                 <div class="mb-5">
                     <div class="flex items-center justify-between mb-2">
@@ -390,7 +408,7 @@ $suppliers = $pdo->query("
                     <div class="grid grid-cols-2 gap-2">
                         <?php foreach ($suppliers as $s): ?>
                         <label class="flex items-center gap-2 p-3 border-2 border-gray-100 rounded-xl cursor-pointer hover:border-red-300 transition-colors has-[:checked]:border-red-500 has-[:checked]:bg-red-50">
-                            <input type="checkbox" name="supplier_ids[]" value="<?= $s['supplier_id'] ?>" class="accent-red-600">
+                            <input type="checkbox" name="supplier_ids[]" value="<?= (int) $s['supplier_id'] ?>" class="accent-red-600">
                             <div class="min-w-0">
                                 <span class="text-sm text-gray-700"><?= htmlspecialchars($s['supplier_name']) ?></span>
                                 <?php if ($s['avg_lead_time'] !== null): ?>
@@ -405,7 +423,7 @@ $suppliers = $pdo->query("
 
                 <div class="mb-5">
                     <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Notes (Optional)</label>
-                    <textarea name="notes" rows="2" placeholder="Any special requirements..."
+                    <textarea name="notes" rows="2" maxlength="2000" placeholder="Any special requirements..."
                             class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none"></textarea>
                 </div>
 
@@ -555,11 +573,11 @@ $suppliers = $pdo->query("
     <?php if ($from_pr): ?>
     window.addEventListener('DOMContentLoaded', function() {
         openRfqModal();
-        document.getElementById('pid-1').value = <?= $from_pr['pr_product_id'] ?>;
+        document.getElementById('pid-1').value = <?= (int) $from_pr['pr_product_id'] ?>;
         document.getElementById('label-1').textContent = <?= json_encode($from_pr['product_title']) ?>;
         document.getElementById('label-1').classList.remove('text-gray-400');
         document.getElementById('label-1').classList.add('text-gray-800');
-        document.querySelector('input[name="quantity[]"]').value = <?= $from_pr['pr_suggested_quantity'] ?>;
+        document.querySelector('input[name="quantity[]"]').value = <?= (int) $from_pr['pr_suggested_quantity'] ?>;
     });
     <?php endif; ?>
     </script>

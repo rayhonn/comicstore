@@ -8,19 +8,159 @@ require_once __DIR__ . '/../includes/csrf.php';
 $error = '';
 $success = '';
 
-// Handle Add/Edit
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_supplier'])) {
-    csrf_verify();
-    $name = trim($_POST['supplier_name'] ?? '');
-    $contact = trim($_POST['supplier_contact_person'] ?? '');
-    $phone = trim($_POST['supplier_phone'] ?? '');
-    $email = trim($_POST['supplier_email'] ?? '');
-    $address = trim($_POST['supplier_address'] ?? '');
-    $supplier_id = $_POST['supplier_id'] ?? null;
+function normalizeSupplierInput(
+    mixed $value,
+    string $label,
+    int $max_length,
+    bool $required = false
+): string {
+    if (!is_string($value)) {
+        throw new RuntimeException(
+            "$label is invalid."
+        );
+    }
 
-    if (empty($name)) {
-        $error = 'Supplier name is required.';
-    } else {
+    $normalized = trim($value);
+
+    if ($required && $normalized === '') {
+        throw new RuntimeException(
+            "$label is required."
+        );
+    }
+
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($normalized, 'UTF-8')
+        : strlen($normalized);
+
+    if ($length > $max_length) {
+        throw new RuntimeException(
+            "$label cannot exceed $max_length characters."
+        );
+    }
+
+    return $normalized;
+}
+
+// Handle Add/Edit
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['save_supplier'])
+) {
+    csrf_verify();
+
+    try {
+        $name = normalizeSupplierInput(
+            $_POST['supplier_name'] ?? null,
+            'Supplier name',
+            150,
+            true
+        );
+
+        $contact = normalizeSupplierInput(
+            $_POST['supplier_contact_person'] ?? '',
+            'Contact person',
+            100
+        );
+
+        $phone = normalizeSupplierInput(
+            $_POST['supplier_phone'] ?? '',
+            'Phone number',
+            20
+        );
+
+        $email = normalizeSupplierInput(
+            $_POST['supplier_email'] ?? '',
+            'Email address',
+            100
+        );
+
+        $address = normalizeSupplierInput(
+            $_POST['supplier_address'] ?? '',
+            'Supplier address',
+            2000
+        );
+
+        $username = normalizeSupplierInput(
+            $_POST['supplier_username'] ?? '',
+            'Supplier username',
+            50
+        );
+
+        $plain_password = normalizeSupplierInput(
+            $_POST['supplier_password'] ?? '',
+            'Supplier password',
+            72
+        );
+
+        if (
+            $plain_password !== '' &&
+            strlen($plain_password) > 72
+        ) {
+            throw new RuntimeException(
+                'Supplier password cannot exceed 72 bytes.'
+            );
+        }
+
+        if (
+            $email !== '' &&
+            filter_var(
+                $email,
+                FILTER_VALIDATE_EMAIL
+            ) === false
+        ) {
+            throw new RuntimeException(
+                'Enter a valid supplier email address.'
+            );
+        }
+
+        $supplier_id = null;
+        $raw_supplier_id =
+            $_POST['supplier_id'] ?? '';
+
+        if ($raw_supplier_id !== '') {
+            $supplier_id = filter_var(
+                $raw_supplier_id,
+                FILTER_VALIDATE_INT,
+                [
+                    'options' => [
+                        'min_range' => 1,
+                    ],
+                ]
+            );
+
+            if ($supplier_id === false) {
+                throw new RuntimeException(
+                    'Invalid supplier.'
+                );
+            }
+
+            $supplier_id = (int) $supplier_id;
+
+            $supplier_exists = $pdo->prepare(
+                "SELECT supplier_id
+                 FROM suppliers
+                 WHERE supplier_id = ?"
+            );
+            $supplier_exists->execute([
+                $supplier_id,
+            ]);
+
+            if (!$supplier_exists->fetchColumn()) {
+                throw new RuntimeException(
+                    'Supplier not found.'
+                );
+            }
+        }
+
+        $username =
+            $username !== ''
+                ? $username
+                : null;
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
+    }
+
+    if ($error === '') {
         // Check duplicate supplier name (excluding current one if editing)
         $dup_check = $pdo->prepare("SELECT supplier_id FROM suppliers WHERE supplier_name = ? AND supplier_id != ?");
         $dup_check->execute([$name, $supplier_id ?? 0]);
@@ -49,11 +189,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_supplier'])) {
             }
         }
 
-        $username = trim($_POST['supplier_username'] ?? '');
-        $username = !empty($username) ? $username : null;
-        $plain_password = trim($_POST['supplier_password'] ?? '');
+        if ($username !== null) {
+            $dup_username = $pdo->prepare(
+                "SELECT supplier_id
+                 FROM suppliers
+                 WHERE supplier_username = ?
+                 AND supplier_id != ?"
+            );
+            $dup_username->execute([
+                $username,
+                $supplier_id ?? 0,
+            ]);
 
-        if ($supplier_id) {
+            if ($dup_username->fetch()) {
+                $error =
+                    'This username is already used by another supplier.';
+                goto skip_save;
+            }
+        }
+
+        if ($supplier_id !== null) {
             if (!empty($plain_password)) {
                 $hashed = password_hash($plain_password, PASSWORD_DEFAULT);
                 $pdo->prepare("UPDATE suppliers SET supplier_name=?, supplier_contact_person=?, supplier_phone=?, supplier_email=?, supplier_address=?,         supplier_username=?, supplier_password=? WHERE supplier_id=?")
@@ -100,10 +255,15 @@ if (
     $sid = filter_input(
         INPUT_POST,
         'supplier_id',
-        FILTER_VALIDATE_INT
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
     );
 
-    if (!$sid) {
+    if ($sid === false || $sid === null) {
         $_SESSION['flash_error'] = 'Invalid supplier.';
         header('Location: suppliers.php');
         exit;
@@ -254,7 +414,7 @@ $suppliers = $pdo->query("
                         </td>
                         <td class="px-5 py-4 text-center">
                             <div class="flex flex-col items-center gap-1">
-                                <a href="supplier_performance.php?id=<?= $s['supplier_id'] ?>" class="text-xs text-purple-600 hover:underline font-semibold">History</a>
+                                <a href="supplier_performance.php?id=<?= (int) $s['supplier_id'] ?>" class="text-xs text-purple-600 hover:underline font-semibold">History</a>
                                 <div class="flex items-center gap-2">
                                     <button onclick='openEditModal(<?= json_encode($s) ?>)'
                                             class="text-xs text-blue-600 hover:underline font-semibold">Edit</button>
@@ -310,33 +470,33 @@ $suppliers = $pdo->query("
                 <div class="space-y-4">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Supplier Name *</label>
-                        <input type="text" name="supplier_name" id="form_name" required
+                        <input type="text" name="supplier_name" id="form_name" maxlength="150" required
                                placeholder="e.g. Popular Book Distribution Sdn Bhd"
                                class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Contact Person</label>
-                        <input type="text" name="supplier_contact_person" id="form_contact"
+                        <input type="text" name="supplier_contact_person" id="form_contact" maxlength="100"
                                placeholder="e.g. Mr. Tan"
                                class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors">
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Phone</label>
-                            <input type="text" name="supplier_phone" id="form_phone"
+                            <input type="text" name="supplier_phone" id="form_phone" maxlength="20"
                                    placeholder="03-12345678"
                                    class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors">
                         </div>
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Email</label>
-                            <input type="email" name="supplier_email" id="form_email"
+                            <input type="email" name="supplier_email" id="form_email" maxlength="100"
                                    placeholder="supplier@email.com"
                                    class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors">
                         </div>
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Address</label>
-                        <textarea name="supplier_address" id="form_address" rows="2"
+                        <textarea name="supplier_address" id="form_address" rows="2" maxlength="2000"
                                   placeholder="Full address"
                                   class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none"></textarea>
                     </div>
@@ -345,7 +505,7 @@ $suppliers = $pdo->query("
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Username</label>
-                                <input type="text" name="supplier_username" id="form_username"
+                                <input type="text" name="supplier_username" id="form_username" maxlength="50"
                                     placeholder="e.g. popularbook"
                                     class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors">
                             </div>
@@ -353,7 +513,7 @@ $suppliers = $pdo->query("
                                 <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
                                     Password <span id="passwordHint" class="text-gray-300 normal-case"></span>
                                 </label>
-                                <input type="text" name="supplier_password" id="form_password"
+                                <input type="password" name="supplier_password" id="form_password" maxlength="72" autocomplete="new-password"
                                     placeholder="Leave blank to keep current"
                                     class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors">
                             </div>
