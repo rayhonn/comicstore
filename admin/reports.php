@@ -999,7 +999,7 @@ $query_parameters = http_build_query([
     <style>
         body {
             opacity: 0;
-            animation: fadeIn 0.3s ease forwards;
+            animation: fadeIn 0.25s ease forwards;
         }
 
         @keyframes fadeIn {
@@ -1012,113 +1012,393 @@ $query_parameters = http_build_query([
             display: none;
         }
 
+        .report-tabs::-webkit-scrollbar {
+            height: 5px;
+        }
+
+        .report-tabs::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 999px;
+        }
+
+        @page {
+            size: A4 landscape;
+            margin: 13mm 12mm 16mm;
+        }
+
         @media print {
+            aside,
             nav,
-            .no-print {
+            header,
+            .no-print,
+            #adminSidebarOverlay,
+            #adminSharedSidebar {
                 display: none !important;
+            }
+
+            html,
+            body {
+                width: 100%;
+                min-height: auto;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #ffffff !important;
+                color: #172033 !important;
+                opacity: 1 !important;
+                print-color-adjust: exact;
+                -webkit-print-color-adjust: exact;
             }
 
             .print-only {
                 display: block !important;
             }
 
-            body {
-                opacity: 1;
-                background: white !important;
-            }
-
             .report-wrapper {
                 max-width: none !important;
+                width: 100% !important;
+                margin: 0 !important;
                 padding: 0 !important;
             }
 
-            .report-table {
-                box-shadow: none !important;
-                border: 1px solid #d1d5db;
+            .print-report-header {
+                border-bottom: 4px solid #dc2626;
+                padding-bottom: 14px;
+                margin-bottom: 16px;
             }
 
-            th,
-            td {
+            .print-brand {
+                display: flex !important;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 24px;
+            }
+
+            .print-brand-name {
+                font-size: 25px !important;
+                font-weight: 900 !important;
+                letter-spacing: 0.03em;
+                color: #17243d !important;
+            }
+
+            .print-brand-name span {
+                color: #dc2626 !important;
+            }
+
+            .print-report-title {
+                margin-top: 10px;
+                font-size: 18px !important;
+                font-weight: 800 !important;
+                color: #17243d !important;
+            }
+
+            .print-report-description {
+                margin-top: 3px;
                 font-size: 9px !important;
+                color: #64748b !important;
+            }
+
+            .print-meta {
+                min-width: 245px;
+                border: 1px solid #dbe1ea;
+                border-radius: 8px;
+                overflow: hidden;
+                font-size: 8.5px !important;
+            }
+
+            .print-meta-row {
+                display: flex !important;
+                justify-content: space-between;
+                gap: 18px;
+                padding: 6px 9px;
+                border-bottom: 1px solid #e5e7eb;
+            }
+
+            .print-meta-row:last-child {
+                border-bottom: 0;
+            }
+
+            .print-meta-label {
+                color: #64748b !important;
+                font-weight: 600;
+            }
+
+            .print-meta-value {
+                color: #17243d !important;
+                font-weight: 700;
+                text-align: right;
+            }
+
+            .print-summary {
+                display: grid !important;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 9px;
+                margin-bottom: 16px;
+            }
+
+            .print-summary-card {
+                border: 1px solid #dbe1ea;
+                border-left: 4px solid #dc2626;
+                border-radius: 7px;
+                padding: 9px 11px;
+                background: #f8fafc !important;
+            }
+
+            .print-summary-label {
+                font-size: 7.5px !important;
+                font-weight: 700 !important;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: #64748b !important;
+            }
+
+            .print-summary-value {
+                margin-top: 3px;
+                font-size: 15px !important;
+                font-weight: 900 !important;
+                color: #17243d !important;
+            }
+
+            .print-summary-detail {
+                margin-top: 2px;
+                font-size: 7.5px !important;
+                color: #94a3b8 !important;
+            }
+
+            .report-table {
+                border: 1px solid #cbd5e1 !important;
+                border-radius: 0 !important;
+                box-shadow: none !important;
+                overflow: visible !important;
+            }
+
+            .screen-report-heading {
+                display: none !important;
+            }
+
+            .report-table-scroll {
+                overflow: visible !important;
+            }
+
+            table {
+                width: 100% !important;
+                border-collapse: collapse !important;
+                table-layout: auto;
+            }
+
+            thead {
+                display: table-header-group;
+            }
+
+            tfoot {
+                display: table-footer-group;
+            }
+
+            tr {
+                page-break-inside: avoid;
+            }
+
+            th {
+                background: #17243d !important;
+                color: #ffffff !important;
+                border: 1px solid #31415f !important;
+                font-size: 7.4px !important;
+                font-weight: 800 !important;
+                letter-spacing: 0.045em;
+                padding: 6px 5px !important;
+                white-space: normal !important;
+            }
+
+            td {
+                border: 1px solid #dbe1ea !important;
+                color: #334155 !important;
+                font-size: 7.6px !important;
+                line-height: 1.3 !important;
                 padding: 5px !important;
+                white-space: normal !important;
+                vertical-align: top;
+            }
+
+            tbody tr:nth-child(even) td {
+                background: #f8fafc !important;
+            }
+
+            td span {
+                border: 0 !important;
+                border-radius: 4px !important;
+                padding: 2px 4px !important;
+                font-size: 7px !important;
+            }
+
+            .print-footer {
+                display: flex !important;
+                position: fixed;
+                bottom: -10mm;
+                left: 0;
+                right: 0;
+                justify-content: space-between;
+                border-top: 1px solid #cbd5e1;
+                padding-top: 5px;
+                font-size: 7px !important;
+                color: #64748b !important;
             }
         }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="bg-[#f5f6fa] min-h-screen">
 
     <?php include '../includes/admin_navbar.php'; ?>
 
     <div
-        class="report-wrapper max-w-7xl mx-auto px-6 py-8"
+        class="report-wrapper max-w-7xl mx-auto px-5 md:px-7 py-6"
     >
-        <div class="print-only mb-6">
-            <h1 class="text-2xl font-black">
-                MangaVault
-            </h1>
-            <p class="font-semibold">
-                <?= htmlspecialchars(
-                    $report_types[$report]['title'],
-                    ENT_QUOTES,
-                    'UTF-8'
-                ) ?>
-            </p>
-            <p class="text-sm">
-                <?= $report === 'inventory'
-                    ? 'Generated: ' .
-                        date('d M Y, h:i A')
-                    : 'Date range: ' .
-                        htmlspecialchars(
-                            $from_date,
-                            ENT_QUOTES,
-                            'UTF-8'
-                        ) .
-                        ' to ' .
-                        htmlspecialchars(
-                            $to_date,
+        <section class="print-only print-report-header">
+            <div class="print-brand">
+                <div>
+                    <div class="print-brand-name">
+                        MANGA<span>VAULT</span>
+                    </div>
+                    <div class="print-report-title">
+                        <?= htmlspecialchars(
+                            $report_types[$report]['title'],
                             ENT_QUOTES,
                             'UTF-8'
                         ) ?>
-            </p>
+                    </div>
+                    <div class="print-report-description">
+                        <?= htmlspecialchars(
+                            $report_types[$report]['description'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                    </div>
+                </div>
+
+                <div class="print-meta">
+                    <div class="print-meta-row">
+                        <span class="print-meta-label">
+                            Report Period
+                        </span>
+                        <span class="print-meta-value">
+                            <?= $report === 'inventory'
+                                ? 'Current inventory position'
+                                : htmlspecialchars(
+                                    date(
+                                        'd M Y',
+                                        strtotime($from_date)
+                                    ) .
+                                    ' – ' .
+                                    date(
+                                        'd M Y',
+                                        strtotime($to_date)
+                                    ),
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
+                        </span>
+                    </div>
+
+                    <div class="print-meta-row">
+                        <span class="print-meta-label">
+                            Generated
+                        </span>
+                        <span class="print-meta-value">
+                            <?= date('d M Y, h:i A') ?>
+                        </span>
+                    </div>
+
+                    <div class="print-meta-row">
+                        <span class="print-meta-label">
+                            Prepared By
+                        </span>
+                        <span class="print-meta-value">
+                            <?= htmlspecialchars(
+                                (string) (
+                                    $_SESSION['user_name']
+                                    ?? 'MangaVault Admin'
+                                ),
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>
+                        </span>
+                    </div>
+
+                    <div class="print-meta-row">
+                        <span class="print-meta-label">
+                            Total Records
+                        </span>
+                        <span class="print-meta-value">
+                            <?= number_format(count($rows)) ?>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="print-only print-summary">
+            <?php foreach ($summary_cards as $card): ?>
+            <div class="print-summary-card">
+                <div class="print-summary-label">
+                    <?= htmlspecialchars(
+                        $card['label'],
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </div>
+                <div class="print-summary-value">
+                    <?= htmlspecialchars(
+                        $card['value'],
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </div>
+                <div class="print-summary-detail">
+                    <?= htmlspecialchars(
+                        $card['detail'],
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </section>
+
+        <div class="print-only print-footer">
+            <span>
+                MangaVault Administration · Business Report
+            </span>
+            <span>
+                Generated <?= date('d M Y') ?>
+            </span>
         </div>
 
-        <div
-            class="no-print flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-7"
+        <section
+            class="no-print flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5"
         >
             <div>
                 <h1
-                    class="text-2xl font-black text-gray-800"
+                    class="text-2xl font-black text-gray-900"
                 >
-                    📊 Reports Center
+                    Reports Center
                 </h1>
-                <p class="text-sm text-gray-500 mt-1">
-                    Preview, download and print business reports.
+                <p class="text-sm text-gray-400 mt-1">
+                    Generate and export operational reports.
                 </p>
             </div>
 
-            <div class="flex flex-wrap gap-2">
-                <a
-                    href="reports.php?<?= htmlspecialchars(
-                        $query_parameters . '&export=csv',
-                        ENT_QUOTES,
-                        'UTF-8'
-                    ) ?>"
-                    class="bg-green-600 hover:bg-green-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-colors"
-                >
-                    ⬇ Download CSV
-                </a>
-                <button
-                    type="button"
-                    onclick="window.print()"
-                    class="bg-[#1e2d4a] hover:bg-[#162338] text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-colors"
-                >
-                    🖨 Print / Save PDF
-                </button>
+            <div
+                class="inline-flex items-center gap-2 text-xs text-gray-400"
+            >
+                <span
+                    class="w-2 h-2 rounded-full bg-emerald-500"
+                ></span>
+                <?= number_format(count($rows)) ?>
+                records in the current report
             </div>
-        </div>
+        </section>
 
-        <div
-            class="no-print grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6"
+        <nav
+            class="no-print report-tabs flex gap-2 overflow-x-auto pb-2 mb-4"
+            aria-label="Report types"
         >
             <?php foreach ($report_types as $key => $config): ?>
             <a
@@ -1128,189 +1408,58 @@ $query_parameters = http_build_query([
                     'to' => $to_date,
                 ]) ?>"
                 class="<?= $report === $key
-                    ? 'border-red-500 bg-red-50'
-                    : 'border-transparent bg-white hover:border-red-200' ?> border-2 rounded-2xl p-4 shadow-sm transition-all"
+                    ? 'bg-[#17243d] text-white border-[#17243d]'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-red-300 hover:text-red-600' ?> flex-shrink-0 inline-flex items-center gap-2 border rounded-xl px-3.5 py-2.5 text-xs font-bold transition-colors"
             >
-                <div class="text-2xl mb-2">
-                    <?= $config['icon'] ?>
-                </div>
-                <p
-                    class="text-sm font-bold text-gray-800"
-                >
+                <span><?= $config['icon'] ?></span>
+                <span>
                     <?= htmlspecialchars(
-                        $config['title'],
+                        str_replace(
+                            [
+                                ' Report',
+                                'Supplier Performance',
+                            ],
+                            [
+                                '',
+                                'Suppliers',
+                            ],
+                            $config['title']
+                        ),
                         ENT_QUOTES,
                         'UTF-8'
                     ) ?>
-                </p>
-                <p
-                    class="text-xs text-gray-400 mt-1 leading-relaxed"
-                >
-                    <?= htmlspecialchars(
-                        $config['description'],
-                        ENT_QUOTES,
-                        'UTF-8'
-                    ) ?>
-                </p>
+                </span>
             </a>
             <?php endforeach; ?>
-        </div>
+        </nav>
 
-        <div
-            class="no-print bg-white rounded-2xl shadow-sm p-5 mb-6"
+        <section
+            class="no-print bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-5"
         >
             <form
                 method="GET"
-                class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+                class="flex flex-col xl:flex-row xl:items-end gap-3"
             >
-                <div>
-                    <label
-                        class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2"
-                    >
-                        Report Type
-                    </label>
-                    <select
-                        name="report"
-                        class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400"
-                    >
-                        <?php foreach (
-                            $report_types as $key => $config
-                        ): ?>
-                        <option
-                            value="<?= htmlspecialchars(
-                                $key,
-                                ENT_QUOTES,
-                                'UTF-8'
-                            ) ?>"
-                            <?= $report === $key
-                                ? 'selected'
-                                : '' ?>
-                        >
-                            <?= htmlspecialchars(
-                                $config['title'],
-                                ENT_QUOTES,
-                                'UTF-8'
-                            ) ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <div>
-                    <label
-                        class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2"
-                    >
-                        Start Date
-                    </label>
-                    <input
-                        type="date"
-                        name="from"
-                        value="<?= htmlspecialchars(
-                            $from_date,
-                            ENT_QUOTES,
-                            'UTF-8'
-                        ) ?>"
-                        class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400"
-                    >
-                </div>
-
-                <div>
-                    <label
-                        class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2"
-                    >
-                        End Date
-                    </label>
-                    <input
-                        type="date"
-                        name="to"
-                        value="<?= htmlspecialchars(
-                            $to_date,
-                            ENT_QUOTES,
-                            'UTF-8'
-                        ) ?>"
-                        class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400"
-                    >
-                </div>
-
-                <button
-                    type="submit"
-                    class="bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors"
-                >
-                    Generate Report
-                </button>
-            </form>
-
-            <?php if ($report === 'inventory'): ?>
-            <p class="text-xs text-gray-400 mt-3">
-                Inventory reports always show the current stock level.
-            </p>
-            <?php endif; ?>
-        </div>
-
-        <?php if ($error !== ''): ?>
-        <div
-            class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-6"
-        >
-            ❌ <?= htmlspecialchars(
-                $error,
-                ENT_QUOTES,
-                'UTF-8'
-            ) ?>
-        </div>
-        <?php endif; ?>
-
-        <div
-            class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"
-        >
-            <?php foreach ($summary_cards as $card): ?>
-            <div
-                class="bg-white rounded-2xl shadow-sm p-5"
-            >
-                <p
-                    class="text-xs font-semibold text-gray-400 uppercase tracking-wide"
-                >
-                    <?= htmlspecialchars(
-                        $card['label'],
+                <input
+                    type="hidden"
+                    name="report"
+                    value="<?= htmlspecialchars(
+                        $report,
                         ENT_QUOTES,
                         'UTF-8'
-                    ) ?>
-                </p>
-                <p
-                    class="text-2xl font-black text-gray-800 mt-2"
+                    ) ?>"
                 >
-                    <?= htmlspecialchars(
-                        $card['value'],
-                        ENT_QUOTES,
-                        'UTF-8'
-                    ) ?>
-                </p>
-                <p class="text-xs text-gray-400 mt-1">
-                    <?= htmlspecialchars(
-                        $card['detail'],
-                        ENT_QUOTES,
-                        'UTF-8'
-                    ) ?>
-                </p>
-            </div>
-            <?php endforeach; ?>
-        </div>
 
-        <div
-            class="report-table bg-white rounded-2xl shadow-sm overflow-hidden"
-        >
-            <div
-                class="px-5 py-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-2"
-            >
-                <div>
-                    <h2
-                        class="font-black text-gray-800"
+                <div class="flex-1 min-w-0">
+                    <p
+                        class="text-sm font-black text-gray-800"
                     >
                         <?= htmlspecialchars(
                             $report_types[$report]['title'],
                             ENT_QUOTES,
                             'UTF-8'
                         ) ?>
-                    </h2>
+                    </p>
                     <p class="text-xs text-gray-400 mt-1">
                         <?= htmlspecialchars(
                             $report_types[$report]['description'],
@@ -1319,24 +1468,196 @@ $query_parameters = http_build_query([
                         ) ?>
                     </p>
                 </div>
+
+                <div
+                    class="grid grid-cols-1 sm:grid-cols-2 gap-3 xl:w-[410px]"
+                >
+                    <label>
+                        <span
+                            class="block text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1.5"
+                        >
+                            Start Date
+                        </span>
+                        <input
+                            type="date"
+                            name="from"
+                            value="<?= htmlspecialchars(
+                                $from_date,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>"
+                            class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400"
+                        >
+                    </label>
+
+                    <label>
+                        <span
+                            class="block text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1.5"
+                        >
+                            End Date
+                        </span>
+                        <input
+                            type="date"
+                            name="to"
+                            value="<?= htmlspecialchars(
+                                $to_date,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>"
+                            class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400"
+                        >
+                    </label>
+                </div>
+
+                <div
+                    class="flex flex-wrap sm:flex-nowrap gap-2"
+                >
+                    <button
+                        type="submit"
+                        class="bg-red-600 hover:bg-red-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-colors"
+                    >
+                        Generate
+                    </button>
+
+                    <a
+                        href="reports.php?<?= htmlspecialchars(
+                            $query_parameters .
+                            '&export=csv',
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>"
+                        class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-colors"
+                    >
+                        Download CSV
+                    </a>
+
+                    <button
+                        type="button"
+                        onclick="window.print()"
+                        class="bg-[#17243d] hover:bg-[#223454] text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-colors"
+                    >
+                        Save PDF
+                    </button>
+                </div>
+            </form>
+
+            <?php if ($report === 'inventory'): ?>
+            <p class="text-xs text-amber-600 mt-3">
+                Inventory reports display the current stock
+                position and are not affected by the date range.
+            </p>
+            <?php endif; ?>
+        </section>
+
+        <?php if ($error !== ''): ?>
+        <div
+            class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5"
+        >
+            <?= htmlspecialchars(
+                $error,
+                ENT_QUOTES,
+                'UTF-8'
+            ) ?>
+        </div>
+        <?php endif; ?>
+
+        <section
+            class="no-print grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5"
+        >
+            <?php foreach ($summary_cards as $card): ?>
+            <div
+                class="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3.5 flex items-center justify-between gap-4"
+            >
+                <div class="min-w-0">
+                    <p
+                        class="text-[10px] font-bold text-gray-400 uppercase tracking-wide"
+                    >
+                        <?= htmlspecialchars(
+                            $card['label'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                    </p>
+                    <p
+                        class="text-xl font-black text-gray-900 mt-1"
+                    >
+                        <?= htmlspecialchars(
+                            $card['value'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                    </p>
+                </div>
+
+                <p
+                    class="hidden lg:block text-[11px] text-gray-400 text-right max-w-36"
+                >
+                    <?= htmlspecialchars(
+                        $card['detail'],
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </p>
+            </div>
+            <?php endforeach; ?>
+        </section>
+
+        <section
+            class="report-table bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"
+        >
+            <div
+                class="screen-report-heading px-5 py-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-2"
+            >
+                <div>
+                    <h2
+                        class="font-black text-gray-900"
+                    >
+                        <?= htmlspecialchars(
+                            $report_types[$report]['title'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                    </h2>
+                    <p class="text-xs text-gray-400 mt-1">
+                        <?= $report === 'inventory'
+                            ? 'Current inventory position'
+                            : htmlspecialchars(
+                                date(
+                                    'd M Y',
+                                    strtotime($from_date)
+                                ) .
+                                ' – ' .
+                                date(
+                                    'd M Y',
+                                    strtotime($to_date)
+                                ),
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>
+                    </p>
+                </div>
+
                 <p class="text-xs text-gray-400">
-                    Generated:
-                    <?= date('d M Y, h:i A') ?>
+                    Generated <?= date('d M Y, h:i A') ?>
                 </p>
             </div>
 
             <?php if (!$rows): ?>
-            <div class="text-center py-16">
-                <div class="text-5xl mb-4">📄</div>
-                <p class="text-gray-500 font-medium">
-                    No records found for this report.
+            <div class="text-center py-14">
+                <div
+                    class="w-12 h-12 mx-auto rounded-2xl bg-gray-100 text-gray-400 flex items-center justify-center text-xl mb-3"
+                >
+                    ▤
+                </div>
+                <p class="text-gray-600 font-semibold">
+                    No records found
                 </p>
                 <p class="text-xs text-gray-400 mt-1">
-                    Try changing the selected date range.
+                    Change the report period and generate it again.
                 </p>
             </div>
             <?php else: ?>
-            <div class="overflow-x-auto">
+            <div class="report-table-scroll overflow-x-auto">
                 <table class="w-full">
                     <thead>
                         <tr class="bg-gray-50">
@@ -1344,7 +1665,7 @@ $query_parameters = http_build_query([
                                 $columns as $label
                             ): ?>
                             <th
-                                class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                                class="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap"
                             >
                                 <?= htmlspecialchars(
                                     $label,
@@ -1355,19 +1676,17 @@ $query_parameters = http_build_query([
                             <?php endforeach; ?>
                         </tr>
                     </thead>
+
                     <tbody>
-                        <?php foreach (
-                            array_slice($rows, 0, 200)
-                            as $row
-                        ): ?>
+                        <?php foreach ($rows as $row): ?>
                         <tr
-                            class="border-t border-gray-50 hover:bg-gray-50"
+                            class="border-t border-gray-100 hover:bg-gray-50/60"
                         >
                             <?php foreach (
                                 $columns as $key => $label
                             ): ?>
                             <td
-                                class="px-4 py-3 text-sm text-gray-600 align-top <?= $key === 'return_reason'
+                                class="px-4 py-3 text-xs text-gray-600 align-top <?= $key === 'return_reason'
                                     ? 'min-w-64 max-w-md whitespace-normal'
                                     : 'whitespace-nowrap' ?>"
                             >
@@ -1378,6 +1697,7 @@ $query_parameters = http_build_query([
                                         $row[$key] ?? null
                                     );
                                 ?>
+
                                 <?php if (
                                     in_array(
                                         $key,
@@ -1394,7 +1714,7 @@ $query_parameters = http_build_query([
                                     )
                                 ): ?>
                                 <span
-                                    class="inline-flex px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-semibold capitalize"
+                                    class="inline-flex px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 text-[10px] font-bold capitalize"
                                 >
                                     <?= htmlspecialchars(
                                         $display_value,
@@ -1416,19 +1736,8 @@ $query_parameters = http_build_query([
                     </tbody>
                 </table>
             </div>
-
-            <?php if (count($rows) > 200): ?>
-            <div
-                class="no-print px-5 py-3 bg-yellow-50 border-t border-yellow-100 text-xs text-yellow-700"
-            >
-                The page preview shows the first 200 rows.
-                Download CSV to obtain all
-                <?= number_format(count($rows)) ?>
-                rows.
-            </div>
             <?php endif; ?>
-            <?php endif; ?>
-        </div>
+        </section>
     </div>
 
 </body>
