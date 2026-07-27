@@ -6,6 +6,7 @@ use PHPMailer\PHPMailer\Exception;
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 require_once __DIR__ . '/../includes/voucher_helper.php';
 require_once __DIR__ . '/../includes/stock_helper.php';
 require_once __DIR__ . '/../includes/config.php';
@@ -232,16 +233,25 @@ if (
                     $current_tier,
                 ]);
 
-                $multiplier =
-                    (float) (
-                        $tier_stmt->fetchColumn()
-                        ?: 1
+                $multiplier_hundredths =
+                    moneyDecimalToSen(
+                        (string) (
+                            $tier_stmt->fetchColumn()
+                            ?: '1.0'
+                        )
                     );
 
-                $points_earned = (int) floor(
-                    (float) $order[
-                        'order_total_amount'
-                    ] * $multiplier
+                $order_total_sen =
+                    moneyDecimalToSen(
+                        (string) $order[
+                            'order_total_amount'
+                        ]
+                    );
+
+                $points_earned = intdiv(
+                    $order_total_sen *
+                    $multiplier_hundredths,
+                    10000
                 );
 
                 $update_user = $pdo->prepare("
@@ -291,13 +301,13 @@ if (
                     ]);
                 }
 
-                $new_spending =
-                    (float) $user_row[
-                        'user_lifetime_spending'
-                    ] +
-                    (float) $order[
-                        'order_total_amount'
-                    ];
+                $new_spending_sen =
+                    moneyDecimalToSen(
+                        (string) $user_row[
+                            'user_lifetime_spending'
+                        ]
+                    ) +
+                    $order_total_sen;
 
                 $all_tiers = $pdo->query("
                     SELECT
@@ -311,10 +321,12 @@ if (
 
                 foreach ($all_tiers as $tier) {
                     if (
-                        $new_spending >=
-                        (float) $tier[
-                            'tier_min_spending'
-                        ]
+                        $new_spending_sen >=
+                        moneyDecimalToSen(
+                            (string) $tier[
+                                'tier_min_spending'
+                            ]
+                        )
                     ) {
                         $new_tier =
                             $tier['tier_name'];
@@ -574,11 +586,13 @@ if ($order && $confirmed) {
                         'order_item_quantity'
                     ];
 
-                $price = number_format(
-                    (float) $item[
-                        'order_item_price'
-                    ] * $quantity,
-                    2
+                $price = moneyFormatSen(
+                    moneyDecimalToSen(
+                        (string) $item[
+                            'order_item_price'
+                        ]
+                    ) *
+                    $quantity
                 );
 
                 $items_html .= "
@@ -591,11 +605,12 @@ if ($order && $confirmed) {
                 ";
             }
 
-            $total = number_format(
-                (float) $order[
-                    'order_total_amount'
-                ],
-                2
+            $total = moneyFormatSen(
+                moneyDecimalToSen(
+                    (string) $order[
+                        'order_total_amount'
+                    ]
+                )
             );
 
             $mail = new PHPMailer(true);
