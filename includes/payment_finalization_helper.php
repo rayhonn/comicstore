@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/vendor/autoload.php';
 require_once __DIR__ . '/stripe_config.php';
+require_once __DIR__ . '/money_helper.php';
 require_once __DIR__ . '/payment_draft_helper.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/notifications.php';
@@ -164,9 +165,10 @@ function fulfillStripeCheckoutSession(
         )
     );
 
-    $expectedAmount = (int) round(
-        (float) $draft['total'] * 100
-    );
+    $expectedAmount =
+        moneyDecimalToSen(
+            (string) $draft['total']
+        );
 
     if (
         $expectedAmount <= 0 ||
@@ -360,11 +362,12 @@ function finalizePaidPaymentDraft(
             );
         }
 
-        $draftAmount = (int) round(
-            (float) $draft[
-                'payment_draft_total_amount'
-            ] * 100
-        );
+        $draftAmount =
+            moneyDecimalToSen(
+                (string) $draft[
+                    'payment_draft_total_amount'
+                ]
+            );
 
         $draftCurrency = strtolower(
             (string) $draft[

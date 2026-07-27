@@ -6,6 +6,7 @@ require_customer();
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stripe_config.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 require_once __DIR__ .
     '/../includes/payment_draft_helper.php';
 require_once __DIR__ . '/../includes/config.php';
@@ -190,11 +191,12 @@ try {
         );
     }
 
-    $expected_amount = (int) round(
-        (float) $payment_draft[
-            'total'
-        ] * 100
-    );
+    $expected_amount =
+        moneyDecimalToSen(
+            (string) $payment_draft[
+                'total'
+            ]
+        );
 
     $session_amount = (int) (
         $checkout_session->amount_total

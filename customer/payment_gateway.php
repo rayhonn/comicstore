@@ -7,6 +7,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../includes/stripe_config.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/voucher_helper.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 require_once __DIR__ .
     '/../includes/payment_draft_helper.php';
 require_once __DIR__ . '/../includes/csrf.php';
@@ -102,7 +103,38 @@ $_SESSION['payment_draft_id'] =
  */
 $_SESSION['pending_order'] = $order;
 
-$total = (float) $order['total'];
+$total_sen =
+    moneyDecimalToSen(
+        (string) $order['total']
+    );
+
+$shipping_fee_sen =
+    moneyDecimalToSen(
+        (string) $order[
+            'shipping_fee'
+        ]
+    );
+
+$original_shipping_fee_sen =
+    moneyDecimalToSen(
+        (string) $order[
+            'original_shipping_fee'
+        ]
+    );
+
+$discount_amount_sen =
+    moneyDecimalToSen(
+        (string) (
+            $order[
+                'discount_amount'
+            ] ?? '0.00'
+        )
+    );
+
+$subtotal_sen =
+    $total_sen -
+    $shipping_fee_sen +
+    $discount_amount_sen;
 
 $stripe_session_id = trim(
     (string) (
@@ -268,6 +300,13 @@ if (
     $line_items = [];
 
     foreach ($order['items'] as $item) {
+        $unit_amount_sen =
+            moneyDecimalToSen(
+                (string) $item[
+                    'product_price'
+                ]
+            );
+
         $line_items[] = [
             'price_data' => [
                 'currency' =>
@@ -285,11 +324,7 @@ if (
                 ],
 
                 'unit_amount' =>
-                    (int) round(
-                        (float) $item[
-                            'product_price'
-                        ] * 100
-                    ),
+                    $unit_amount_sen,
             ],
 
             'quantity' =>
@@ -301,9 +336,7 @@ if (
 
     if (
         !empty($order['has_physical']) &&
-        (float) $order[
-            'shipping_fee'
-        ] > 0
+        $shipping_fee_sen > 0
     ) {
         $line_items[] = [
             'price_data' => [
@@ -316,11 +349,7 @@ if (
                 ],
 
                 'unit_amount' =>
-                    (int) round(
-                        (float) $order[
-                            'shipping_fee'
-                        ] * 100
-                    ),
+                    $shipping_fee_sen,
             ],
 
             'quantity' => 1,
@@ -329,11 +358,7 @@ if (
 
     if (
         !empty($order['voucher_code']) &&
-        (float) (
-            $order[
-                'discount_amount'
-            ] ?? 0
-        ) > 0
+        $discount_amount_sen > 0
     ) {
         $line_items = [[
             'price_data' => [
@@ -350,19 +375,14 @@ if (
                             'voucher_code'
                         ] .
                         ' -RM' .
-                        number_format(
-                            (float) $order[
-                                'discount_amount'
-                            ],
-                            2
+                        moneyFormatSen(
+                            $discount_amount_sen
                         ) .
                         ')',
                 ],
 
                 'unit_amount' =>
-                    (int) round(
-                        $total * 100
-                    ),
+                    $total_sen,
             ],
 
             'quantity' => 1,
@@ -726,14 +746,15 @@ if ($has_active_stripe_session) {
                                 class="font-bold text-gray-800 text-sm"
                             >
                                 RM
-                                <?= number_format(
-                                    (float) $item[
-                                        'product_price'
-                                    ] *
+                                <?= moneyFormatSen(
+                                    moneyDecimalToSen(
+                                        (string) $item[
+                                            'product_price'
+                                        ]
+                                    ) *
                                     (int) $item[
                                         'cart_item_quantity'
-                                    ],
-                                    2
+                                    ]
                                 ) ?>
                             </p>
                         </div>
@@ -750,17 +771,8 @@ if ($has_active_stripe_session) {
 
                         <span>
                             RM
-                            <?= number_format(
-                                $total -
-                                (float) $order[
-                                    'shipping_fee'
-                                ] +
-                                (float) (
-                                    $order[
-                                        'discount_amount'
-                                    ] ?? 0
-                                ),
-                                2
+                            <?= moneyFormatSen(
+                                $subtotal_sen
                             ) ?>
                         </span>
                     </div>
@@ -779,14 +791,8 @@ if ($has_active_stripe_session) {
 
                             <?php
                             if (
-                                (float) $order[
-                                    'shipping_fee'
-                                ] === 0.0 &&
-                                isset(
-                                    $order[
-                                        'original_shipping_fee'
-                                    ]
-                                )
+                                $shipping_fee_sen === 0 &&
+                                $original_shipping_fee_sen > 0
                             ):
                             ?>
                                 <span>
@@ -794,11 +800,8 @@ if ($has_active_stripe_session) {
                                         class="line-through text-gray-400"
                                     >
                                         RM
-                                        <?= number_format(
-                                            (float) $order[
-                                                'original_shipping_fee'
-                                            ],
-                                            2
+                                        <?= moneyFormatSen(
+                                            $original_shipping_fee_sen
                                         ) ?>
                                     </span>
 
@@ -810,17 +813,8 @@ if ($has_active_stripe_session) {
                                 </span>
                             <?php
                             elseif (
-                                isset(
-                                    $order[
-                                        'original_shipping_fee'
-                                    ]
-                                ) &&
-                                (float) $order[
-                                    'original_shipping_fee'
-                                ] >
-                                (float) $order[
-                                    'shipping_fee'
-                                ]
+                                $original_shipping_fee_sen >
+                                $shipping_fee_sen
                             ):
                             ?>
                                 <span>
@@ -828,11 +822,8 @@ if ($has_active_stripe_session) {
                                         class="line-through text-gray-400"
                                     >
                                         RM
-                                        <?= number_format(
-                                            (float) $order[
-                                                'original_shipping_fee'
-                                            ],
-                                            2
+                                        <?= moneyFormatSen(
+                                            $original_shipping_fee_sen
                                         ) ?>
                                     </span>
 
@@ -840,25 +831,17 @@ if ($has_active_stripe_session) {
                                         class="text-green-600 font-bold ml-1"
                                     >
                                         RM
-                                        <?= number_format(
-                                            (float) $order[
-                                                'shipping_fee'
-                                            ],
-                                            2
+                                        <?= moneyFormatSen(
+                                            $shipping_fee_sen
                                         ) ?>
                                     </span>
                                 </span>
                             <?php else: ?>
                                 <span>
-                                    <?= (float) $order[
-                                        'shipping_fee'
-                                    ] > 0
+                                    <?= $shipping_fee_sen > 0
                                         ? 'RM ' .
-                                            number_format(
-                                                (float) $order[
-                                                    'shipping_fee'
-                                                ],
-                                                2
+                                            moneyFormatSen(
+                                                $shipping_fee_sen
                                             )
                                         : 'Free' ?>
                                 </span>
@@ -871,11 +854,7 @@ if ($has_active_stripe_session) {
                         !empty(
                             $order['voucher_code']
                         ) &&
-                        (float) (
-                            $order[
-                                'discount_amount'
-                            ] ?? 0
-                        ) > 0
+                        $discount_amount_sen > 0
                     ):
                     ?>
                         <div
@@ -894,11 +873,8 @@ if ($has_active_stripe_session) {
 
                             <span>
                                 -RM
-                                <?= number_format(
-                                    (float) $order[
-                                        'discount_amount'
-                                    ],
-                                    2
+                                <?= moneyFormatSen(
+                                    $discount_amount_sen
                                 ) ?>
                             </span>
                         </div>
@@ -911,9 +887,8 @@ if ($has_active_stripe_session) {
 
                         <span class="text-red-600">
                             RM
-                            <?= number_format(
-                                $total,
-                                2
+                            <?= moneyFormatSen(
+                                $total_sen
                             ) ?>
                         </span>
                     </div>
@@ -1038,9 +1013,8 @@ if ($has_active_stripe_session) {
                             class="text-2xl font-black text-red-600"
                         >
                             RM
-                            <?= number_format(
-                                $total,
-                                2
+                            <?= moneyFormatSen(
+                                $total_sen
                             ) ?>
                         </p>
                     </div>
