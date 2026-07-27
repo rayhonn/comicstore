@@ -61,61 +61,32 @@ if ($action === 'add') {
             }
 
             if ($max_quantity > 0) {
-                $stmt = $pdo->prepare("
-                    SELECT
-                        cart_item_id,
-                        cart_item_quantity
-                    FROM cart_items
-                    WHERE cart_item_user_id = ?
-                      AND cart_item_product_id = ?
-                    LIMIT 1
-                ");
-
-                $stmt->execute([
-                    $user_id,
-                    $product_id,
-                ]);
-
-                $existing = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                $existing_quantity = $existing
-                    ? (int)$existing['cart_item_quantity']
-                    : 0;
-
-                $new_quantity = min(
-                    $existing_quantity + $quantity,
+                $insert_quantity = min(
+                    $quantity,
                     $max_quantity
                 );
 
-                if ($existing) {
-                    $update_stmt = $pdo->prepare("
-                        UPDATE cart_items
-                        SET cart_item_quantity = ?
-                        WHERE cart_item_id = ?
-                          AND cart_item_user_id = ?
-                    ");
-
-                    $update_stmt->execute([
-                        $new_quantity,
-                        $existing['cart_item_id'],
-                        $user_id,
-                    ]);
-                } else {
-                    $insert_stmt = $pdo->prepare("
-                        INSERT INTO cart_items (
-                            cart_item_user_id,
-                            cart_item_product_id,
-                            cart_item_quantity
+                $upsert_stmt = $pdo->prepare("
+                    INSERT INTO cart_items (
+                        cart_item_user_id,
+                        cart_item_product_id,
+                        cart_item_quantity
+                    )
+                    VALUES (?, ?, ?)
+                    ON DUPLICATE KEY UPDATE
+                        cart_item_quantity = LEAST(
+                            cart_item_quantity +
+                                VALUES(cart_item_quantity),
+                            ?
                         )
-                        VALUES (?, ?, ?)
-                    ");
+                ");
 
-                    $insert_stmt->execute([
-                        $user_id,
-                        $product_id,
-                        $new_quantity,
-                    ]);
-                }
+                $upsert_stmt->execute([
+                    $user_id,
+                    $product_id,
+                    $insert_quantity,
+                    $max_quantity,
+                ]);
             }
         }
     }
