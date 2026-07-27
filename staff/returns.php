@@ -8,6 +8,27 @@ require_once '../includes/notifications.php';
 
 require_staff();
 
+function normalizeStaffReturnNote(
+    mixed $value
+): string {
+    if (!is_string($value)) {
+        http_response_code(400);
+        exit('Invalid return note.');
+    }
+
+    $note = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($note, 'UTF-8')
+        : strlen($note);
+
+    if ($length > 2000) {
+        http_response_code(400);
+        exit('Return note cannot exceed 2000 characters.');
+    }
+
+    return $note;
+}
+
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset(
@@ -28,13 +49,15 @@ if (
         ]
     );
 
-    $action = $_POST['action'] ?? '';
-    $admin_note = trim(
-        (string) ($_POST['admin_note'] ?? '')
+    $action = $_POST['action'] ?? null;
+    $admin_note = normalizeStaffReturnNote(
+        $_POST['admin_note'] ?? ''
     );
 
     if (
         $return_id === false ||
+        $return_id === null ||
+        !is_string($action) ||
         !in_array(
             $action,
             [
@@ -246,17 +269,71 @@ if (
     exit;
 }
 
-$filter = $_GET['filter'] ?? 'pending';
-$sql = "SELECT rr.*, u.user_first_name, u.user_last_name, oi.order_item_product_title AS product_title, p.product_cover_image, oi.order_item_quantity, oi.order_item_price FROM return_requests rr JOIN users u ON rr.return_user_id = u.user_id JOIN order_items oi ON rr.return_item_id = oi.order_item_id JOIN products p ON oi.order_item_product_id = p.product_id";
-if ($filter !== 'all') $sql .= " WHERE rr.return_status = " . $pdo->quote($filter);
-$sql .= " ORDER BY rr.return_created_at DESC";
-$returns = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
-
-$counts = [
-    'pending'  => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'pending'")->fetchColumn(),
-    'approved' => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'approved'")->fetchColumn(),
-    'rejected' => $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'rejected'")->fetchColumn(),
+$allowed_filters = [
+    'all',
+    'pending',
+    'approved',
+    'rejected',
 ];
+
+$filter = $_GET['filter'] ?? 'pending';
+
+if (
+    !is_string($filter) ||
+    !in_array($filter, $allowed_filters, true)
+) {
+    $filter = 'pending';
+}
+
+$sql = "
+    SELECT
+        rr.*,
+        u.user_first_name,
+        u.user_last_name,
+        oi.order_item_product_title
+            AS product_title,
+        p.product_cover_image,
+        oi.order_item_quantity,
+        oi.order_item_price
+    FROM return_requests rr
+    JOIN users u
+        ON rr.return_user_id = u.user_id
+    JOIN order_items oi
+        ON rr.return_item_id = oi.order_item_id
+    JOIN products p
+        ON oi.order_item_product_id = p.product_id
+";
+
+$params = [];
+
+if ($filter !== 'all') {
+    $sql .= " WHERE rr.return_status = ?";
+    $params[] = $filter;
+}
+
+$sql .= " ORDER BY rr.return_created_at DESC";
+
+$return_query = $pdo->prepare($sql);
+$return_query->execute($params);
+$returns = $return_query->fetchAll(PDO::FETCH_ASSOC);
+
+$counts = [];
+foreach (
+    [
+        'pending',
+        'approved',
+        'rejected',
+    ] as $count_status
+) {
+    $count_stmt = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM return_requests
+         WHERE return_status = ?"
+    );
+    $count_stmt->execute([$count_status]);
+    $counts[$count_status] =
+        (int) $count_stmt->fetchColumn();
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -285,11 +362,18 @@ $counts = [
         <?php endif; ?>
 
         <div class="flex gap-1 bg-white rounded-2xl shadow-sm p-1 mb-6 w-fit">
-            <?php foreach (['all'=>'All','pending'=>'Pending','approved'=>'Approved','rejected'=>'Rejected'] as $key => $label): ?>
-            <a href="returns.php?filter=<?= $key ?>"
+            <?php foreach (
+                [
+                    'all' => 'All',
+                    'pending' => 'Pending',
+                    'approved' => 'Approved',
+                    'rejected' => 'Rejected',
+                ] as $key => $label
+            ): ?>
+            <a href="returns.php?filter=<?= htmlspecialchars($key, ENT_QUOTES, 'UTF-8') ?>"
                class="px-4 py-2 rounded-xl text-sm font-semibold transition-colors flex items-center gap-1.5
                <?= $filter === $key ? 'bg-[#1e2d4a] text-white' : 'text-gray-500 hover:bg-gray-50' ?>">
-                <?= $label ?>
+                <?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?>
                 <?php if ($key !== 'all' && !empty($counts[$key]) && $counts[$key] > 0): ?>
                 <span class="<?= $filter === $key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600' ?> text-xs px-1.5 py-0.5 rounded-full"><?= $counts[$key] ?></span>
                 <?php endif; ?>
@@ -300,20 +384,30 @@ $counts = [
         <?php if (count($returns) === 0): ?>
         <div class="bg-white rounded-2xl shadow-sm p-12 text-center">
             <div class="text-5xl mb-4">↩️</div>
-            <p class="text-gray-500">No <?= $filter !== 'all' ? $filter : '' ?> returns.</p>
+            <p class="text-gray-500">No <?= $filter !== 'all' ? htmlspecialchars($filter, ENT_QUOTES, 'UTF-8') : '' ?> returns.</p>
         </div>
         <?php else: ?>
         <div class="space-y-4">
             <?php foreach ($returns as $r):
-                $color = ['pending'=>'bg-yellow-100 text-yellow-700','approved'=>'bg-green-100 text-green-700','rejected'=>'bg-red-100 text-red-700'][$r['return_status']] ?? 'bg-gray-100 text-gray-600';
+                $status_colors = [
+                    'pending' =>
+                        'bg-yellow-100 text-yellow-700',
+                    'approved' =>
+                        'bg-green-100 text-green-700',
+                    'rejected' =>
+                        'bg-red-100 text-red-700',
+                ];
+                $color =
+                    $status_colors[$r['return_status']]
+                    ?? 'bg-gray-100 text-gray-600';
             ?>
             <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
                 <div class="px-6 py-4 border-b border-gray-50 flex justify-between items-center flex-wrap gap-3">
                     <div>
-                        <p class="font-bold text-gray-800">Return #<?= str_pad($r['return_id'], 4, '0', STR_PAD_LEFT) ?></p>
+                        <p class="font-bold text-gray-800">Return #<?= str_pad((string) ((int) $r['return_id']), 4, '0', STR_PAD_LEFT) ?></p>
                         <p class="text-xs text-gray-400"><?= date('d M Y, h:i A', strtotime($r['return_created_at'])) ?></p>
                     </div>
-                    <span class="<?= $color ?> text-xs px-3 py-1 rounded-full font-semibold capitalize"><?= $r['return_status'] ?></span>
+                    <span class="<?= $color ?> text-xs px-3 py-1 rounded-full font-semibold capitalize"><?= htmlspecialchars($r['return_status'], ENT_QUOTES, 'UTF-8') ?></span>
                 </div>
                 <div class="px-6 py-4 flex gap-4">
                     <?php if (!empty($r['product_cover_image'])): ?>
@@ -321,7 +415,7 @@ $counts = [
                     <?php endif; ?>
                     <div class="flex-1">
                         <p class="font-semibold text-gray-800 mb-1"><?= htmlspecialchars($r['product_title']) ?></p>
-                        <p class="text-xs text-gray-400 mb-3">Customer: <span class="font-semibold text-gray-600"><?= htmlspecialchars($r['user_first_name'] . ' ' . $r['user_last_name']) ?></span> · Qty: <?= $r['order_item_quantity'] ?></p>
+                        <p class="text-xs text-gray-400 mb-3">Customer: <span class="font-semibold text-gray-600"><?= htmlspecialchars($r['user_first_name'] . ' ' . $r['user_last_name']) ?></span> · Qty: <?= (int) $r['order_item_quantity'] ?></p>
                         <div class="bg-gray-50 rounded-xl p-3">
                             <p class="text-xs font-semibold text-gray-500 mb-1">Reason:</p>
                             <p class="text-sm text-gray-700"><?= nl2br(htmlspecialchars($r['return_reason'])) ?></p>
@@ -336,9 +430,12 @@ $counts = [
                 <?php if ($r['return_status'] === 'pending'): ?>
                 <div class="px-6 py-4 border-t border-gray-50 bg-gray-50">
                     <form method="POST" class="space-y-3">
-                        <?php csrf_field() ?>
-                        <input type="hidden" name="return_id" value="<?= $r['return_id'] ?>">
-                        <textarea name="admin_note" rows="2" placeholder="Note for customer (optional)"
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="return_id" value="<?= (int) $r['return_id'] ?>">
+                        <textarea name="admin_note"
+                                  rows="2"
+                                  maxlength="2000"
+                                  placeholder="Note for customer (optional)"
                                   class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 resize-none"></textarea>
                         <div class="flex gap-3">
                             <button name="action" value="approved" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">✓ Approve</button>
