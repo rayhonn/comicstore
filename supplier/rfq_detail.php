@@ -3,12 +3,37 @@
 require_once '../includes/db.php';
 require_once '../includes/auth.php';
 require_once '../includes/csrf.php';
+require_once '../includes/money_helper.php';
 
 require_supplier();
 
-$supplier_id = $_SESSION['supplier_id'];
-$rfq_id = $_GET['id'] ?? null;
-if (!$rfq_id) { header('Location: dashboard.php'); exit; }
+$supplier_id = filter_var(
+    $_SESSION['supplier_id'] ?? null,
+    FILTER_VALIDATE_INT,
+    [
+        'options' => [
+            'min_range' => 1,
+        ],
+    ]
+);
+
+$rfq_id = filter_var(
+    $_GET['id'] ?? null,
+    FILTER_VALIDATE_INT,
+    [
+        'options' => [
+            'min_range' => 1,
+        ],
+    ]
+);
+
+if (
+    $supplier_id === false ||
+    $rfq_id === false
+) {
+    header('Location: dashboard.php');
+    exit;
+}
 
 $check = $pdo->prepare("SELECT * FROM rfq_suppliers WHERE rfq_supplier_rfq_id = ? AND rfq_supplier_supplier_id = ?");
 $check->execute([$rfq_id, $supplier_id]);
@@ -43,6 +68,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote'])) {
     $notes = trim((string) ($_POST['notes'] ?? ''));
 
     try {
+        $notes_length = function_exists('mb_strlen')
+            ? mb_strlen($notes, 'UTF-8')
+            : strlen($notes);
+
+        if ($notes_length > 2000) {
+            throw new RuntimeException(
+                'Additional notes cannot exceed 2000 characters.'
+            );
+        }
+
         $pdo->beginTransaction();
 
         // Lock the supplier assignment so duplicate submissions are serialized.
@@ -123,24 +158,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote'])) {
                 (string) ($prices[$rfq_item_id] ?? '')
             );
 
-            if (
-                !preg_match('/^\d{1,8}(?:\.\d{1,2})?$/', $raw_price) ||
-                (float) $raw_price <= 0
-            ) {
+            try {
+                $unit_price = moneyNormalizeDecimal(
+                    $raw_price
+                );
+
+                $unit_price_sen = moneyDecimalToSen(
+                    $unit_price
+                );
+            } catch (MoneyValueException $e) {
+                throw new RuntimeException(
+                    'Please enter a valid price for all items.',
+                    0,
+                    $e
+                );
+            }
+
+            if ($unit_price_sen < 1) {
                 throw new RuntimeException(
                     'Please enter a valid price for all items.'
                 );
             }
 
             $quotation_items_data[] = [
-                'product_id' => (int) $item['rfq_item_product_id'],
-                'quantity' => (int) $item['rfq_item_quantity'],
-                'unit_price' => number_format(
-                    (float) $raw_price,
-                    2,
-                    '.',
-                    ''
-                ),
+                'product_id' =>
+                    (int) $item[
+                        'rfq_item_product_id'
+                    ],
+                'quantity' =>
+                    (int) $item[
+                        'rfq_item_quantity'
+                    ],
+                'unit_price' => $unit_price,
             ];
         }
 
@@ -291,7 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote'])) {
                             </td>
                             <td class="px-5 py-4 text-center text-sm font-semibold text-gray-700"><?= $item['rfq_item_quantity'] ?></td>
                             <td class="px-5 py-4">
-                                <input type="number" step="0.01" min="0.01" name="unit_price[<?= $item['rfq_item_id'] ?>]" required
+                                <input type="number" step="0.01" min="0.01" max="99999999.99" name="unit_price[<?= $item['rfq_item_id'] ?>]" required
                                        placeholder="0.00" data-qty="<?= $item['rfq_item_quantity'] ?>"
                                        oninput="updateSubtotal(this)"
                                        class="w-28 px-3 py-2 border-2 border-gray-100 rounded-xl text-sm text-right focus:outline-none focus:border-blue-400 transition-colors">
@@ -311,7 +360,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote'])) {
 
             <div class="bg-white rounded-2xl shadow-sm p-6 mb-6">
                 <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Additional Notes (Optional)</label>
-                <textarea name="notes" rows="3" placeholder="Delivery timeline, terms, special conditions..."
+                <textarea name="notes" rows="3" maxlength="2000" placeholder="Delivery timeline, terms, special conditions..."
                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-blue-400 transition-colors resize-none"></textarea>
             </div>
 
@@ -324,23 +373,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote'])) {
 
     </div>
 
-    <script>
-    function updateSubtotal(input) {
-        const qty = parseFloat(input.dataset.qty);
-        const price = parseFloat(input.value) || 0;
-        const subtotal = qty * price;
-        input.closest('tr').querySelector('.subtotal-cell').textContent = 'RM ' + subtotal.toFixed(2);
-        updateGrandTotal();
+<script>
+function parseMoneyToSen(value) {
+    const normalized = String(value).trim();
+
+    if (!/^\d{1,8}(?:\.\d{1,2})?$/.test(normalized)) {
+        return 0;
     }
 
-    function updateGrandTotal() {
-        let total = 0;
-        document.querySelectorAll('.subtotal-cell').forEach(cell => {
-            total += parseFloat(cell.textContent.replace('RM ', '')) || 0;
+    const parts = normalized.split('.');
+    const whole = Number.parseInt(parts[0], 10);
+    const fraction = (parts[1] || '')
+        .padEnd(2, '0')
+        .slice(0, 2);
+
+    return (whole * 100) +
+        Number.parseInt(fraction || '0', 10);
+}
+
+function formatSen(sen) {
+    const whole = Math.floor(sen / 100);
+    const fraction = String(sen % 100)
+        .padStart(2, '0');
+
+    return `${whole.toLocaleString('en-MY')}.${fraction}`;
+}
+
+function updateSubtotal(input) {
+    const quantity = Number.parseInt(
+        input.dataset.qty,
+        10
+    ) || 0;
+
+    const subtotalSen =
+        quantity * parseMoneyToSen(input.value);
+
+    const row = input.closest('tr');
+    const subtotalCell =
+        row.querySelector('.subtotal-cell');
+
+    subtotalCell.dataset.subtotalSen =
+        String(subtotalSen);
+
+    subtotalCell.textContent =
+        `RM ${formatSen(subtotalSen)}`;
+
+    updateGrandTotal();
+}
+
+function updateGrandTotal() {
+    let totalSen = 0;
+
+    document
+        .querySelectorAll('.subtotal-cell')
+        .forEach((cell) => {
+            totalSen += Number.parseInt(
+                cell.dataset.subtotalSen || '0',
+                10
+            );
         });
-        document.getElementById('grandTotal').textContent = 'RM ' + total.toFixed(2);
-    }
-    </script>
+
+    document.getElementById(
+        'grandTotal'
+    ).textContent = `RM ${formatSen(totalSen)}`;
+}
+</script>
 
 </body>
 </html>

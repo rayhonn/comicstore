@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
 require_admin();
 
@@ -55,10 +56,46 @@ $quotations = $quotations->fetchAll(PDO::FETCH_ASSOC);
 
 // Get quotation items for each quotation
 foreach ($quotations as &$q) {
-    $qi = $pdo->prepare("SELECT * FROM quotation_items WHERE quotation_item_quotation_id = ?");
+    $qi = $pdo->prepare("
+        SELECT *
+        FROM quotation_items
+        WHERE quotation_item_quotation_id = ?
+    ");
     $qi->execute([$q['quotation_id']]);
-    $q['items'] = $qi->fetchAll(PDO::FETCH_ASSOC);
-    $q['total'] = array_sum(array_map(fn($i) => $i['quotation_item_quantity'] * $i['quotation_item_unit_price'], $q['items']));
+
+    $q['items'] = $qi->fetchAll(
+        PDO::FETCH_ASSOC
+    );
+
+    $q['total_sen'] = 0;
+
+    foreach ($q['items'] as $item) {
+        $quantity = (int) $item[
+            'quotation_item_quantity'
+        ];
+
+        $unit_price_sen = moneyDecimalToSen(
+            (string) $item[
+                'quotation_item_unit_price'
+            ]
+        );
+
+        $line_total_sen =
+            $quantity * $unit_price_sen;
+
+        if (
+            $quantity <= 0 ||
+            $line_total_sen >
+                9999999999 - $q['total_sen']
+        ) {
+            throw new RuntimeException(
+                'A quotation contains invalid item amounts.'
+            );
+        }
+
+        $q['total_sen'] +=
+            $line_total_sen;
+    }
 }
 unset($q);
 
@@ -80,12 +117,24 @@ foreach ($quotations as &$q) {
 unset($q);
 
 if (count($quotations) > 0) {
-    $min_total = min(array_column($quotations, 'total'));
+    $min_total_sen = min(
+        array_column(
+            $quotations,
+            'total_sen'
+        )
+    );
     $lead_times = array_filter(array_column($quotations, 'avg_lead_time'), fn($v) => $v !== null);
     $min_lead_time = count($lead_times) > 0 ? min($lead_times) : null;
 
     foreach ($quotations as &$q) {
-        $price_score = $min_total > 0 ? ($min_total / $q['total']) * 100 : 100;
+        $price_score =
+            $min_total_sen > 0 &&
+            $q['total_sen'] > 0
+                ? (
+                    $min_total_sen /
+                    $q['total_sen']
+                ) * 100
+                : 100;
         $rating_score = $q['avg_rating'] !== null ? ($q['avg_rating'] / 5) * 100 : 50;
         $lead_score = ($min_lead_time !== null && $q['avg_lead_time'] !== null && $q['avg_lead_time'] > 0)
             ? ($min_lead_time / $q['avg_lead_time']) * 100 : 50;
@@ -196,41 +245,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
             }
 
             $po_items_data = [];
-            $total_cents = 0;
+            $total_sen = 0;
 
             foreach ($quote_items as $item) {
-                $product_id = (int) $item['quotation_item_product_id'];
-                $quantity = (int) $item['quotation_item_quantity'];
-                $unit_price = (float) $item['quotation_item_unit_price'];
+                $product_id = (int) $item[
+                    'quotation_item_product_id'
+                ];
 
-                if ($product_id <= 0 || $quantity <= 0 || $unit_price <= 0) {
+                $quantity = (int) $item[
+                    'quotation_item_quantity'
+                ];
+
+                try {
+                    $unit_price_sen =
+                        moneyDecimalToSen(
+                            (string) $item[
+                                'quotation_item_unit_price'
+                            ]
+                        );
+                } catch (MoneyValueException $e) {
+                    throw new RuntimeException(
+                        'The selected quotation contains invalid item data.',
+                        0,
+                        $e
+                    );
+                }
+
+                if (
+                    $product_id <= 0 ||
+                    $quantity <= 0 ||
+                    $unit_price_sen <= 0
+                ) {
                     throw new RuntimeException(
                         'The selected quotation contains invalid item data.'
                     );
                 }
 
-                $unit_price_cents = (int) round($unit_price * 100);
-                $total_cents += $quantity * $unit_price_cents;
+                $line_total_sen =
+                    $quantity * $unit_price_sen;
+
+                if (
+                    $line_total_sen >
+                    9999999999 - $total_sen
+                ) {
+                    throw new RuntimeException(
+                        'The selected quotation total exceeds the supported amount.'
+                    );
+                }
+
+                $total_sen += $line_total_sen;
 
                 $po_items_data[] = [
                     'product_id' => $product_id,
                     'quantity' => $quantity,
-                    'unit_price' => number_format(
-                        $unit_price_cents / 100,
-                        2,
-                        '.',
-                        ''
-                    ),
+                    'unit_price' =>
+                        moneySenToDecimal(
+                            $unit_price_sen
+                        ),
                 ];
             }
 
-            if ($total_cents <= 0) {
+            if ($total_sen <= 0) {
                 throw new RuntimeException(
                     'The selected quotation has an invalid total amount.'
                 );
             }
 
-            $po_total = number_format($total_cents / 100, 2, '.', '');
+            $po_total = moneySenToDecimal(
+                $total_sen
+            );
 
             // Use the auto-increment ID to generate a concurrency-safe PO number.
             $temporary_po_number = 'TMP-PO-' . bin2hex(random_bytes(6));
@@ -442,7 +525,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
                     ?>
                     <div class="flex justify-between text-sm">
                         <span class="text-gray-600 truncate"><?= htmlspecialchars($prod['product_title'] ?? 'Product') ?></span>
-                        <span class="text-gray-800 font-semibold flex-shrink-0">RM <?= number_format($i['quotation_item_unit_price'], 2) ?>/unit</span>
+                        <span class="text-gray-800 font-semibold flex-shrink-0">
+                            RM
+                            <?= moneyFormatSen(
+                                moneyDecimalToSen(
+                                    (string) $i[
+                                        'quotation_item_unit_price'
+                                    ]
+                                )
+                            ) ?>/unit
+                        </span>
                     </div>
                     <?php endforeach; ?>
                 </div>
@@ -450,7 +542,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
                 <div class="border-t border-gray-100 pt-3 mb-4">
                     <div class="flex justify-between">
                         <span class="font-bold text-gray-700">Total</span>
-                        <span class="font-black text-red-600">RM <?= number_format($q['total'], 2) ?></span>
+                        <span class="font-black text-red-600">
+                            RM
+                            <?= moneyFormatSen(
+                                $q['total_sen']
+                            ) ?>
+                        </span>
                     </div>
                 </div>
 
