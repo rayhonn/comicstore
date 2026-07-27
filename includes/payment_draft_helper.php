@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/voucher_helper.php';
+require_once __DIR__ . '/money_helper.php';
 
 final class PaymentDraftException extends RuntimeException
 {
@@ -194,9 +195,11 @@ function loadPaymentDraft(
                 ],
 
             'product_price' =>
-                (float) $item[
-                    'payment_draft_item_unit_price'
-                ],
+                moneyNormalizeDecimal(
+                    (string) $item[
+                        'payment_draft_item_unit_price'
+                    ]
+                ),
 
             'product_type' =>
                 $item[
@@ -225,9 +228,11 @@ function loadPaymentDraft(
             ),
 
         'total' =>
-            (float) $row[
-                'payment_draft_total_amount'
-            ],
+            moneyNormalizeDecimal(
+                (string) $row[
+                    'payment_draft_total_amount'
+                ]
+            ),
 
         'has_physical' =>
             (int) $row[
@@ -289,14 +294,18 @@ function loadPaymentDraft(
             ],
 
         'shipping_fee' =>
-            (float) $row[
-                'payment_draft_shipping_fee'
-            ],
+            moneyNormalizeDecimal(
+                (string) $row[
+                    'payment_draft_shipping_fee'
+                ]
+            ),
 
         'original_shipping_fee' =>
-            (float) $row[
-                'payment_draft_original_shipping_fee'
-            ],
+            moneyNormalizeDecimal(
+                (string) $row[
+                    'payment_draft_original_shipping_fee'
+                ]
+            ),
 
         'shipping_courier' =>
             $row[
@@ -323,9 +332,11 @@ function loadPaymentDraft(
             ],
 
         'discount_amount' =>
-            (float) $row[
-                'payment_draft_discount_amount'
-            ],
+            moneyNormalizeDecimal(
+                (string) $row[
+                    'payment_draft_discount_amount'
+                ]
+            ),
 
         'stripe_session_id' =>
             $row[
@@ -872,6 +883,162 @@ function createPaymentDraft(
     }
 
     try {
+        $totalAmountSen =
+            moneyDecimalToSen(
+                $draft['total'] ?? null
+            );
+
+        $shippingFeeSen =
+            moneyDecimalToSen(
+                $draft[
+                    'shipping_fee'
+                ] ?? null
+            );
+
+        $originalShippingFeeSen =
+            moneyDecimalToSen(
+                $draft[
+                    'original_shipping_fee'
+                ] ?? null
+            );
+
+        $discountAmountSen =
+            moneyDecimalToSen(
+                $draft[
+                    'discount_amount'
+                ] ?? null
+            );
+
+        $itemSubtotalSen = 0;
+
+        foreach ($items as $item) {
+            $quantity = (int) (
+                $item[
+                    'cart_item_quantity'
+                ] ?? 0
+            );
+
+            if ($quantity < 1) {
+                throw new PaymentDraftException(
+                    'The payment draft contains an invalid quantity.'
+                );
+            }
+
+            $unitPriceSen =
+                moneyDecimalToSen(
+                    $item[
+                        'product_price'
+                    ] ?? null
+                );
+
+            if (
+                $unitPriceSen > 0 &&
+                $quantity > intdiv(
+                    9999999999 -
+                        $itemSubtotalSen,
+                    $unitPriceSen
+                )
+            ) {
+                throw new PaymentDraftException(
+                    'The payment draft subtotal exceeds the supported amount.'
+                );
+            }
+
+            $itemSubtotalSen +=
+                $unitPriceSen * $quantity;
+        }
+    } catch (MoneyValueException $e) {
+        throw new PaymentDraftException(
+            'The checkout contains an invalid monetary amount.',
+            0,
+            $e
+        );
+    }
+
+    if ($totalAmountSen < 1) {
+        throw new PaymentDraftException(
+            'The order total must be at least RM 0.01.'
+        );
+    }
+
+    if (
+        !$hasPhysical &&
+        (
+            $shippingFeeSen !== 0 ||
+            $originalShippingFeeSen !== 0
+        )
+    ) {
+        throw new PaymentDraftException(
+            'An e-book-only order cannot include shipping charges.'
+        );
+    }
+
+    if (
+        $originalShippingFeeSen <
+        $shippingFeeSen
+    ) {
+        throw new PaymentDraftException(
+            'The shipping amount is invalid.'
+        );
+    }
+
+    if (
+        $discountAmountSen >
+        $itemSubtotalSen
+    ) {
+        throw new PaymentDraftException(
+            'The discount amount is invalid.'
+        );
+    }
+
+    $discountedSubtotalSen =
+        $itemSubtotalSen -
+        $discountAmountSen;
+
+    if (
+        $shippingFeeSen >
+        9999999999 -
+            $discountedSubtotalSen
+    ) {
+        throw new PaymentDraftException(
+            'The order total exceeds the supported amount.'
+        );
+    }
+
+    $expectedTotalSen =
+        $discountedSubtotalSen +
+        $shippingFeeSen;
+
+    if (
+        $totalAmountSen !==
+        $expectedTotalSen
+    ) {
+        throw new PaymentDraftException(
+            'The payment draft total does not match its items.'
+        );
+    }
+
+    $normalizedTotalAmount =
+        moneySenToDecimal(
+            $totalAmountSen
+        );
+
+    $normalizedShippingFee =
+        moneySenToDecimal(
+            $shippingFeeSen
+        );
+
+    $normalizedOriginalShippingFee =
+        moneySenToDecimal(
+            $originalShippingFeeSen
+        );
+
+    $normalizedDiscountAmount =
+        moneySenToDecimal(
+            $discountAmountSen
+        );
+
+    try {
         $pdo->beginTransaction();
 
         /*
@@ -995,10 +1162,7 @@ function createPaymentDraft(
         $insertDraft->execute([
             $userId,
             $currency,
-            round(
-                (float) $draft['total'],
-                2
-            ),
+            $normalizedTotalAmount,
             $hasPhysical ? 1 : 0,
             $addressId,
             $addressRecipientName,
@@ -1010,30 +1174,15 @@ function createPaymentDraft(
             $addressCountry,
             $addressPhone,
             $draft['shipping_method'],
-            round(
-                (float) $draft[
-                    'shipping_fee'
-                ],
-                2
-            ),
-            round(
-                (float) $draft[
-                    'original_shipping_fee'
-                ],
-                2
-            ),
+            $normalizedShippingFee,
+            $normalizedOriginalShippingFee,
             $draft[
                 'shipping_courier'
             ] ?: null,
             $draft['shipping_zone'],
             $voucherId,
             $draft['voucher_code'] ?: null,
-            round(
-                (float) $draft[
-                    'discount_amount'
-                ],
-                2
-            ),
+            $normalizedDiscountAmount,
         ]);
 
         $draftId = (int) $pdo
@@ -1103,14 +1252,12 @@ function createPaymentDraft(
                 ] ?? 0
             );
 
-            $unitPrice = round(
-                (float) (
+            $unitPrice =
+                moneyNormalizeDecimal(
                     $item[
                         'product_price'
-                    ] ?? -1
-                ),
-                2
-            );
+                    ] ?? null
+                );
 
             $type = (string) (
                 $item[
@@ -1122,7 +1269,6 @@ function createPaymentDraft(
                 $cartItemId < 1 ||
                 $productId < 1 ||
                 $quantity < 1 ||
-                $unitPrice < 0 ||
                 !in_array(
                     $type,
                     [

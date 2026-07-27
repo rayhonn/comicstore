@@ -4,6 +4,7 @@ require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 require_once __DIR__ .
     '/../includes/payment_draft_helper.php';
 
@@ -121,16 +122,20 @@ if (count($items) === 0) {
 }
 
 $error = '';
-$total = 0;
+$total_sen = 0;
 $has_physical = false;
 
 // Recalculate using current database price
 // and validate current product availability and stock.
 foreach ($items as $item) {
-    $quantity = (int) $item['cart_item_quantity'];
+    $quantity = (int) $item[
+        'cart_item_quantity'
+    ];
 
     if (
-        (int) $item['product_is_available'] !== 1
+        (int) $item[
+            'product_is_available'
+        ] !== 1
     ) {
         $error =
             'One or more selected products are no longer available.';
@@ -146,7 +151,9 @@ foreach ($items as $item) {
     if ($item['product_type'] === 'physical') {
         $available_stock = max(
             0,
-            (int) $item['physical_stock_quantity']
+            (int) $item[
+                'physical_stock_quantity'
+            ]
         );
 
         if ($quantity > $available_stock) {
@@ -156,7 +163,9 @@ foreach ($items as $item) {
         }
 
         $has_physical = true;
-    } elseif ($item['product_type'] === 'ebook') {
+    } elseif (
+        $item['product_type'] === 'ebook'
+    ) {
         if ($quantity !== 1) {
             $error =
                 'E-book quantity must be one.';
@@ -168,10 +177,37 @@ foreach ($items as $item) {
         break;
     }
 
-    $total +=
-        (float) $item['product_price'] *
-        $quantity;
+    try {
+        $unit_price_sen = moneyDecimalToSen(
+            (string) $item[
+                'product_price'
+            ]
+        );
+    } catch (MoneyValueException $e) {
+        $error =
+            'One or more selected products have an invalid price.';
+        break;
+    }
+
+    if (
+        $unit_price_sen > 0 &&
+        $quantity > intdiv(
+            9999999999 - $total_sen,
+            $unit_price_sen
+        )
+    ) {
+        $error =
+            'The selected cart total exceeds the supported amount.';
+        break;
+    }
+
+    $total_sen +=
+        $unit_price_sen * $quantity;
 }
+
+$total = moneySenToDecimal(
+    $total_sen
+);
 
 $addresses = $pdo->prepare("
     SELECT *
@@ -240,45 +276,64 @@ function findAvailableVoucher(
     return $result ?: null;
 }
 
-function calculateVoucherDiscount(
+function calculateVoucherDiscountSen(
     array $voucher,
-    float $subtotal
-): float {
+    int $subtotal_sen
+): int {
     if (
         $voucher['voucher_type'] ===
         'percentage'
     ) {
-        $discount =
-            $subtotal *
-            (
-                (float) $voucher[
+        $discount_sen =
+            moneyPercentageDiscountSen(
+                $subtotal_sen,
+                (string) $voucher[
                     'voucher_value'
-                ] / 100
+                ]
             );
 
-        $maximum_discount =
-            (float) (
-                $voucher[
-                    'voucher_max_discount'
-                ] ?? 0
-            );
+        $maximum_discount_raw =
+            $voucher[
+                'voucher_max_discount'
+            ] ?? null;
 
-        if ($maximum_discount > 0) {
-            $discount = min(
-                $discount,
-                $maximum_discount
-            );
+        if (
+            $maximum_discount_raw !== null &&
+            trim(
+                (string) $maximum_discount_raw
+            ) !== ''
+        ) {
+            $maximum_discount_sen =
+                moneyDecimalToSen(
+                    (string) $maximum_discount_raw
+                );
+
+            if ($maximum_discount_sen > 0) {
+                $discount_sen = min(
+                    $discount_sen,
+                    $maximum_discount_sen
+                );
+            }
         }
+    } elseif (
+        $voucher['voucher_type'] ===
+        'fixed'
+    ) {
+        $discount_sen =
+            moneyDecimalToSen(
+                (string) $voucher[
+                    'voucher_value'
+                ]
+            );
     } else {
-        $discount =
-            (float) $voucher[
-                'voucher_value'
-            ];
+        throw new RuntimeException(
+            'Voucher type is invalid.'
+        );
     }
 
-    return round(
-        min($discount, $subtotal),
-        2
+    return min(
+        $discount_sen,
+        $subtotal_sen
     );
 }
 
@@ -295,42 +350,42 @@ $couriers = [
     'jnt' => [
         'name' => 'J&T Express',
         'logo' => '🟡',
-        'peninsular_std' => 4.90,
-        'peninsular_exp' => 9.90,
-        'east_std' => 11.90,
-        'east_exp' => 19.90,
+        'peninsular_std' => '4.90',
+        'peninsular_exp' => '9.90',
+        'east_std' => '11.90',
+        'east_exp' => '19.90',
     ],
     'ninja_van' => [
         'name' => 'Ninja Van',
         'logo' => '⚫',
-        'peninsular_std' => 5.90,
-        'peninsular_exp' => 11.90,
-        'east_std' => 13.90,
-        'east_exp' => 21.90,
+        'peninsular_std' => '5.90',
+        'peninsular_exp' => '11.90',
+        'east_std' => '13.90',
+        'east_exp' => '21.90',
     ],
     'pos_laju' => [
         'name' => 'Pos Laju',
         'logo' => '🔴',
-        'peninsular_std' => 6.90,
-        'peninsular_exp' => 14.90,
-        'east_std' => 14.90,
-        'east_exp' => 24.90,
+        'peninsular_std' => '6.90',
+        'peninsular_exp' => '14.90',
+        'east_std' => '14.90',
+        'east_exp' => '24.90',
     ],
     'gdex' => [
         'name' => 'GDex',
         'logo' => '🟠',
-        'peninsular_std' => 8.90,
-        'peninsular_exp' => 16.90,
-        'east_std' => 17.90,
-        'east_exp' => 29.90,
+        'peninsular_std' => '8.90',
+        'peninsular_exp' => '16.90',
+        'east_std' => '17.90',
+        'east_exp' => '29.90',
     ],
     'dhl' => [
         'name' => 'DHL Express',
         'logo' => '🔴',
-        'peninsular_std' => 14.90,
-        'peninsular_exp' => 24.90,
-        'east_std' => 24.90,
-        'east_exp' => 39.90,
+        'peninsular_std' => '14.90',
+        'peninsular_exp' => '24.90',
+        'east_std' => '24.90',
+        'east_exp' => '39.90',
     ],
 ];
 
@@ -379,19 +434,20 @@ if (
         exit;
     }
 
-    $minimum_order =
-        (float) $voucher[
-            'voucher_min_order'
-        ];
+    $minimum_order_sen =
+        moneyDecimalToSen(
+            (string) $voucher[
+                'voucher_min_order'
+            ]
+        );
 
-    if ($total < $minimum_order) {
+    if ($total_sen < $minimum_order_sen) {
         echo json_encode([
             'success' => false,
             'message' =>
                 'Minimum order RM ' .
-                number_format(
-                    $minimum_order,
-                    2
+                moneyFormatSen(
+                    $minimum_order_sen
                 ) .
                 ' required.',
         ]);
@@ -399,21 +455,27 @@ if (
         exit;
     }
 
-    $discount = calculateVoucherDiscount(
-        $voucher,
-        $total
-    );
+    $discount_sen =
+        calculateVoucherDiscountSen(
+            $voucher,
+            $total_sen
+        );
 
     echo json_encode([
         'success' => true,
         'message' => 'Voucher applied!',
-        'discount' => $discount,
+        'discount' =>
+            moneySenToDecimal(
+                $discount_sen
+            ),
+        'discount_sen' =>
+            $discount_sen,
         'voucher_id' =>
             (int) $voucher['voucher_id'],
         'voucher_type' =>
             $voucher['voucher_type'],
         'voucher_value' =>
-            (float) $voucher[
+            (string) $voucher[
                 'voucher_value'
             ],
     ]);
@@ -454,8 +516,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $zone_key = 'peninsular';
     $fee_key = 'peninsular_std';
 
-    $shipping_fee = 0.0;
-    $original_shipping_fee = 0.0;
+    $shipping_fee_sen = 0;
+    $original_shipping_fee_sen = 0;
 
     if ($has_physical) {
         $valid_courier =
@@ -508,13 +570,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '_' .
                 $shipping_type;
 
-            $original_shipping_fee =
-                (float) $couriers[
-                    $shipping_courier
-                ][$fee_key];
+            $original_shipping_fee_sen =
+                moneyDecimalToSen(
+                    (string) $couriers[
+                        $shipping_courier
+                    ][$fee_key]
+                );
 
-            $shipping_fee =
-                $original_shipping_fee;
+            $shipping_fee_sen =
+                $original_shipping_fee_sen;
 
             $shipping_method =
                 $shipping_type === 'exp'
@@ -531,25 +595,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (
         $has_physical &&
         empty($error) &&
-        $shipping_fee > 0 &&
+        $shipping_fee_sen > 0 &&
         $shipping_type === 'std'
     ) {
-        $user_tier_info = $pdo->prepare("SELECT user_tier FROM users WHERE user_id = ?");
-        $user_tier_info->execute([$user_id]);
-        $user_tier_name = $user_tier_info->fetchColumn() ?? 'bronze';
+        $user_tier_info = $pdo->prepare("
+            SELECT user_tier
+            FROM users
+            WHERE user_id = ?
+        ");
 
-        $tier_shipping = $pdo->prepare("SELECT tier_free_shipping, tier_shipping_discount FROM tier_config WHERE tier_name = ?");
-        $tier_shipping->execute([$user_tier_name]);
-        $tier_shipping_row = $tier_shipping->fetch(PDO::FETCH_ASSOC);
+        $user_tier_info->execute([
+            $user_id,
+        ]);
+
+        $user_tier_name =
+            $user_tier_info->fetchColumn()
+            ?? 'bronze';
+
+        $tier_shipping = $pdo->prepare("
+            SELECT
+                tier_free_shipping,
+                tier_shipping_discount
+            FROM tier_config
+            WHERE tier_name = ?
+        ");
+
+        $tier_shipping->execute([
+            $user_tier_name,
+        ]);
+
+        $tier_shipping_row =
+            $tier_shipping->fetch(
+                PDO::FETCH_ASSOC
+            );
 
         if ($tier_shipping_row) {
-            if ($tier_shipping_row['tier_free_shipping']) {
-                $shipping_fee = 0;
-            } elseif ($tier_shipping_row['tier_shipping_discount'] > 0) {
-                $shipping_fee = max(
+            $tier_shipping_discount_sen =
+                moneyDecimalToSen(
+                    (string) (
+                        $tier_shipping_row[
+                            'tier_shipping_discount'
+                        ] ?? '0.00'
+                    )
+                );
+
+            if (
+                (int) $tier_shipping_row[
+                    'tier_free_shipping'
+                ] === 1
+            ) {
+                $shipping_fee_sen = 0;
+            } elseif (
+                $tier_shipping_discount_sen > 0
+            ) {
+                $shipping_fee_sen = max(
                     0,
-                    $shipping_fee -
-                    $tier_shipping_row['tier_shipping_discount']
+                    $shipping_fee_sen -
+                        $tier_shipping_discount_sen
                 );
             }
         }
@@ -565,7 +667,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         )
     );
 
-    $discount_amount = 0.0;
+    $discount_amount_sen = 0;
     $applied_voucher = null;
 
     if ($voucher_code_input !== '') {
@@ -579,31 +681,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$applied_voucher) {
             $error =
                 'The selected voucher is no longer available.';
-        } elseif (
-            $total <
-            (float) $applied_voucher[
-                'voucher_min_order'
-            ]
-        ) {
-            $error =
-                'Minimum order RM ' .
-                number_format(
-                    (float) $applied_voucher[
-                        'voucher_min_order'
-                    ],
-                    2
-                ) .
-                ' required.';
         } else {
-            $discount_amount =
-                calculateVoucherDiscount(
-                    $applied_voucher,
-                    $total
+            $minimum_order_sen =
+                moneyDecimalToSen(
+                    (string) $applied_voucher[
+                        'voucher_min_order'
+                    ]
                 );
+
+            if (
+                $total_sen <
+                $minimum_order_sen
+            ) {
+                $error =
+                    'Minimum order RM ' .
+                    moneyFormatSen(
+                        $minimum_order_sen
+                    ) .
+                    ' required.';
+            } else {
+                $discount_amount_sen =
+                    calculateVoucherDiscountSen(
+                        $applied_voucher,
+                        $total_sen
+                    );
+            }
         }
     }
 
-    $final_total = max(0, $total - $discount_amount + $shipping_fee);
+    $final_total_sen = max(
+        0,
+        $total_sen -
+            $discount_amount_sen +
+            $shipping_fee_sen
+    );
+
+    $final_total =
+        moneySenToDecimal(
+            $final_total_sen
+        );
+
+    $shipping_fee =
+        moneySenToDecimal(
+            $shipping_fee_sen
+        );
+
+    $original_shipping_fee =
+        moneySenToDecimal(
+            $original_shipping_fee_sen
+        );
+
+    $discount_amount =
+        moneySenToDecimal(
+            $discount_amount_sen
+        );
 
     if ($has_physical) {
         $address_option =
@@ -1457,7 +1588,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     window.addEventListener('DOMContentLoaded', () => showPaymentLockModal());
     <?php endif; ?>
     
-    const subtotal = <?= $total ?>;
+    const subtotal = Number(
+        <?= json_encode($total) ?>
+    );
     const hasPhysical = <?= $has_physical ? 'true' : 'false' ?>;
 
     function updateShipping(fee) {
@@ -1523,7 +1656,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                appliedDiscount = data.discount;
+                appliedDiscount = Number(
+                    data.discount
+                );
                 document.getElementById('voucherCodeApplied').value = code;
                 document.getElementById('discountRow').classList.remove('hidden');
                 document.getElementById('discountAmount').textContent = '-RM ' + appliedDiscount.toFixed(2);
@@ -1710,10 +1845,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Tier shipping benefit
-    const tierFreeShipping = <?= $tier_shipping_row['tier_free_shipping'] ? 'true' : 'false' ?>;
-    const tierShippingDiscount = <?= floatval($tier_shipping_row['tier_shipping_discount']) ?>;
+    const tierFreeShipping =
+        <?= $tier_shipping_row[
+            'tier_free_shipping'
+        ] ? 'true' : 'false' ?>;
 
-    const couriersData = <?= json_encode($couriers) ?>;
+    const tierShippingDiscount = Number(
+        <?= json_encode(
+            (string) (
+                $tier_shipping_row[
+                    'tier_shipping_discount'
+                ] ?? '0.00'
+            )
+        ) ?>
+    );
+
+    const couriersData =
+        <?= json_encode($couriers) ?>;
+
+    Object.values(couriersData).forEach(
+        courier => {
+            [
+                'peninsular_std',
+                'peninsular_exp',
+                'east_std',
+                'east_exp'
+            ].forEach(key => {
+                courier[key] =
+                    Number(courier[key]);
+            });
+        }
+    );
+
     let currentZone = null;
     let currentSpeed = null;
     let currentCourier = null;
