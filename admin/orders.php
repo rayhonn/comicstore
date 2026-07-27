@@ -194,14 +194,36 @@ if (
 }
 
 $filter = $_GET['filter'] ?? 'all';
+
 $sql = "
-    SELECT o.*, u.user_name, u.user_first_name, u.user_last_name, u.user_gmail,
-    a.address_recipient_name, a.address_taman, a.address_street, a.address_city, a.address_state, a.address_postal_code, a.address_country, a.address_phone
+    SELECT
+        o.*,
+        u.user_name,
+        u.user_first_name,
+        u.user_last_name,
+        u.user_gmail,
+        o.order_address_recipient_name
+            AS address_recipient_name,
+        o.order_address_taman
+            AS address_taman,
+        o.order_address_street
+            AS address_street,
+        o.order_address_city
+            AS address_city,
+        o.order_address_state
+            AS address_state,
+        o.order_address_postal_code
+            AS address_postal_code,
+        o.order_address_country
+            AS address_country,
+        o.order_address_phone
+            AS address_phone
     FROM orders o
-    JOIN users u ON o.order_user_id = u.user_id
-    LEFT JOIN addresses a ON o.order_address_id = a.address_id
+    JOIN users u
+        ON o.order_user_id = u.user_id
     WHERE o.order_payment_status = 'confirmed'
 ";
+
 if ($filter !== 'all') {
     $sql .= " AND o.order_status = " . $pdo->quote($filter);
 }
