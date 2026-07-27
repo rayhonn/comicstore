@@ -6,6 +6,7 @@ require_admin();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
 $success = '';
 
@@ -229,11 +230,26 @@ if (
             );
         }
 
-        $applied = min(
-            (float) $credit_amount,
-            (float) $invoice['invoice_amount']
+        $credit_amount_sen =
+            moneyDecimalToSen(
+                (string) $credit_amount
+            );
+
+        $invoice_amount_sen =
+            moneyDecimalToSen(
+                (string) $invoice[
+                    'invoice_amount'
+                ]
+            );
+
+        $applied_sen = min(
+            $credit_amount_sen,
+            $invoice_amount_sen
         );
 
+        $applied = moneySenToDecimal(
+            $applied_sen
+        );
         $invoice_update = $pdo->prepare(
             "UPDATE supplier_invoices
              SET invoice_credit_note_id = ?,
@@ -277,7 +293,7 @@ if (
 
         redirectInvoicePage(
             'Credit note applied. RM ' .
-            number_format($applied, 2) .
+            moneyFormatSen($applied_sen) .
             ' deducted from this invoice.'
         );
     } catch (Throwable $e) {
@@ -413,6 +429,28 @@ if (isset($_GET['download_receipt'])) {
 
     if (!$inv) { header('Location: supplier_invoices.php'); exit; }
 
+    $receipt_invoice_sen =
+        moneyDecimalToSen(
+            (string) $inv[
+                'invoice_amount'
+            ]
+        );
+
+    $receipt_credit_sen =
+        moneyDecimalToSen(
+            (string) (
+                $inv[
+                    'invoice_credit_applied_amount'
+                ] ?? '0.00'
+            )
+        );
+
+    $receipt_total_sen = max(
+        0,
+        $receipt_invoice_sen -
+            $receipt_credit_sen
+    );
+
     $receipt_number = 'RCT-' . str_pad($invoice_id, 5, '0', STR_PAD_LEFT);
 
     $html = "
@@ -459,15 +497,15 @@ if (isset($_GET['download_receipt'])) {
             </tr>
             <tr style='border-bottom:1px solid #e5e7eb;'>
                 <td style='padding:12px 14px; font-size:13px;'>Invoice " . htmlspecialchars($inv['invoice_number']) . "</td>
-                <td style='padding:12px 14px; font-size:13px; text-align:right;'>RM " . number_format($inv['invoice_amount'], 2) . "</td>
-            </tr>" . ($inv['invoice_credit_applied_amount'] > 0 ? "
+                <td style='padding:12px 14px; font-size:13px; text-align:right;'>RM " . moneyFormatSen($receipt_invoice_sen) . "</td>
+            </tr>" . ($receipt_credit_sen > 0 ? "
             <tr style='border-bottom:1px solid #e5e7eb;'>
                 <td style='padding:12px 14px; font-size:13px; color:#C0392B;'>Less: Credit Note " . htmlspecialchars($inv['return_credit_note_number']) . "</td>
-                <td style='padding:12px 14px; font-size:13px; text-align:right; color:#C0392B;'>- RM " . number_format($inv['invoice_credit_applied_amount'], 2) . "</td>
+                <td style='padding:12px 14px; font-size:13px; text-align:right; color:#C0392B;'>- RM " . moneyFormatSen($receipt_credit_sen) . "</td>
             </tr>" : "") . "
             <tr style='background:#fef2f2;'>
                 <td style='padding:12px 14px; font-size:14px; font-weight:900;'>Total Paid</td>
-                <td style='padding:12px 14px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) . "</td>
+                <td style='padding:12px 14px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . moneyFormatSen($receipt_total_sen) . "</td>
             </tr>
         </table>
 
@@ -577,8 +615,45 @@ foreach ($available_credits as $c) {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($invoices as $inv): 
-                        $is_overdue = $inv['invoice_status'] === 'unpaid' && $inv['invoice_due_date'] && strtotime($inv['invoice_due_date']) < time();
+                    <?php foreach ($invoices as $inv):
+                        $invoice_amount_sen =
+                            moneyDecimalToSen(
+                                (string) $inv[
+                                    'invoice_amount'
+                                ]
+                            );
+
+                        $invoice_credit_sen =
+                            moneyDecimalToSen(
+                                (string) (
+                                    $inv[
+                                        'invoice_credit_applied_amount'
+                                    ] ?? '0.00'
+                                )
+                            );
+
+                        $invoice_net_sen = max(
+                            0,
+                            $invoice_amount_sen -
+                                $invoice_credit_sen
+                        );
+
+                        $po_total_sen =
+                            moneyDecimalToSen(
+                                (string) (
+                                    $inv[
+                                        'po_total_amount'
+                                    ] ?? '0.00'
+                                )
+                            );
+
+                        $is_overdue =
+                            $inv['invoice_status'] ===
+                                'unpaid' &&
+                            $inv['invoice_due_date'] &&
+                            strtotime(
+                                $inv['invoice_due_date']
+                            ) < time();
                     ?>
                     <tr class="border-b border-gray-50 hover:bg-gray-50 transition-colors" style="overflow: hidden;">
                         <td class="px-5 py-4 whitespace-nowrap">
@@ -598,10 +673,26 @@ foreach ($available_credits as $c) {
                         <td class="px-5 py-4 text-sm text-gray-600 whitespace-nowrap"><?= htmlspecialchars($inv['supplier_name']) ?></td>
                         <td class="px-5 py-4 text-sm text-gray-600 whitespace-nowrap"><?= htmlspecialchars($inv['po_number'] ?? '—') ?></td>
                         <td class="px-5 py-4 text-right text-sm whitespace-nowrap">
-                            <p class="font-bold text-gray-800">RM <?= number_format($inv['invoice_amount'], 2) ?></p>
-                            <?php if ($inv['invoice_credit_applied_amount'] > 0): ?>
-                            <p class="text-xs text-green-600">− RM <?= number_format($inv['invoice_credit_applied_amount'], 2) ?> credit</p>
-                            <p class="text-xs text-gray-400">Net: RM <?= number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) ?></p>
+                            <p class="font-bold text-gray-800">
+                                RM
+                                <?= moneyFormatSen(
+                                    $invoice_amount_sen
+                                ) ?>
+                            </p>
+                            <?php if ($invoice_credit_sen > 0): ?>
+                            <p class="text-xs text-green-600">
+                                − RM
+                                <?= moneyFormatSen(
+                                    $invoice_credit_sen
+                                ) ?>
+                                credit
+                            </p>
+                            <p class="text-xs text-gray-400">
+                                Net: RM
+                                <?= moneyFormatSen(
+                                    $invoice_net_sen
+                                ) ?>
+                            </p>
                             <?php if ($inv['invoice_status'] === 'unpaid'): ?>
                             <form method="POST" class="inline">
                                 <?php csrf_field(); ?>
@@ -624,7 +715,9 @@ foreach ($available_credits as $c) {
                         </td>
                         <td class="px-5 py-4 text-center whitespace-nowrap">
                             <?php if ($inv['invoice_is_mismatch']): ?>
-                            <span class="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full font-semibold inline-block" title="PO Total: RM <?= number_format($inv['po_total_amount'], 2) ?>">
+                            <span class="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full font-semibold inline-block" title="PO Total: RM <?= moneyFormatSen(
+                                $po_total_sen
+                            ) ?>">
                                 ⚠️ Mismatch
                             </span>
                             <?php else: ?>
@@ -673,7 +766,14 @@ foreach ($available_credits as $c) {
                                             value="<?= (int) $credit['return_id'] ?>"
                                         >
                                         <button type="submit" class="w-full bg-yellow-50 hover:bg-yellow-100 text-yellow-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors whitespace-normal leading-tight">
-                                            💳 Apply Credit<br><?= htmlspecialchars($credit['return_credit_note_number']) ?> (RM <?= number_format($credit['return_credit_note_amount'], 2) ?>)
+                                            💳 Apply Credit<br><?= htmlspecialchars($credit['return_credit_note_number']) ?> (RM
+                                            <?= moneyFormatSen(
+                                                moneyDecimalToSen(
+                                                    (string) $credit[
+                                                        'return_credit_note_amount'
+                                                    ]
+                                                )
+                                            ) ?>)
                                         </button>
                                     </form>
                                     <?php endforeach; ?>
@@ -691,8 +791,8 @@ foreach ($available_credits as $c) {
                                                 JSON_HEX_APOS |
                                                 JSON_HEX_QUOT
                                             ) ?>,
-                                            <?= (float) $inv['invoice_amount'] ?>,
-                                            <?= (float) ($inv['po_total_amount'] ?? 0) ?>
+                                            <?= $invoice_amount_sen ?>,
+                                            <?= $po_total_sen ?>
                                         )'
                                             class="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center">
                                         ✓ Mark as Paid
@@ -846,12 +946,41 @@ foreach ($available_credits as $c) {
     function closeRejectModal() {
         document.getElementById('rejectModal').classList.add('hidden');
     }
-    function openOverrideModal(id, number, invoiceAmount, poAmount) {
-        document.getElementById('overrideInvoiceId').value = id;
-        document.getElementById('overrideInvoiceLabel').textContent = number;
-        document.getElementById('overrideInvoiceAmount').textContent = 'RM ' + parseFloat(invoiceAmount).toFixed(2);
-        document.getElementById('overridePoAmount').textContent = 'RM ' + parseFloat(poAmount).toFixed(2);
-        document.getElementById('overrideModal').classList.remove('hidden');
+    function formatSen(sen) {
+        const whole = Math.floor(sen / 100);
+        const fraction = String(sen % 100)
+            .padStart(2, '0');
+
+        return `${whole.toLocaleString('en-MY')}.${fraction}`;
+    }
+
+    function openOverrideModal(
+        id,
+        number,
+        invoiceAmountSen,
+        poAmountSen
+    ) {
+        document.getElementById(
+            'overrideInvoiceId'
+        ).value = id;
+
+        document.getElementById(
+            'overrideInvoiceLabel'
+        ).textContent = number;
+
+        document.getElementById(
+            'overrideInvoiceAmount'
+        ).textContent =
+            `RM ${formatSen(invoiceAmountSen)}`;
+
+        document.getElementById(
+            'overridePoAmount'
+        ).textContent =
+            `RM ${formatSen(poAmountSen)}`;
+
+        document.getElementById(
+            'overrideModal'
+        ).classList.remove('hidden');
     }
     function closeOverrideModal() {
         document.getElementById('overrideModal').classList.add('hidden');

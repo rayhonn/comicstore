@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
 require_admin();
 
@@ -197,35 +198,48 @@ if (
             );
         }
 
-        $cn_amount = 0.0;
+        $cn_amount_sen = 0;
 
         foreach ($return_items as $item) {
             $quantity = (int) $item[
                 'return_item_quantity'
             ];
 
-            $unit_price = (float) $item[
-                'return_item_unit_price'
-            ];
+            $unit_price_sen =
+                moneyDecimalToSen(
+                    (string) $item[
+                        'return_item_unit_price'
+                    ]
+                );
 
             if (
                 $quantity <= 0 ||
-                $unit_price < 0
+                $unit_price_sen <= 0 ||
+                $unit_price_sen >
+                    intdiv(
+                        9999999999 -
+                            $cn_amount_sen,
+                        $quantity
+                    )
             ) {
                 throw new RuntimeException(
                     'The return contains invalid item data.'
                 );
             }
 
-            $cn_amount +=
-                $quantity * $unit_price;
+            $cn_amount_sen +=
+                $quantity * $unit_price_sen;
         }
 
-        if ($cn_amount <= 0) {
+        if ($cn_amount_sen <= 0) {
             throw new RuntimeException(
                 'The credit note amount is invalid.'
             );
         }
+
+        $cn_amount = moneySenToDecimal(
+            $cn_amount_sen
+        );
 
         $resolution_type =
             $ret['return_status'] ===
@@ -418,54 +432,63 @@ if (
         }
 
         $po_items_data = [];
-        $total_cents = 0;
+        $total_sen = 0;
 
         foreach ($items as $item) {
             $product_id =
-                (int) $item['return_item_product_id'];
+                (int) $item[
+                    'return_item_product_id'
+                ];
+
             $quantity =
-                (int) $item['return_item_quantity'];
-            $unit_price =
-                (float) $item['return_item_unit_price'];
+                (int) $item[
+                    'return_item_quantity'
+                ];
+
+            $unit_price_sen =
+                moneyDecimalToSen(
+                    (string) $item[
+                        'return_item_unit_price'
+                    ]
+                );
 
             if (
                 $product_id <= 0 ||
                 $quantity <= 0 ||
-                $unit_price <= 0
+                $unit_price_sen <= 0 ||
+                $unit_price_sen >
+                    intdiv(
+                        9999999999 -
+                            $total_sen,
+                        $quantity
+                    )
             ) {
                 throw new RuntimeException(
                     'The return contains invalid item data.'
                 );
             }
 
-            $unit_price_cents =
-                (int) round($unit_price * 100);
-            $total_cents +=
-                $quantity * $unit_price_cents;
+            $total_sen +=
+                $quantity * $unit_price_sen;
 
             $po_items_data[] = [
                 'product_id' => $product_id,
                 'quantity' => $quantity,
-                'unit_price' => number_format(
-                    $unit_price_cents / 100,
-                    2,
-                    '.',
-                    ''
-                ),
+                'unit_price' =>
+                    moneySenToDecimal(
+                        $unit_price_sen
+                    ),
             ];
         }
 
-        if ($total_cents <= 0) {
+        if ($total_sen <= 0) {
             throw new RuntimeException(
                 'The replacement order has an invalid total amount.'
             );
         }
 
-        $po_total = number_format(
-            $total_cents / 100,
-            2,
-            '.',
-            ''
+        $po_total = moneySenToDecimal(
+            $total_sen
         );
 
         // Use the auto-increment ID to create a concurrency-safe PO number.
@@ -807,8 +830,17 @@ if (
             $ret['return_po_id'],
         ]);
 
-        $payable_total =
-            (float) $new_total->fetchColumn();
+        $payable_total_sen =
+            moneyDecimalToSen(
+                (string) (
+                    $new_total->fetchColumn()
+                    ?: '0.00'
+                )
+            );
+
+        $payable_total = moneySenToDecimal(
+            $payable_total_sen
+        );
 
         $update_po = $pdo->prepare("
             UPDATE purchase_orders
@@ -896,7 +928,38 @@ foreach ($returns as &$r) {
     ");
     $items->execute([$r['return_id']]);
     $r['items'] = $items->fetchAll(PDO::FETCH_ASSOC);
-    $r['total_value'] = array_sum(array_map(fn($i) => $i['return_item_quantity'] * $i['return_item_unit_price'], $r['items']));
+    $r['total_value_sen'] = 0;
+
+    foreach ($r['items'] as $item) {
+        $quantity = (int) $item[
+            'return_item_quantity'
+        ];
+
+        $unit_price_sen =
+            moneyDecimalToSen(
+                (string) $item[
+                    'return_item_unit_price'
+                ]
+            );
+
+        if (
+            $quantity <= 0 ||
+            $unit_price_sen <= 0 ||
+            $unit_price_sen >
+                intdiv(
+                    9999999999 -
+                        $r['total_value_sen'],
+                    $quantity
+                )
+        ) {
+            throw new RuntimeException(
+                'A supplier return contains invalid item data.'
+            );
+        }
+
+        $r['total_value_sen'] +=
+            $quantity * $unit_price_sen;
+    }
 
     if ($r['return_replacement_po_id']) {
         $po = $pdo->prepare("SELECT po_number FROM purchase_orders WHERE po_id = ?");
@@ -983,7 +1046,19 @@ unset($r);
                         </div>
                         <div class="text-right flex-shrink-0">
                             <p class="text-sm font-bold text-red-600"><?= $item['return_item_quantity'] ?> units</p>
-                            <p class="text-xs text-gray-400">RM <?= number_format($item['return_item_quantity'] * $item['return_item_unit_price'], 2) ?></p>
+                            <p class="text-xs text-gray-400">
+                                RM
+                                <?= moneyFormatSen(
+                                    (int) $item[
+                                        'return_item_quantity'
+                                    ] *
+                                    moneyDecimalToSen(
+                                        (string) $item[
+                                            'return_item_unit_price'
+                                        ]
+                                    )
+                                ) ?>
+                            </p>
                         </div>
                     </div>
                     <?php endforeach; ?>
@@ -1019,7 +1094,20 @@ unset($r);
                         ][$ret['return_resolution_type']] ?? $ret['return_resolution_type'] ?>
                     </p>
                     <?php if ($ret['return_resolution_type'] === 'credit_note'): ?>
-                    <p class="text-sm text-gray-700">Credit Note <strong><?= htmlspecialchars($ret['return_credit_note_number']) ?></strong> — RM <?= number_format($ret['return_credit_note_amount'], 2) ?></p>
+                    <p class="text-sm text-gray-700">
+                        Credit Note
+                        <strong><?= htmlspecialchars(
+                            $ret['return_credit_note_number']
+                        ) ?></strong>
+                        — RM
+                        <?= moneyFormatSen(
+                            moneyDecimalToSen(
+                                (string) $ret[
+                                    'return_credit_note_amount'
+                                ]
+                            )
+                        ) ?>
+                    </p>
                     <?php elseif ($ret['return_resolution_type'] === 'replacement' && !empty($ret['replacement_po_number'])): ?>
                     <p class="text-sm text-gray-700">Replacement order: <a href="purchase_orders.php" class="text-blue-600 font-semibold hover:underline"><?= htmlspecialchars($ret['replacement_po_number']) ?></a></p>
                     <?php endif; ?>
@@ -1031,7 +1119,15 @@ unset($r);
                 <?php endif; ?>
 
                 <div class="flex items-center justify-between">
-                    <p class="text-sm text-gray-600">Total deducted from payment: <strong class="text-red-600">RM <?= number_format($ret['total_value'], 2) ?></strong></p>
+                    <p class="text-sm text-gray-600">
+                        Total deducted from payment:
+                        <strong class="text-red-600">
+                            RM
+                            <?= moneyFormatSen(
+                                $ret['total_value_sen']
+                            ) ?>
+                        </strong>
+                    </p>
 
                     <?php if ($ret['return_status'] === 'acknowledged'): ?>
                     <button onclick="document.getElementById('<?= $modal_id ?>').classList.remove('hidden')"
@@ -1058,7 +1154,16 @@ unset($r);
                     <h3 class="text-lg font-bold text-gray-800 mb-1">
                         <?= $ret['return_status'] === 'escalated' ? '⚖️ Adjudicate Dispute' : 'Resolve Return' ?> — <?= htmlspecialchars($ret['return_number']) ?>
                     </h3>
-                    <p class="text-xs text-gray-400 mb-4">RM <?= number_format($ret['total_value'], 2) ?> · <?= htmlspecialchars($ret['supplier_name']) ?></p>
+                    <p class="text-xs text-gray-400 mb-4">
+                        RM
+                        <?= moneyFormatSen(
+                            $ret['total_value_sen']
+                        ) ?>
+                        ·
+                        <?= htmlspecialchars(
+                            $ret['supplier_name']
+                        ) ?>
+                    </p>
 
                     <?php if ($ret['return_status'] === 'escalated'): ?>
                     <div class="bg-orange-50 border border-orange-100 rounded-xl p-3 mb-4">
@@ -1078,7 +1183,9 @@ unset($r);
                                         <input type="text" name="credit_note_seq" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="0001" required
                                             class="flex-1 px-3 py-2 text-sm focus:outline-none" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,4)">
                                     </div>
-                                    <input type="number" step="0.01" name="credit_note_amount" value="<?= number_format($ret['total_value'], 2, '.', '') ?>" readonly required
+                                    <input type="number" step="0.01" name="credit_note_amount" value="<?= moneySenToDecimal(
+                                                $ret['total_value_sen']
+                                            ) ?>" readonly required
                                            class="px-3 py-2 border-2 border-gray-100 rounded-lg text-sm focus:outline-none focus:border-blue-400">
                                 </div>
                                 <?php if ($ret['return_status'] === 'escalated'): ?>
