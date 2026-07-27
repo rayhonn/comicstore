@@ -8,51 +8,197 @@ require_admin();
 $success = '';
 $error = '';
 
+function normalizeFaqText(
+    mixed $value,
+    string $label,
+    int $maxLength,
+    bool $required = true
+): string {
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
+
+    $value = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($value, 'UTF-8')
+        : strlen($value);
+
+    if ($required && $value === '') {
+        throw new RuntimeException($label . ' is required.');
+    }
+
+    if ($length > $maxLength) {
+        throw new RuntimeException(
+            $label . ' cannot exceed ' . $maxLength . ' characters.'
+        );
+    }
+
+    return $value;
+}
+
+function normalizeFaqId(mixed $value): int
+{
+    $id = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
+
+    if ($id === false || $id === null) {
+        throw new RuntimeException('Invalid FAQ.');
+    }
+
+    return $id;
+}
+
+function normalizeFaqOrder(mixed $value): int
+{
+    $order = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 0,
+                'max_range' => 1000000,
+            ],
+        ]
+    );
+
+    if ($order === false || $order === null) {
+        throw new RuntimeException(
+            'Display order must be a non-negative integer.'
+        );
+    }
+
+    return $order;
+}
+
+function validateFaqFields(array $input): array
+{
+    return [
+        normalizeFaqText(
+            $input['faq_category'] ?? '',
+            'FAQ category',
+            100
+        ),
+        normalizeFaqText(
+            $input['faq_question'] ?? '',
+            'FAQ question',
+            500
+        ),
+        normalizeFaqText(
+            $input['faq_answer'] ?? '',
+            'FAQ answer',
+            5000
+        ),
+        normalizeFaqOrder($input['faq_order'] ?? 0),
+    ];
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
-    $action = $_POST['action'] ?? '';
 
-    if ($action === 'add') {
-        $category = trim($_POST['faq_category']);
-        $question = trim($_POST['faq_question']);
-        $answer = trim($_POST['faq_answer']);
-        $order = intval($_POST['faq_order'] ?? 0);
+    $action = $_POST['action'] ?? null;
 
-        if (!is_string($_POST['faq_category'] ?? null) || !is_string($_POST['faq_question'] ?? null) || !is_string($_POST['faq_answer'] ?? null) || strlen($category) > 100 || strlen($question) > 500 || strlen($answer) > 5000 || $order < 0) {
-            $error = 'FAQ input is invalid or too long.';
-        } elseif (empty($category) || empty($question) || empty($answer)) {
-            $error = 'All fields are required.';
-        } else {
-            $pdo->prepare("INSERT INTO faqs (faq_category, faq_question, faq_answer, faq_order) VALUES (?, ?, ?, ?)")
-                ->execute([$category, $question, $answer, $order]);
-            $success = 'FAQ added successfully!';
+    try {
+        if (!is_string($action)) {
+            throw new RuntimeException('Invalid FAQ action.');
         }
 
-    } elseif ($action === 'edit') {
-        $id = filter_var($_POST['faq_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-        if ($id === false || $id === null) { $error = 'Invalid FAQ.'; } else
-        $category = trim($_POST['faq_category']);
-        $question = trim($_POST['faq_question']);
-        $answer = trim($_POST['faq_answer']);
-        $order = intval($_POST['faq_order'] ?? 0);
-        $active = isset($_POST['faq_is_active']) ? 1 : 0;
+        if ($action === 'add') {
+            [$category, $question, $answer, $order] =
+                validateFaqFields($_POST);
 
-        $pdo->prepare("UPDATE faqs SET faq_category=?, faq_question=?, faq_answer=?, faq_order=?, faq_is_active=? WHERE faq_id=?")
-            ->execute([$category, $question, $answer, $order, $active, $id]);
-        $success = 'FAQ updated successfully!';
+            $insert_faq = $pdo->prepare(
+                'INSERT INTO faqs (
+                    faq_category,
+                    faq_question,
+                    faq_answer,
+                    faq_order
+                ) VALUES (?, ?, ?, ?)'
+            );
+            $insert_faq->execute([
+                $category,
+                $question,
+                $answer,
+                $order,
+            ]);
+            $success = 'FAQ added successfully!';
+        } elseif ($action === 'edit') {
+            $faq_id = normalizeFaqId($_POST['faq_id'] ?? null);
+            [$category, $question, $answer, $order] =
+                validateFaqFields($_POST);
+            $active = isset($_POST['faq_is_active']) ? 1 : 0;
 
-    } elseif ($action === 'delete') {
-        $pdo->prepare("DELETE FROM faqs WHERE faq_id = ?")->execute([filter_var($_POST['faq_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])]);
-        $success = 'FAQ deleted.';
+            $faq_check = $pdo->prepare(
+                'SELECT faq_id FROM faqs WHERE faq_id = ?'
+            );
+            $faq_check->execute([$faq_id]);
+            if (!$faq_check->fetchColumn()) {
+                throw new RuntimeException('FAQ not found.');
+            }
 
-    } elseif ($action === 'toggle') {
-        $pdo->prepare("UPDATE faqs SET faq_is_active = NOT faq_is_active WHERE faq_id = ?")->execute([filter_var($_POST['faq_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])]);
-        header('Location: faq.php');
-        exit;
+            $update_faq = $pdo->prepare(
+                'UPDATE faqs
+                 SET faq_category = ?,
+                     faq_question = ?,
+                     faq_answer = ?,
+                     faq_order = ?,
+                     faq_is_active = ?
+                 WHERE faq_id = ?'
+            );
+            $update_faq->execute([
+                $category,
+                $question,
+                $answer,
+                $order,
+                $active,
+                $faq_id,
+            ]);
+            $success = 'FAQ updated successfully!';
+        } elseif ($action === 'delete') {
+            $faq_id = normalizeFaqId($_POST['faq_id'] ?? null);
+
+            $delete_faq = $pdo->prepare(
+                'DELETE FROM faqs WHERE faq_id = ?'
+            );
+            $delete_faq->execute([$faq_id]);
+
+            if ($delete_faq->rowCount() !== 1) {
+                throw new RuntimeException('FAQ not found.');
+            }
+
+            $success = 'FAQ deleted.';
+        } elseif ($action === 'toggle') {
+            $faq_id = normalizeFaqId($_POST['faq_id'] ?? null);
+
+            $toggle_faq = $pdo->prepare(
+                'UPDATE faqs
+                 SET faq_is_active = NOT faq_is_active
+                 WHERE faq_id = ?'
+            );
+            $toggle_faq->execute([$faq_id]);
+
+            if ($toggle_faq->rowCount() !== 1) {
+                throw new RuntimeException('FAQ not found.');
+            }
+
+            header('Location: faq.php');
+            exit;
+        } else {
+            throw new RuntimeException('Invalid FAQ action.');
+        }
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
+    } catch (Throwable $e) {
+        app_error_log('FAQ management failed: ' . $e->getMessage());
+        $error = 'Unable to update FAQ content.';
     }
 }
 
-$faqs = $pdo->query("SELECT * FROM faqs ORDER BY faq_category, faq_order ASC")->fetchAll(PDO::FETCH_ASSOC);
+$faqs = $pdo->query(
+    'SELECT * FROM faqs ORDER BY faq_category, faq_order ASC'
+)->fetchAll(PDO::FETCH_ASSOC);
 $faqs_grouped = [];
 foreach ($faqs as $faq) {
     $faqs_grouped[$faq['faq_category']][] = $faq;
@@ -125,17 +271,17 @@ foreach ($faqs as $faq) {
                     <div class="flex items-center gap-2 flex-shrink-0">
                         <form method="POST" class="inline">
                             <?php csrf_field(); ?>
-<input type="hidden" name="action" value="toggle">
-                            <input type="hidden" name="faq_id" value="<?= $faq['faq_id'] ?>">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="faq_id" value="<?= (int) $faq['faq_id'] ?>">
                             <button type="submit" class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:border-gray-300 text-gray-500 hover:text-gray-700 transition-colors">
                                 <?= $faq['faq_is_active'] ? '👁️ Hide' : '👁️ Show' ?>
                             </button>
                         </form>
-                        <button onclick="openEditModal(<?= htmlspecialchars(json_encode($faq)) ?>)"
+                        <button onclick="openEditModal(<?= htmlspecialchars(json_encode($faq), ENT_QUOTES, 'UTF-8') ?>)"
                                 class="text-xs px-3 py-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition-colors">
                             ✏️ Edit
                         </button>
-                        <button onclick="openDeleteModal(<?= $faq['faq_id'] ?>, '<?= htmlspecialchars(addslashes($faq['faq_question'])) ?>')"
+                        <button onclick="openDeleteModal(<?= (int) $faq['faq_id'] ?>, '<?= htmlspecialchars(addslashes($faq['faq_question'])) ?>')"
                                 class="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors">
                             🗑️ Delete
                         </button>
@@ -158,7 +304,7 @@ foreach ($faqs as $faq) {
             </div>
             <form method="POST" class="p-6 space-y-4">
                 <?php csrf_field(); ?>
-<input type="hidden" name="action" id="formAction" value="add">
+                <input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="faq_id" id="formId">
 
                 <div>
@@ -213,7 +359,7 @@ foreach ($faqs as $faq) {
             <p class="text-sm text-gray-500 mb-6" id="deleteQuestion"></p>
             <form method="POST">
                 <?php csrf_field(); ?>
-<input type="hidden" name="action" value="delete">
+                <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="faq_id" id="deleteId">
                 <div class="flex gap-3">
                     <button type="button" onclick="closeDeleteModal()"

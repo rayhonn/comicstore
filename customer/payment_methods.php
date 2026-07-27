@@ -9,103 +9,313 @@ $user_id = (int) $_SESSION['user_id'];
 $error = '';
 $success = '';
 
-function paymentInput(mixed $value, string $label, int $maxLength): string
-{
-    if (!is_string($value)) throw new RuntimeException('Invalid ' . $label . '.');
+$ewallets = [
+    'Touch n Go',
+    'GrabPay',
+    'ShopeePay',
+    'Boost',
+];
+
+function normalizePaymentText(
+    mixed $value,
+    string $label,
+    int $maxLength,
+    bool $required = true
+): string {
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
+
     $value = trim($value);
-    $length = function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
-    if ($value === '' || $length > $maxLength) throw new RuntimeException($label . ' is invalid.');
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($value, 'UTF-8')
+        : strlen($value);
+
+    if ($required && $value === '') {
+        throw new RuntimeException($label . ' is required.');
+    }
+
+    if ($length > $maxLength) {
+        throw new RuntimeException(
+            $label . ' cannot exceed ' . $maxLength . ' characters.'
+        );
+    }
+
     return $value;
 }
 
+function normalizePaymentMethodId(mixed $value): int
+{
+    $id = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
 
-// Handle actions
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    csrf_verify();
-    $action = $_POST['action'] ?? '';
+    if ($id === false || $id === null) {
+        throw new RuntimeException('Invalid payment method.');
+    }
 
-    if ($action === 'add_card') {
-        $label = trim($_POST['pm_label']);
-        $holder = trim($_POST['pm_holder_name']);
-        $last_four = trim($_POST['pm_last_four']);
-        $expiry = trim($_POST['pm_expiry']);
-        $is_default = isset($_POST['pm_is_default']) ? 1 : 0;
-        $pin = is_string($_POST['confirm_pin'] ?? null) ? trim($_POST['confirm_pin']) : '';
-        if (!is_string($_POST['pm_label'] ?? null) || !is_string($_POST['pm_holder_name'] ?? null) || strlen($label) > 100 || strlen($holder) > 150) {
-            $error = 'Card label or holder name is invalid.';
-        }
+    return $id;
+}
 
-        if ($error !== '') {
-            // Validation error already set.
-        } elseif (empty($label) || empty($holder) || empty($last_four) || empty($expiry) || empty($pin)) {
-            $error = "Please fill in all required fields.";
-        } elseif (!preg_match('/^\d{4}$/', $last_four)) {
-            $error = "Last 4 digits must be exactly 4 numbers.";
-        } elseif (!preg_match('/^\d{2}\/\d{2}$/', $expiry)) {
-            $error = "Expiry must be in MM/YY format.";
-        } elseif (strlen($pin) !== 6 || !ctype_digit($pin)) {
-            $error = "Security PIN must be 6 digits.";
-        } else {
-            if ($is_default) {
-                $pdo->prepare("UPDATE payment_methods SET pm_is_default = 0 WHERE pm_user_id = ?")
-                    ->execute([$user_id]);
-            }
-            $pdo->prepare("INSERT INTO payment_methods (pm_user_id, pm_type, pm_label, pm_last_four, pm_expiry, pm_holder_name, pm_is_default) VALUES (?, 'card', ?, ?, ?, ?, ?)")
-                ->execute([$user_id, $label, $last_four, $expiry, $holder, $is_default]);
-            $success = "Card saved successfully!";
-        }
+function validatePaymentPin(mixed $value): void
+{
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid security PIN.');
+    }
 
-    } elseif ($action === 'add_ewallet') {
-        $label = trim($_POST['pm_label']);
-        $ewallet_name = trim($_POST['pm_ewallet_name']);
-        $phone = trim($_POST['pm_phone']);
-        $is_default = isset($_POST['pm_is_default']) ? 1 : 0;
-        $pin = is_string($_POST['confirm_pin'] ?? null) ? trim($_POST['confirm_pin']) : '';
-        if (!is_string($_POST['pm_label'] ?? null) || !is_string($_POST['pm_ewallet_name'] ?? null) || !is_string($_POST['pm_phone'] ?? null) || strlen($label) > 100 || strlen($ewallet_name) > 50) {
-            $error = 'E-wallet input is invalid.';
-        }
-
-        if ($error !== '') {
-            // Validation error already set.
-        } elseif (empty($label) || empty($ewallet_name) || empty($phone) || empty($pin)) {
-            $error = "Please fill in all required fields.";
-        } elseif (!preg_match('/^[0-9]{9,10}$/', $phone)) {
-            $error = "Please enter a valid phone number.";
-        } elseif (strlen($pin) !== 6 || !ctype_digit($pin)) {
-            $error = "Security PIN must be 6 digits.";
-        } else {
-            if ($is_default) {
-                $pdo->prepare("UPDATE payment_methods SET pm_is_default = 0 WHERE pm_user_id = ?")
-                    ->execute([$user_id]);
-            }
-            $pdo->prepare("INSERT INTO payment_methods (pm_user_id, pm_type, pm_label, pm_ewallet_name, pm_phone, pm_is_default) VALUES (?, 'ewallet', ?, ?, ?, ?)")
-                ->execute([$user_id, $label, $ewallet_name, $phone, $is_default]);
-            $success = "E-Wallet saved successfully!";
-        }
-
-    } elseif ($action === 'delete') {
-        $pm_id = filter_var($_POST['pm_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-        if ($pm_id === false || $pm_id === null) { $error = 'Invalid payment method.'; } else
-        $pdo->prepare("DELETE FROM payment_methods WHERE pm_id = ? AND pm_user_id = ?")
-            ->execute([$pm_id, $user_id]);
-        $success = "Payment method removed.";
-
-    } elseif ($action === 'set_default') {
-        $pm_id = filter_var($_POST['pm_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-        if ($pm_id === false || $pm_id === null) { $error = 'Invalid payment method.'; } else
-        $pdo->prepare("UPDATE payment_methods SET pm_is_default = 0 WHERE pm_user_id = ?")
-            ->execute([$user_id]);
-        $pdo->prepare("UPDATE payment_methods SET pm_is_default = 1 WHERE pm_id = ? AND pm_user_id = ?")
-            ->execute([$pm_id, $user_id]);
-        $success = "Default payment method updated.";
+    $pin = trim($value);
+    if (!preg_match('/^\d{6}$/', $pin)) {
+        throw new RuntimeException('Security PIN must be 6 digits.');
     }
 }
 
-$payment_methods = $pdo->prepare("SELECT * FROM payment_methods WHERE pm_user_id = ? ORDER BY pm_is_default DESC, pm_created_at DESC");
-$payment_methods->execute([$user_id]);
-$payment_methods = $payment_methods->fetchAll(PDO::FETCH_ASSOC);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
 
-$ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
+    $action = $_POST['action'] ?? null;
+
+    try {
+        if (!is_string($action)) {
+            throw new RuntimeException('Invalid payment method action.');
+        }
+
+        if ($action === 'add_card') {
+            $label = normalizePaymentText(
+                $_POST['pm_label'] ?? '',
+                'Card label',
+                100
+            );
+            $holder = normalizePaymentText(
+                $_POST['pm_holder_name'] ?? '',
+                'Card holder name',
+                100
+            );
+            $last_four = normalizePaymentText(
+                $_POST['pm_last_four'] ?? '',
+                'Last four digits',
+                4
+            );
+            $expiry = normalizePaymentText(
+                $_POST['pm_expiry'] ?? '',
+                'Card expiry',
+                5
+            );
+            validatePaymentPin($_POST['confirm_pin'] ?? null);
+
+            if (!preg_match('/^\d{4}$/', $last_four)) {
+                throw new RuntimeException(
+                    'Last 4 digits must be exactly 4 numbers.'
+                );
+            }
+
+            if (!preg_match('/^(0[1-9]|1[0-2])\/\d{2}$/', $expiry)) {
+                throw new RuntimeException(
+                    'Expiry must be a valid MM/YY value.'
+                );
+            }
+
+            $is_default = isset($_POST['pm_is_default']) ? 1 : 0;
+
+            $pdo->beginTransaction();
+            try {
+                if ($is_default) {
+                    $clear_default = $pdo->prepare(
+                        'UPDATE payment_methods
+                         SET pm_is_default = 0
+                         WHERE pm_user_id = ?'
+                    );
+                    $clear_default->execute([$user_id]);
+                }
+
+                $insert_card = $pdo->prepare(
+                    "INSERT INTO payment_methods (
+                        pm_user_id,
+                        pm_type,
+                        pm_label,
+                        pm_last_four,
+                        pm_expiry,
+                        pm_holder_name,
+                        pm_is_default
+                    ) VALUES (?, 'card', ?, ?, ?, ?, ?)"
+                );
+                $insert_card->execute([
+                    $user_id,
+                    $label,
+                    $last_four,
+                    $expiry,
+                    $holder,
+                    $is_default,
+                ]);
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            $success = 'Card saved successfully!';
+        } elseif ($action === 'add_ewallet') {
+            $label = normalizePaymentText(
+                $_POST['pm_label'] ?? '',
+                'Wallet label',
+                100
+            );
+            $ewallet_name = normalizePaymentText(
+                $_POST['pm_ewallet_name'] ?? '',
+                'E-wallet type',
+                50
+            );
+            $phone = normalizePaymentText(
+                $_POST['pm_phone'] ?? '',
+                'Registered phone number',
+                20
+            );
+            validatePaymentPin($_POST['confirm_pin'] ?? null);
+
+            if (!in_array($ewallet_name, $ewallets, true)) {
+                throw new RuntimeException('Please select a valid e-wallet.');
+            }
+
+            if (!preg_match('/^[0-9]{9,10}$/', $phone)) {
+                throw new RuntimeException(
+                    'Please enter a valid phone number.'
+                );
+            }
+
+            $is_default = isset($_POST['pm_is_default']) ? 1 : 0;
+
+            $pdo->beginTransaction();
+            try {
+                if ($is_default) {
+                    $clear_default = $pdo->prepare(
+                        'UPDATE payment_methods
+                         SET pm_is_default = 0
+                         WHERE pm_user_id = ?'
+                    );
+                    $clear_default->execute([$user_id]);
+                }
+
+                $insert_wallet = $pdo->prepare(
+                    "INSERT INTO payment_methods (
+                        pm_user_id,
+                        pm_type,
+                        pm_label,
+                        pm_ewallet_name,
+                        pm_phone,
+                        pm_is_default
+                    ) VALUES (?, 'ewallet', ?, ?, ?, ?)"
+                );
+                $insert_wallet->execute([
+                    $user_id,
+                    $label,
+                    $ewallet_name,
+                    $phone,
+                    $is_default,
+                ]);
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            $success = 'E-Wallet saved successfully!';
+        } elseif ($action === 'delete') {
+            $payment_method_id = normalizePaymentMethodId(
+                $_POST['pm_id'] ?? null
+            );
+
+            $delete_method = $pdo->prepare(
+                'DELETE FROM payment_methods
+                 WHERE pm_id = ?
+                 AND pm_user_id = ?'
+            );
+            $delete_method->execute([
+                $payment_method_id,
+                $user_id,
+            ]);
+
+            if ($delete_method->rowCount() !== 1) {
+                throw new RuntimeException('Payment method not found.');
+            }
+
+            $success = 'Payment method removed.';
+        } elseif ($action === 'set_default') {
+            $payment_method_id = normalizePaymentMethodId(
+                $_POST['pm_id'] ?? null
+            );
+
+            $method_check = $pdo->prepare(
+                'SELECT pm_id
+                 FROM payment_methods
+                 WHERE pm_id = ?
+                 AND pm_user_id = ?'
+            );
+            $method_check->execute([
+                $payment_method_id,
+                $user_id,
+            ]);
+            if (!$method_check->fetchColumn()) {
+                throw new RuntimeException('Payment method not found.');
+            }
+
+            $pdo->beginTransaction();
+            try {
+                $clear_default = $pdo->prepare(
+                    'UPDATE payment_methods
+                     SET pm_is_default = 0
+                     WHERE pm_user_id = ?'
+                );
+                $clear_default->execute([$user_id]);
+
+                $set_default = $pdo->prepare(
+                    'UPDATE payment_methods
+                     SET pm_is_default = 1
+                     WHERE pm_id = ?
+                     AND pm_user_id = ?'
+                );
+                $set_default->execute([
+                    $payment_method_id,
+                    $user_id,
+                ]);
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            $success = 'Default payment method updated.';
+        } else {
+            throw new RuntimeException('Invalid payment method action.');
+        }
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        app_error_log('Payment method management failed: ' . $e->getMessage());
+        $error = 'Unable to update payment methods.';
+    }
+}
+
+$payment_methods_stmt = $pdo->prepare(
+    'SELECT *
+     FROM payment_methods
+     WHERE pm_user_id = ?
+     ORDER BY pm_is_default DESC, pm_created_at DESC'
+);
+$payment_methods_stmt->execute([$user_id]);
+$payment_methods = $payment_methods_stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -188,12 +398,12 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
                                         <?php if (!$pm['pm_is_default']): ?>
                                         <form method="POST" class="inline">
                                             <?php csrf_field(); ?>
-<input type="hidden" name="action" value="set_default">
-                                            <input type="hidden" name="pm_id" value="<?= $pm['pm_id'] ?>">
+                                            <input type="hidden" name="action" value="set_default">
+                                            <input type="hidden" name="pm_id" value="<?= (int) $pm['pm_id'] ?>">
                                             <button type="submit" class="text-xs px-3 py-1.5 bg-green-100 text-green-700 hover:bg-green-200 rounded-lg transition-colors">Set Default</button>
                                         </form>
                                         <?php endif; ?>
-                                        <button onclick="confirmDelete(<?= $pm['pm_id'] ?>)"
+                                        <button onclick="confirmDelete(<?= (int) $pm['pm_id'] ?>)"
                                                 class="text-xs px-3 py-1.5 bg-red-100 text-red-600 hover:bg-red-200 rounded-lg transition-colors">Remove</button>
                                     </div>
                                 </div>
@@ -215,7 +425,7 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
 
                         <form method="POST" id="addCardForm" class="space-y-4">
                             <?php csrf_field(); ?>
-<input type="hidden" name="action" value="add_card">
+                            <input type="hidden" name="action" value="add_card">
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1.5">Card Label *</label>
                                 <input type="text" name="pm_label" maxlength="100" placeholder="e.g. My Visa Card" required
@@ -223,7 +433,7 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1.5">Card Holder Name *</label>
-                                <input type="text" name="pm_holder_name" maxlength="150" placeholder="JOHN DOE" required
+                                <input type="text" name="pm_holder_name" maxlength="100" placeholder="JOHN DOE" required
                                        class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white uppercase">
                             </div>
                             <div class="grid grid-cols-2 gap-3">
@@ -276,7 +486,7 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
 
                         <form method="POST" id="addWalletForm" class="space-y-4">
                             <?php csrf_field(); ?>
-<input type="hidden" name="action" value="add_ewallet">
+                            <input type="hidden" name="action" value="add_ewallet">
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1.5">Wallet Label *</label>
                                 <input type="text" name="pm_label" maxlength="100" placeholder="e.g. My TNG Wallet" required
@@ -284,11 +494,11 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1.5">E-Wallet Type *</label>
-                                <select name="pm_ewallet_name" maxlength="50" required
+                                <select name="pm_ewallet_name" required
                                         class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                                     <option value="">Select e-wallet...</option>
                                     <?php foreach ($ewallets as $ew): ?>
-                                        <option value="<?= $ew ?>"><?= $ew ?></option>
+                                        <option value="<?= htmlspecialchars($ew, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($ew, ENT_QUOTES, 'UTF-8') ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
@@ -344,7 +554,7 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
             <p class="text-sm text-gray-500 mb-5">This action cannot be undone.</p>
             <form method="POST" id="deleteForm">
                 <?php csrf_field(); ?>
-<input type="hidden" name="action" value="delete">
+                <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="pm_id" id="deletePmId">
                 <div class="flex gap-3">
                     <button type="button" onclick="document.getElementById('deleteModal').classList.add('hidden')"

@@ -7,126 +7,362 @@ require_customer();
 
 $user_id = (int) $_SESSION['user_id'];
 
-function addressInput(mixed $value, string $label, int $maxLength, bool $required = false): string
-{
+$malaysian_states = [
+    'Johor',
+    'Kedah',
+    'Kelantan',
+    'Melaka',
+    'Negeri Sembilan',
+    'Pahang',
+    'Perak',
+    'Perlis',
+    'Pulau Pinang',
+    'Sabah',
+    'Sarawak',
+    'Selangor',
+    'Terengganu',
+    'Wilayah Persekutuan Kuala Lumpur',
+    'Wilayah Persekutuan Labuan',
+    'Wilayah Persekutuan Putrajaya',
+];
+
+function normalizeAddressText(
+    mixed $value,
+    string $label,
+    int $maxLength,
+    bool $required = false
+): string {
     if (!is_string($value)) {
         throw new RuntimeException('Invalid ' . $label . '.');
     }
+
     $value = trim($value);
-    $length = function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
-    if (($required && $value === '') || $length > $maxLength) {
-        throw new RuntimeException($label . ' is invalid.');
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($value, 'UTF-8')
+        : strlen($value);
+
+    if ($required && $value === '') {
+        throw new RuntimeException($label . ' is required.');
     }
+
+    if ($length > $maxLength) {
+        throw new RuntimeException(
+            $label . ' cannot exceed ' . $maxLength . ' characters.'
+        );
+    }
+
     return $value;
 }
 
+function normalizeAddressId(mixed $value): int
+{
+    $id = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
 
-// Handle actions
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    csrf_verify();
-    $action = $_POST['action'] ?? '';
-
-    if ($action === 'add') {
-        try {
-            $recipient = addressInput($_POST['address_recipient_name'] ?? '', 'Recipient name', 150, true);
-            $taman = addressInput($_POST['address_taman'] ?? '', 'Taman or apartment', 150, true);
-            $street = addressInput($_POST['address_street'] ?? '', 'Street address', 255, true);
-            $city = addressInput($_POST['address_city'] ?? '', 'City', 100, true);
-            $state = addressInput($_POST['address_state'] ?? '', 'State', 100);
-            $postal = addressInput($_POST['address_postal_code'] ?? '', 'Postal code', 20, true);
-            $country = addressInput($_POST['address_country'] ?? 'Malaysia', 'Country', 100, true);
-            $phone = addressInput($_POST['address_phone'] ?? '', 'Phone number', 20, true);
-            if (!preg_match('/^01[0-9]{8,9}$/', $phone)) {
-                throw new RuntimeException('Please enter a valid Malaysian phone number.');
-            }
-            $is_default = isset($_POST['is_default']) ? 1 : 0;
-        } catch (RuntimeException $e) {
-            $_SESSION['addr_success'] = $e->getMessage();
-            header('Location: addresses.php');
-            exit;
-        }
-
-        if ($is_default) {
-            $pdo->prepare("UPDATE addresses SET address_is_default = 0 WHERE address_user_id = ?")
-                ->execute([$user_id]);
-        }
-
-        $pdo->prepare("INSERT INTO addresses (address_user_id, address_recipient_name, address_taman, address_street, address_city, address_state, address_postal_code, address_country, address_phone, address_is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            ->execute([$user_id, $recipient, $taman, $street, $city, $state, $postal, $country, $phone, $is_default]);
-
-        $_SESSION['addr_success'] = 'Address added successfully!';
-        header('Location: addresses.php');
-        exit;
-
-    } elseif ($action === 'edit') {
-        $addr_id   = $_POST['address_id'];
-        try {
-            $recipient = addressInput($_POST['address_recipient_name'] ?? '', 'Recipient name', 150, true);
-            $taman = addressInput($_POST['address_taman'] ?? '', 'Taman or apartment', 150, true);
-            $street = addressInput($_POST['address_street'] ?? '', 'Street address', 255, true);
-            $city = addressInput($_POST['address_city'] ?? '', 'City', 100, true);
-            $state = addressInput($_POST['address_state'] ?? '', 'State', 100);
-            $postal = addressInput($_POST['address_postal_code'] ?? '', 'Postal code', 20, true);
-            $country = addressInput($_POST['address_country'] ?? 'Malaysia', 'Country', 100, true);
-            $phone = addressInput($_POST['address_phone'] ?? '', 'Phone number', 20, true);
-            if (!preg_match('/^01[0-9]{8,9}$/', $phone)) {
-                throw new RuntimeException('Please enter a valid Malaysian phone number.');
-            }
-            $is_default = isset($_POST['is_default']) ? 1 : 0;
-        } catch (RuntimeException $e) {
-            $_SESSION['addr_success'] = $e->getMessage();
-            header('Location: addresses.php');
-            exit;
-        }
-
-        $check = $pdo->prepare("SELECT address_id FROM addresses WHERE address_id = ? AND address_user_id = ?");
-        $check->execute([$addr_id, $user_id]);
-        if ($check->fetch()) {
-            if ($is_default) {
-                $pdo->prepare("UPDATE addresses SET address_is_default = 0 WHERE address_user_id = ?")
-                    ->execute([$user_id]);
-            }
-            $pdo->prepare("UPDATE addresses SET address_recipient_name=?, address_taman=?, address_street=?, address_city=?, address_state=?, address_postal_code=?, address_country=?, address_phone=?, address_is_default=? WHERE address_id=?")
-                ->execute([$recipient, $taman, $street, $city, $state, $postal, $country, $phone, $is_default, $addr_id]);
-        }
-        $_SESSION['addr_success'] = 'Address updated successfully!';
-        header('Location: addresses.php');
-        exit;
-
-    } elseif ($action === 'delete') {
-        $addr_id = filter_var($_POST['address_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-        if ($addr_id === false || $addr_id === null) { header('Location: addresses.php'); exit; }
-        $check = $pdo->prepare("SELECT address_id FROM addresses WHERE address_id = ? AND address_user_id = ?");
-        $check->execute([$addr_id, $user_id]);
-        if ($check->fetch()) {
-            $pdo->prepare("DELETE FROM addresses WHERE address_id = ?")->execute([$addr_id]);
-        }
-        $_SESSION['addr_success'] = 'Address deleted.';
-        header('Location: addresses.php');
-        exit;
-
-    } elseif ($action === 'set_default') {
-        $addr_id = filter_var($_POST['address_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-        if ($addr_id === false || $addr_id === null) { header('Location: addresses.php'); exit; }
-        $check = $pdo->prepare("SELECT address_id FROM addresses WHERE address_id = ? AND address_user_id = ?");
-        $check->execute([$addr_id, $user_id]);
-        if ($check->fetch()) {
-            $pdo->prepare("UPDATE addresses SET address_is_default = 0 WHERE address_user_id = ?")
-                ->execute([$user_id]);
-            $pdo->prepare("UPDATE addresses SET address_is_default = 1 WHERE address_id = ?")
-                ->execute([$addr_id]);
-        }
-        header('Location: addresses.php');
-        exit;
+    if ($id === false || $id === null) {
+        throw new RuntimeException('Invalid address.');
     }
+
+    return $id;
 }
 
-$addresses = $pdo->prepare("SELECT * FROM addresses WHERE address_user_id = ? ORDER BY address_is_default DESC, address_created_at DESC");
-$addresses->execute([$user_id]);
-$addresses = $addresses->fetchAll(PDO::FETCH_ASSOC);
+function validateAddressFields(array $input, array $allowedStates): array
+{
+    $recipient = normalizeAddressText(
+        $input['address_recipient_name'] ?? '',
+        'Recipient name',
+        100,
+        true
+    );
+    $taman = normalizeAddressText(
+        $input['address_taman'] ?? '',
+        'Taman or apartment',
+        100,
+        true
+    );
+    $street = normalizeAddressText(
+        $input['address_street'] ?? '',
+        'Street address',
+        255,
+        true
+    );
+    $city = normalizeAddressText(
+        $input['address_city'] ?? '',
+        'City',
+        100,
+        true
+    );
+    $state = normalizeAddressText(
+        $input['address_state'] ?? '',
+        'State',
+        100,
+        true
+    );
+    $postal = normalizeAddressText(
+        $input['address_postal_code'] ?? '',
+        'Postal code',
+        5,
+        true
+    );
+    $country = normalizeAddressText(
+        $input['address_country'] ?? '',
+        'Country',
+        100,
+        true
+    );
+    $phone = normalizeAddressText(
+        $input['address_phone'] ?? '',
+        'Phone number',
+        20,
+        true
+    );
+
+    if (!in_array($state, $allowedStates, true)) {
+        throw new RuntimeException('Please select a valid Malaysian state.');
+    }
+
+    if (!preg_match('/^\d{5}$/', $postal)) {
+        throw new RuntimeException(
+            'Please enter a valid 5-digit Malaysian postal code.'
+        );
+    }
+
+    if ($country !== 'Malaysia') {
+        throw new RuntimeException('Country must be Malaysia.');
+    }
+
+    if (!preg_match('/^01[0-9]{8,9}$/', $phone)) {
+        throw new RuntimeException(
+            'Please enter a valid Malaysian phone number.'
+        );
+    }
+
+    return [
+        $recipient,
+        $taman,
+        $street,
+        $city,
+        $state,
+        $postal,
+        $country,
+        $phone,
+        isset($input['is_default']) ? 1 : 0,
+    ];
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
+    $action = $_POST['action'] ?? null;
+
+    try {
+        if (!is_string($action)) {
+            throw new RuntimeException('Invalid address action.');
+        }
+
+        if ($action === 'add' || $action === 'edit') {
+            $address_id = null;
+            if ($action === 'edit') {
+                $address_id = normalizeAddressId(
+                    $_POST['address_id'] ?? null
+                );
+
+                $address_check = $pdo->prepare(
+                    'SELECT address_id
+                     FROM addresses
+                     WHERE address_id = ?
+                     AND address_user_id = ?'
+                );
+                $address_check->execute([$address_id, $user_id]);
+                if (!$address_check->fetchColumn()) {
+                    throw new RuntimeException('Address not found.');
+                }
+            }
+
+            [
+                $recipient,
+                $taman,
+                $street,
+                $city,
+                $state,
+                $postal,
+                $country,
+                $phone,
+                $is_default,
+            ] = validateAddressFields($_POST, $malaysian_states);
+
+            $pdo->beginTransaction();
+            try {
+                if ($is_default) {
+                    $clear_default = $pdo->prepare(
+                        'UPDATE addresses
+                         SET address_is_default = 0
+                         WHERE address_user_id = ?'
+                    );
+                    $clear_default->execute([$user_id]);
+                }
+
+                if ($action === 'add') {
+                    $insert_address = $pdo->prepare(
+                        'INSERT INTO addresses (
+                            address_user_id,
+                            address_recipient_name,
+                            address_taman,
+                            address_street,
+                            address_city,
+                            address_state,
+                            address_postal_code,
+                            address_country,
+                            address_phone,
+                            address_is_default
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    );
+                    $insert_address->execute([
+                        $user_id,
+                        $recipient,
+                        $taman,
+                        $street,
+                        $city,
+                        $state,
+                        $postal,
+                        $country,
+                        $phone,
+                        $is_default,
+                    ]);
+                } else {
+                    $update_address = $pdo->prepare(
+                        'UPDATE addresses
+                         SET address_recipient_name = ?,
+                             address_taman = ?,
+                             address_street = ?,
+                             address_city = ?,
+                             address_state = ?,
+                             address_postal_code = ?,
+                             address_country = ?,
+                             address_phone = ?,
+                             address_is_default = ?
+                         WHERE address_id = ?
+                         AND address_user_id = ?'
+                    );
+                    $update_address->execute([
+                        $recipient,
+                        $taman,
+                        $street,
+                        $city,
+                        $state,
+                        $postal,
+                        $country,
+                        $phone,
+                        $is_default,
+                        $address_id,
+                        $user_id,
+                    ]);
+                }
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            $_SESSION['addr_success'] =
+                $action === 'add'
+                    ? 'Address added successfully!'
+                    : 'Address updated successfully!';
+        } elseif ($action === 'delete') {
+            $address_id = normalizeAddressId(
+                $_POST['address_id'] ?? null
+            );
+
+            $delete_address = $pdo->prepare(
+                'DELETE FROM addresses
+                 WHERE address_id = ?
+                 AND address_user_id = ?'
+            );
+            $delete_address->execute([$address_id, $user_id]);
+
+            if ($delete_address->rowCount() !== 1) {
+                throw new RuntimeException('Address not found.');
+            }
+
+            $_SESSION['addr_success'] = 'Address deleted.';
+        } elseif ($action === 'set_default') {
+            $address_id = normalizeAddressId(
+                $_POST['address_id'] ?? null
+            );
+
+            $address_check = $pdo->prepare(
+                'SELECT address_id
+                 FROM addresses
+                 WHERE address_id = ?
+                 AND address_user_id = ?'
+            );
+            $address_check->execute([$address_id, $user_id]);
+            if (!$address_check->fetchColumn()) {
+                throw new RuntimeException('Address not found.');
+            }
+
+            $pdo->beginTransaction();
+            try {
+                $clear_default = $pdo->prepare(
+                    'UPDATE addresses
+                     SET address_is_default = 0
+                     WHERE address_user_id = ?'
+                );
+                $clear_default->execute([$user_id]);
+
+                $set_default = $pdo->prepare(
+                    'UPDATE addresses
+                     SET address_is_default = 1
+                     WHERE address_id = ?
+                     AND address_user_id = ?'
+                );
+                $set_default->execute([$address_id, $user_id]);
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            $_SESSION['addr_success'] =
+                'Default address updated.';
+        } else {
+            throw new RuntimeException('Invalid address action.');
+        }
+    } catch (RuntimeException $e) {
+        $_SESSION['addr_error'] = $e->getMessage();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        app_error_log('Address management failed: ' . $e->getMessage());
+        $_SESSION['addr_error'] = 'Unable to update the address book.';
+    }
+
+    header('Location: addresses.php');
+    exit;
+}
+
+$addresses_stmt = $pdo->prepare(
+    'SELECT *
+     FROM addresses
+     WHERE address_user_id = ?
+     ORDER BY address_is_default DESC, address_created_at DESC'
+);
+$addresses_stmt->execute([$user_id]);
+$addresses = $addresses_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $success = $_SESSION['addr_success'] ?? '';
-unset($_SESSION['addr_success']);
+$error = $_SESSION['addr_error'] ?? '';
+unset($_SESSION['addr_success'], $_SESSION['addr_error']);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -164,6 +400,11 @@ unset($_SESSION['addr_success']);
                 <?php if ($success): ?>
                 <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5 flex items-center gap-2">
                     ✅ <?= htmlspecialchars($success) ?>
+                </div>
+                <?php endif; ?>
+                <?php if ($error): ?>
+                <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5 flex items-center gap-2">
+                    ❌ <?= htmlspecialchars($error) ?>
                 </div>
                 <?php endif; ?>
 
@@ -216,18 +457,18 @@ unset($_SESSION['addr_success']);
                             <?php if (!$addr['address_is_default']): ?>
                             <form method="POST" class="inline">
                                 <?php csrf_field(); ?>
-<input type="hidden" name="action" value="set_default">
-                                <input type="hidden" name="address_id" value="<?= $addr['address_id'] ?>">
+                                <input type="hidden" name="action" value="set_default">
+                                <input type="hidden" name="address_id" value="<?= (int) $addr['address_id'] ?>">
                                 <button type="submit" class="text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-300 px-3 py-1.5 rounded-lg transition-colors">
                                     Set Default
                                 </button>
                             </form>
                             <?php endif; ?>
-                            <button onclick="openEditModal(<?= htmlspecialchars(json_encode($addr)) ?>)"
+                            <button onclick="openEditModal(<?= htmlspecialchars(json_encode($addr), ENT_QUOTES, 'UTF-8') ?>)"
                                     class="text-xs text-gray-500 hover:text-blue-600 border border-gray-200 hover:border-blue-300 px-3 py-1.5 rounded-lg transition-colors">
                                 ✏️ Edit
                             </button>
-                            <button onclick="openDeleteModal(<?= $addr['address_id'] ?>, '<?= htmlspecialchars($addr['address_recipient_name']) ?>')"
+                            <button onclick="openDeleteModal(<?= (int) $addr['address_id'] ?>, '<?= htmlspecialchars($addr['address_recipient_name']) ?>')"
                                     class="text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-300 px-3 py-1.5 rounded-lg transition-colors">
                                 🗑️ Delete
                             </button>
@@ -249,13 +490,13 @@ unset($_SESSION['addr_success']);
             </div>
             <form method="POST" class="p-6 space-y-4">
                 <?php csrf_field(); ?>
-<input type="hidden" name="action" id="formAction" value="add">
+                <input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="address_id" id="formAddressId">
 
                 <div class="grid grid-cols-2 gap-4">
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Recipient Name *</label>
-                        <input type="text" name="address_recipient_name" maxlength="150" id="formRecipient" required
+                        <input type="text" name="address_recipient_name" maxlength="100" id="formRecipient" required
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div class="col-span-2">
@@ -267,7 +508,7 @@ unset($_SESSION['addr_success']);
                     </div>
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Taman / Apartment *</label>
-                        <input type="text" name="address_taman" maxlength="150" id="formTaman" required
+                        <input type="text" name="address_taman" maxlength="100" id="formTaman" required
                                placeholder="e.g. Taman Desa Jaya"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
@@ -284,14 +525,14 @@ unset($_SESSION['addr_success']);
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Postal Code *</label>
-                        <input type="text" name="address_postal_code" maxlength="20" id="formPostal" required
-                                oninput="this.value = this.value.replace(/[^0-9]/g, '')" maxlength="5"
+                        <input type="text" name="address_postal_code" id="formPostal" maxlength="5" required
+                                oninput="this.value = this.value.replace(/[^0-9]/g, '')"
                                 placeholder="e.g. 80300"
                                 class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">State *</label>
-                        <select name="address_state" maxlength="100" id="formState" required onchange="autoPostcode(this.value)"
+                        <select name="address_state" id="formState" required onchange="autoPostcode(this.value)"
                                 class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                             <option value="">Select state</option>
                             <option>Johor</option>
@@ -349,7 +590,7 @@ unset($_SESSION['addr_success']);
             <p class="text-sm text-gray-500 mb-6">Are you sure you want to delete <strong id="deleteAddrName"></strong>'s address?</p>
             <form method="POST">
                 <?php csrf_field(); ?>
-<input type="hidden" name="action" value="delete">
+                <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="address_id" id="deleteAddrId">
                 <div class="flex gap-3">
                     <button type="button" onclick="closeDeleteModal()"

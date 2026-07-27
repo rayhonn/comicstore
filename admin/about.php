@@ -8,76 +8,353 @@ require_admin();
 $success = '';
 $error = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    csrf_verify();
-    $action = $_POST['action'] ?? '';
-    foreach ($_POST as $value) {
-        if (is_string($value) && strlen($value) > 5000) {
-            $error = 'Submitted content is too long.';
-            break;
-        }
+function normalizeAboutText(
+    mixed $value,
+    string $label,
+    int $maxLength,
+    bool $required = false
+): string {
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
     }
 
-    if ($action === 'update_sections') {
-        $fields = ['hero_subtitle', 'our_story', 'mission', 'stat_titles', 'stat_customers', 'stat_years', 'stat_rating'];
-        foreach ($fields as $field) {
-            if (isset($_POST[$field])) {
-                $pdo->prepare("UPDATE about_sections SET section_content = ? WHERE section_key = ?")
-                    ->execute([trim($_POST[$field]), $field]);
+    $value = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($value, 'UTF-8')
+        : strlen($value);
+
+    if ($required && $value === '') {
+        throw new RuntimeException($label . ' is required.');
+    }
+
+    if ($length > $maxLength) {
+        throw new RuntimeException(
+            $label . ' cannot exceed ' . $maxLength . ' characters.'
+        );
+    }
+
+    return $value;
+}
+
+function normalizeAboutId(mixed $value, string $label): int
+{
+    $id = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
+
+    if ($id === false || $id === null) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
+
+    return $id;
+}
+
+function normalizeAboutOrder(mixed $value): int
+{
+    $order = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 0,
+                'max_range' => 1000000,
+            ],
+        ]
+    );
+
+    if ($order === false || $order === null) {
+        throw new RuntimeException('Display order must be a non-negative integer.');
+    }
+
+    return $order;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
+    $action = $_POST['action'] ?? null;
+
+    try {
+        if (!is_string($action)) {
+            throw new RuntimeException('Invalid content management action.');
+        }
+
+        if ($action === 'update_sections') {
+            $section_limits = [
+                'hero_subtitle' => 255,
+                'our_story' => 5000,
+                'mission' => 3000,
+                'stat_titles' => 50,
+                'stat_customers' => 50,
+                'stat_years' => 50,
+                'stat_rating' => 50,
+            ];
+
+            $validated_sections = [];
+            foreach ($section_limits as $field => $limit) {
+                $validated_sections[$field] = normalizeAboutText(
+                    $_POST[$field] ?? '',
+                    ucwords(str_replace('_', ' ', $field)),
+                    $limit
+                );
             }
-        }
-        $success = 'Content updated successfully!';
 
-    } elseif ($action === 'add_award') {
-        $emoji = trim($_POST['award_emoji'] ?? '🏆');
-        $title = trim($_POST['award_title']);
-        $org = trim($_POST['award_organization']);
-        $result = trim($_POST['award_result']);
-        $order = intval($_POST['award_order'] ?? 0);
+            $pdo->beginTransaction();
+            try {
+                $update_section = $pdo->prepare(
+                    'UPDATE about_sections
+                     SET section_content = ?
+                     WHERE section_key = ?'
+                );
 
-        if (empty($title) || empty($org) || empty($result)) {
-            $error = 'All award fields are required.';
+                foreach ($validated_sections as $field => $content) {
+                    $update_section->execute([$content, $field]);
+                }
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            $success = 'Content updated successfully!';
+        } elseif ($action === 'add_award' || $action === 'edit_award') {
+            $award_id = null;
+            if ($action === 'edit_award') {
+                $award_id = normalizeAboutId(
+                    $_POST['award_id'] ?? null,
+                    'award'
+                );
+
+                $award_check = $pdo->prepare(
+                    'SELECT award_id FROM about_awards WHERE award_id = ?'
+                );
+                $award_check->execute([$award_id]);
+                if (!$award_check->fetchColumn()) {
+                    throw new RuntimeException('Award not found.');
+                }
+            }
+
+            $emoji = normalizeAboutText(
+                $_POST['award_emoji'] ?? '🏆',
+                'Award emoji',
+                10
+            );
+            if ($emoji === '') {
+                $emoji = '🏆';
+            }
+
+            $title = normalizeAboutText(
+                $_POST['award_title'] ?? '',
+                'Award title',
+                200,
+                true
+            );
+            $organization = normalizeAboutText(
+                $_POST['award_organization'] ?? '',
+                'Award organization',
+                200,
+                true
+            );
+            $result = normalizeAboutText(
+                $_POST['award_result'] ?? '',
+                'Award result',
+                100,
+                true
+            );
+            $order = normalizeAboutOrder($_POST['award_order'] ?? 0);
+
+            if ($action === 'add_award') {
+                $insert_award = $pdo->prepare(
+                    'INSERT INTO about_awards (
+                        award_emoji,
+                        award_title,
+                        award_organization,
+                        award_result,
+                        award_order
+                    ) VALUES (?, ?, ?, ?, ?)'
+                );
+                $insert_award->execute([
+                    $emoji,
+                    $title,
+                    $organization,
+                    $result,
+                    $order,
+                ]);
+                $success = 'Award added!';
+            } else {
+                $update_award = $pdo->prepare(
+                    'UPDATE about_awards
+                     SET award_emoji = ?,
+                         award_title = ?,
+                         award_organization = ?,
+                         award_result = ?,
+                         award_order = ?
+                     WHERE award_id = ?'
+                );
+                $update_award->execute([
+                    $emoji,
+                    $title,
+                    $organization,
+                    $result,
+                    $order,
+                    $award_id,
+                ]);
+                $success = 'Award updated!';
+            }
+        } elseif ($action === 'delete_award') {
+            $award_id = normalizeAboutId(
+                $_POST['award_id'] ?? null,
+                'award'
+            );
+
+            $delete_award = $pdo->prepare(
+                'DELETE FROM about_awards WHERE award_id = ?'
+            );
+            $delete_award->execute([$award_id]);
+
+            if ($delete_award->rowCount() !== 1) {
+                throw new RuntimeException('Award not found.');
+            }
+
+            $success = 'Award deleted.';
+        } elseif ($action === 'add_team' || $action === 'edit_team') {
+            $team_id = null;
+            if ($action === 'edit_team') {
+                $team_id = normalizeAboutId(
+                    $_POST['team_id'] ?? null,
+                    'team member'
+                );
+
+                $team_check = $pdo->prepare(
+                    'SELECT team_id FROM about_team WHERE team_id = ?'
+                );
+                $team_check->execute([$team_id]);
+                if (!$team_check->fetchColumn()) {
+                    throw new RuntimeException('Team member not found.');
+                }
+            }
+
+            $name = normalizeAboutText(
+                $_POST['team_name'] ?? '',
+                'Team member name',
+                100,
+                true
+            );
+            $role = normalizeAboutText(
+                $_POST['team_role'] ?? '',
+                'Team member role',
+                100,
+                true
+            );
+            $bio = normalizeAboutText(
+                $_POST['team_bio'] ?? '',
+                'Team member biography',
+                5000
+            );
+            $initials = normalizeAboutText(
+                $_POST['team_initials'] ?? '',
+                'Team member initials',
+                5,
+                true
+            );
+            $color = normalizeAboutText(
+                $_POST['team_color'] ?? '',
+                'Team member color',
+                100
+            );
+            if ($color === '') {
+                $color = 'linear-gradient(135deg, #1e2d4a, #2c3e6b)';
+            }
+            $order = normalizeAboutOrder($_POST['team_order'] ?? 0);
+
+            if ($action === 'add_team') {
+                $insert_team = $pdo->prepare(
+                    'INSERT INTO about_team (
+                        team_name,
+                        team_role,
+                        team_bio,
+                        team_initials,
+                        team_color,
+                        team_order
+                    ) VALUES (?, ?, ?, ?, ?, ?)'
+                );
+                $insert_team->execute([
+                    $name,
+                    $role,
+                    $bio,
+                    $initials,
+                    $color,
+                    $order,
+                ]);
+                $success = 'Team member added!';
+            } else {
+                $update_team = $pdo->prepare(
+                    'UPDATE about_team
+                     SET team_name = ?,
+                         team_role = ?,
+                         team_bio = ?,
+                         team_initials = ?,
+                         team_color = ?,
+                         team_order = ?
+                     WHERE team_id = ?'
+                );
+                $update_team->execute([
+                    $name,
+                    $role,
+                    $bio,
+                    $initials,
+                    $color,
+                    $order,
+                    $team_id,
+                ]);
+                $success = 'Team member updated!';
+            }
+        } elseif ($action === 'delete_team') {
+            $team_id = normalizeAboutId(
+                $_POST['team_id'] ?? null,
+                'team member'
+            );
+
+            $delete_team = $pdo->prepare(
+                'DELETE FROM about_team WHERE team_id = ?'
+            );
+            $delete_team->execute([$team_id]);
+
+            if ($delete_team->rowCount() !== 1) {
+                throw new RuntimeException('Team member not found.');
+            }
+
+            $success = 'Team member deleted.';
         } else {
-            $pdo->prepare("INSERT INTO about_awards (award_emoji, award_title, award_organization, award_result, award_order) VALUES (?, ?, ?, ?, ?)")
-                ->execute([$emoji, $title, $org, $result, $order]);
-            $success = 'Award added!';
+            throw new RuntimeException('Invalid content management action.');
         }
-
-    } elseif ($action === 'edit_award') {
-        $id = filter_var($_POST['award_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-        if ($id === false || $id === null) { $error = 'Invalid award.'; } else
-        $pdo->prepare("UPDATE about_awards SET award_emoji=?, award_title=?, award_organization=?, award_result=?, award_order=? WHERE award_id=?")
-            ->execute([trim($_POST['award_emoji']), trim($_POST['award_title']), trim($_POST['award_organization']), trim($_POST['award_result']), intval($_POST['award_order']), $id]);
-        $success = 'Award updated!';
-
-    } elseif ($action === 'delete_award') {
-        $pdo->prepare("DELETE FROM about_awards WHERE award_id = ?")->execute([filter_var($_POST['award_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])]);
-        $success = 'Award deleted.';
-
-    } elseif ($action === 'add_team') {
-        $pdo->prepare("INSERT INTO about_team (team_name, team_role, team_bio, team_initials, team_color, team_order) VALUES (?, ?, ?, ?, ?, ?)")
-            ->execute([trim($_POST['team_name']), trim($_POST['team_role']), trim($_POST['team_bio']), trim($_POST['team_initials']), trim($_POST['team_color']), intval($_POST['team_order'])]);
-        $success = 'Team member added!';
-
-    } elseif ($action === 'edit_team') {
-        $id = filter_var($_POST['team_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-        if ($id === false || $id === null) { $error = 'Invalid team member.'; } else
-        $pdo->prepare("UPDATE about_team SET team_name=?, team_role=?, team_bio=?, team_initials=?, team_color=?, team_order=? WHERE team_id=?")
-            ->execute([trim($_POST['team_name']), trim($_POST['team_role']), trim($_POST['team_bio']), trim($_POST['team_initials']), trim($_POST['team_color']), intval($_POST['team_order']), $id]);
-        $success = 'Team member updated!';
-
-    } elseif ($action === 'delete_team') {
-        $pdo->prepare("DELETE FROM about_team WHERE team_id = ?")->execute([filter_var($_POST['team_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])]);
-        $success = 'Team member deleted.';
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
+    } catch (Throwable $e) {
+        app_error_log('About content update failed: ' . $e->getMessage());
+        $error = 'Unable to update About Us content.';
     }
 }
 
-$sections = $pdo->query("SELECT * FROM about_sections")->fetchAll(PDO::FETCH_ASSOC);
+$sections = $pdo->query(
+    'SELECT * FROM about_sections'
+)->fetchAll(PDO::FETCH_ASSOC);
 $s = [];
-foreach ($sections as $sec) { $s[$sec['section_key']] = $sec['section_content']; }
+foreach ($sections as $section) {
+    $s[$section['section_key']] = $section['section_content'];
+}
 
-$awards = $pdo->query("SELECT * FROM about_awards ORDER BY award_order ASC")->fetchAll(PDO::FETCH_ASSOC);
-$team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAll(PDO::FETCH_ASSOC);
+$awards = $pdo->query(
+    'SELECT * FROM about_awards ORDER BY award_order ASC'
+)->fetchAll(PDO::FETCH_ASSOC);
+$team = $pdo->query(
+    'SELECT * FROM about_team ORDER BY team_order ASC'
+)->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -133,7 +410,7 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
         <div id="content-content" class="tab-content active">
             <form method="POST">
                 <?php csrf_field(); ?>
-<input type="hidden" name="action" value="update_sections">
+                <input type="hidden" name="action" value="update_sections">
                 <div class="bg-white rounded-2xl shadow-sm p-6 space-y-5">
                     <h3 class="font-bold text-gray-800 mb-2">Page Content</h3>
 
@@ -213,8 +490,8 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
                                 class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">✏️ Edit</button>
                         <form method="POST" class="inline">
                             <?php csrf_field(); ?>
-<input type="hidden" name="action" value="delete_award">
-                            <input type="hidden" name="award_id" value="<?= $award['award_id'] ?>">
+                            <input type="hidden" name="action" value="delete_award">
+                            <input type="hidden" name="award_id" value="<?= (int) $award['award_id'] ?>">
                             <button type="submit" onclick="return confirm('Delete this award?')"
                                     class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">🗑️ Delete</button>
                         </form>
@@ -257,8 +534,8 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
                                 class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">✏️ Edit</button>
                         <form method="POST" class="inline">
                             <?php csrf_field(); ?>
-<input type="hidden" name="action" value="delete_team">
-                            <input type="hidden" name="team_id" value="<?= $member['team_id'] ?>">
+                            <input type="hidden" name="action" value="delete_team">
+                            <input type="hidden" name="team_id" value="<?= (int) $member['team_id'] ?>">
                             <button type="submit" onclick="return confirm('Delete this team member?')"
                                     class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">🗑️ Delete</button>
                         </form>
@@ -279,12 +556,12 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
             </div>
             <form method="POST" class="p-5 space-y-4">
                 <?php csrf_field(); ?>
-<input type="hidden" name="action" id="awardAction" value="add_award">
+                <input type="hidden" name="action" id="awardAction" value="add_award">
                 <input type="hidden" name="award_id" id="awardId">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5">Emoji</label>
-                        <input type="text" name="award_emoji" maxlength="20" id="awardEmoji" value="🏆" maxlength="5"
+                        <input type="text" name="award_emoji" id="awardEmoji" value="🏆" maxlength="10"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
                     <div>
@@ -295,18 +572,18 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Award Title *</label>
-                    <input type="text" name="award_title" maxlength="255" id="awardTitle" required
+                    <input type="text" name="award_title" id="awardTitle" maxlength="200" required
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Organization *</label>
-                    <input type="text" name="award_organization" maxlength="255" id="awardOrg" required
+                    <input type="text" name="award_organization" id="awardOrg" maxlength="200" required
                            placeholder="e.g. Malaysia Digital Awards 2023"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Result *</label>
-                    <input type="text" name="award_result" maxlength="255" id="awardResult" required
+                    <input type="text" name="award_result" id="awardResult" maxlength="100" required
                            placeholder="e.g. Gold Award, Winner, 1st Place"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
@@ -329,24 +606,24 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
             </div>
             <form method="POST" class="p-5 space-y-4">
                 <?php csrf_field(); ?>
-<input type="hidden" name="action" id="teamAction" value="add_team">
+                <input type="hidden" name="action" id="teamAction" value="add_team">
                 <input type="hidden" name="team_id" id="teamId">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5">Full Name *</label>
-                        <input type="text" name="team_name" maxlength="150" id="teamName" required
+                        <input type="text" name="team_name" id="teamName" maxlength="100" required
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5">Initials *</label>
-                        <input type="text" name="team_initials" maxlength="10" id="teamInitials" required maxlength="3"
+                        <input type="text" name="team_initials" id="teamInitials" maxlength="5" required
                                placeholder="e.g. RH"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Role *</label>
-                    <input type="text" name="team_role" maxlength="150" id="teamRole" required
+                    <input type="text" name="team_role" id="teamRole" maxlength="100" required
                            placeholder="e.g. CEO & Co-Founder"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
