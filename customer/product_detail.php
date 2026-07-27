@@ -1,113 +1,237 @@
 <?php
+
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
 
-$id = $_GET['id'] ?? null;
-if (!$id) { header('Location: home.php'); exit; }
+$user_id = current_user_id();
+
+$id = filter_input(
+    INPUT_GET,
+    'id',
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
+
+if ($id === false || $id === null) {
+    header('Location: home.php');
+    exit;
+}
+
+$id = (int) $id;
 
 $stmt = $pdo->prepare("
-    SELECT p.*, c.category_name,
-    pp.physical_stock_quantity, pp.physical_low_stock_threshold,
-    pe.ebook_file_path, pe.ebook_file_format, pe.ebook_file_size_mb, pe.ebook_download_limit
+    SELECT
+        p.*,
+        c.category_name,
+        pp.physical_stock_quantity,
+        pp.physical_low_stock_threshold,
+        pe.ebook_file_path,
+        pe.ebook_file_format,
+        pe.ebook_file_size_mb,
+        pe.ebook_download_limit
     FROM products p
-    LEFT JOIN categories c ON p.product_category_id = c.category_id
-    LEFT JOIN product_physical pp ON p.product_id = pp.physical_product_id
-    LEFT JOIN product_ebook pe ON p.product_id = pe.ebook_product_id
-    WHERE p.product_id = ? AND p.product_is_available = 1
+    LEFT JOIN categories c
+        ON p.product_category_id = c.category_id
+    LEFT JOIN product_physical pp
+        ON p.product_id = pp.physical_product_id
+    LEFT JOIN product_ebook pe
+        ON p.product_id = pe.ebook_product_id
+    WHERE p.product_id = ?
+    AND p.product_is_available = 1
 ");
 $stmt->execute([$id]);
 $product = $stmt->fetch(PDO::FETCH_ASSOC);
-if (!$product) { header('Location: home.php'); exit; }
 
-// Get genres
+if (!$product) {
+    header('Location: home.php');
+    exit;
+}
+
 $genres_stmt = $pdo->prepare("
-    SELECT g.genre_name FROM product_genres pg
-    JOIN genres g ON pg.product_genres_genre_id = g.genre_id
+    SELECT g.genre_name
+    FROM product_genres pg
+    JOIN genres g
+        ON pg.product_genres_genre_id = g.genre_id
     WHERE pg.product_genres_product_id = ?
 ");
 $genres_stmt->execute([$id]);
 $genres = $genres_stmt->fetchAll(PDO::FETCH_COLUMN);
 
-// Check wishlist
-$in_wishlist = $pdo->prepare("SELECT wishlist_id FROM wishlist WHERE wishlist_user_id = ? AND wishlist_product_id = ?");
-$in_wishlist->execute([$_SESSION['user_id'], $id]);
-$in_wishlist = $in_wishlist->rowCount() > 0;
+$in_wishlist = $pdo->prepare("
+    SELECT wishlist_id
+    FROM wishlist
+    WHERE wishlist_user_id = ?
+    AND wishlist_product_id = ?
+    LIMIT 1
+");
+$in_wishlist->execute([
+    $user_id,
+    $id,
+]);
+$in_wishlist =
+    $in_wishlist->fetchColumn() !== false;
 
-// Get approved reviews
 $reviews = $pdo->prepare("
-    SELECT r.*, u.user_first_name, u.user_last_name
+    SELECT
+        r.*,
+        u.user_first_name,
+        u.user_last_name
     FROM product_reviews r
-    JOIN users u ON r.review_user_id = u.user_id
-    WHERE r.review_product_id = ? AND r.review_status = 'approved'
+    JOIN users u
+        ON r.review_user_id = u.user_id
+    WHERE r.review_product_id = ?
+    AND r.review_status = 'approved'
     ORDER BY r.review_created_at DESC
 ");
 $reviews->execute([$id]);
 $reviews = $reviews->fetchAll(PDO::FETCH_ASSOC);
 
-// Average rating
-$avg_rating = $pdo->prepare("SELECT AVG(review_rating), COUNT(*) FROM product_reviews WHERE review_product_id = ? AND review_status = 'approved'");
+$avg_rating = $pdo->prepare("
+    SELECT
+        AVG(review_rating),
+        COUNT(*)
+    FROM product_reviews
+    WHERE review_product_id = ?
+    AND review_status = 'approved'
+");
 $avg_rating->execute([$id]);
-[$avg, $review_count] = $avg_rating->fetch(PDO::FETCH_NUM);
+[$avg, $review_count] =
+    $avg_rating->fetch(PDO::FETCH_NUM);
 $avg = round($avg ?? 0, 1);
+$review_count = (int) $review_count;
 
-// Check if user can review (has delivered order with this product, and hasn't reviewed yet)
 $can_review = false;
 $existing_review = null;
+
 $eligible_order = $pdo->prepare("
-    SELECT o.order_id FROM order_items oi
-    JOIN orders o ON oi.order_item_order_id = o.order_id
-    WHERE o.order_user_id = ? AND oi.order_item_product_id = ?
-    AND o.order_status = 'delivered' AND o.order_payment_status = 'confirmed'
+    SELECT o.order_id
+    FROM order_items oi
+    JOIN orders o
+        ON oi.order_item_order_id = o.order_id
+    WHERE o.order_user_id = ?
+    AND oi.order_item_product_id = ?
+    AND o.order_status = 'delivered'
+    AND o.order_payment_status = 'confirmed'
     LIMIT 1
 ");
-$eligible_order->execute([$_SESSION['user_id'], $id]);
-$eligible_order = $eligible_order->fetch(PDO::FETCH_ASSOC);
+$eligible_order->execute([
+    $user_id,
+    $id,
+]);
+$eligible_order =
+    $eligible_order->fetch(PDO::FETCH_ASSOC);
 
 if ($eligible_order) {
-    $existing_review = $pdo->prepare("SELECT * FROM product_reviews WHERE review_user_id = ? AND review_product_id = ?");
-    $existing_review->execute([$_SESSION['user_id'], $id]);
-    $existing_review = $existing_review->fetch(PDO::FETCH_ASSOC);
+    $existing_stmt = $pdo->prepare("
+        SELECT *
+        FROM product_reviews
+        WHERE review_user_id = ?
+        AND review_product_id = ?
+        LIMIT 1
+    ");
+    $existing_stmt->execute([
+        $user_id,
+        $id,
+    ]);
+    $existing_review =
+        $existing_stmt->fetch(PDO::FETCH_ASSOC);
     $can_review = !$existing_review;
 }
 
-// Handle review submission
 $review_success = '';
 $review_error = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_review'])) {
-    csrf_verify();
-    $rating = intval($_POST['rating'] ?? 0);
-    $comment = trim($_POST['comment'] ?? '');
 
-    if ($rating < 1 || $rating > 5) {
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['submit_review'])
+) {
+    csrf_verify();
+
+    $rating = filter_var(
+        $_POST['rating'] ?? null,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+                'max_range' => 5,
+            ],
+        ]
+    );
+    $comment_raw = $_POST['comment'] ?? null;
+
+    if ($rating === false || $rating === null) {
         $review_error = 'Please select a rating.';
-    } elseif (empty($comment)) {
-        $review_error = 'Please write a comment.';
-    } elseif (!$eligible_order) {
-        $review_error = 'You can only review products you have purchased and received.';
-    } elseif ($existing_review) {
-        $review_error = 'You have already reviewed this product.';
+    } elseif (!is_string($comment_raw)) {
+        $review_error = 'Please write a valid comment.';
     } else {
-        $pdo->prepare("INSERT INTO product_reviews (review_user_id, review_product_id, review_order_id, review_rating, review_comment, review_status) VALUES (?, ?, ?, ?, ?, 'approved')")
-            ->execute([$_SESSION['user_id'], $id, $eligible_order['order_id'], $rating, $comment]);
-        $review_success = 'Review submitted successfully!';
-        $can_review = false;
-        $existing_review = ['review_status' => 'pending', 'review_rating' => $rating, 'review_comment' => $comment];
+        $comment = trim($comment_raw);
+        $comment_length = function_exists('mb_strlen')
+            ? mb_strlen($comment, 'UTF-8')
+            : strlen($comment);
+
+        if ($comment === '') {
+            $review_error = 'Please write a comment.';
+        } elseif ($comment_length > 2000) {
+            $review_error =
+                'Review comment cannot exceed 2000 characters.';
+        } elseif (!$eligible_order) {
+            $review_error =
+                'You can only review products you have purchased and received.';
+        } elseif ($existing_review) {
+            $review_error =
+                'You have already reviewed this product.';
+        } else {
+            $insert_review = $pdo->prepare("
+                INSERT INTO product_reviews (
+                    review_user_id,
+                    review_product_id,
+                    review_order_id,
+                    review_rating,
+                    review_comment,
+                    review_status
+                )
+                VALUES (?, ?, ?, ?, ?, 'approved')
+            ");
+            $insert_review->execute([
+                $user_id,
+                $id,
+                (int) $eligible_order['order_id'],
+                (int) $rating,
+                $comment,
+            ]);
+
+            $review_success =
+                'Review submitted successfully!';
+            $can_review = false;
+            $existing_review = [
+                'review_status' => 'approved',
+                'review_rating' => (int) $rating,
+                'review_comment' => $comment,
+            ];
+        }
     }
 }
 
-// Related products
 $related = $pdo->prepare("
-    SELECT p.*, pp.physical_stock_quantity
+    SELECT
+        p.*,
+        pp.physical_stock_quantity
     FROM products p
-    LEFT JOIN product_physical pp ON p.product_id = pp.physical_product_id
-    WHERE p.product_series = ? AND p.product_id != ? AND p.product_is_available = 1
+    LEFT JOIN product_physical pp
+        ON p.product_id = pp.physical_product_id
+    WHERE p.product_series = ?
+    AND p.product_id != ?
+    AND p.product_is_available = 1
     ORDER BY p.product_volume_number ASC
     LIMIT 6
 ");
-$related->execute([$product['product_series'], $id]);
+$related->execute([
+    $product['product_series'],
+    $id,
+]);
 $related = $related->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
@@ -247,7 +371,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                             <form method="POST" action="cart_action.php" class="flex gap-3 flex-1">
                                 <?php csrf_field(); ?>
                                 <input type="hidden" name="action" value="add">
-                                <input type="hidden" name="product_id" value="<?= $id ?>">
+                                <input type="hidden" name="product_id" value="<?= (int) $id ?>">
                                 <?php if ($product['product_type'] === 'physical'): ?>
                                     <input type="number" name="quantity" value="1" min="1"
                                            max="<?= $product['physical_stock_quantity'] ?>"
@@ -263,10 +387,10 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
 
                         <!-- Wishlist -->
                         <form method="POST" action="wishlist_action.php">
-                                <?php csrf_field(); ?>
-                                <input type="hidden" name="product_id" value="<?= $id ?>">
-                                <input type="hidden" name="action" value="<?= $in_wishlist ? 'remove' : 'add' ?>">
-                                <input type="hidden" name="redirect" value="product_detail.php?id=<?= $id ?>">
+                            <?php csrf_field(); ?>
+                            <input type="hidden" name="product_id" value="<?= (int) $id ?>">
+                            <input type="hidden" name="action" value="<?= $in_wishlist ? 'remove' : 'add' ?>">
+                            <input type="hidden" name="redirect" value="product_detail.php?id=<?= (int) $id ?>">
                             <button type="submit"
                                     class="py-3 px-4 rounded-xl border-2 transition-colors <?= $in_wishlist ? 'border-red-300 bg-red-50 text-red-600' : 'border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-600' ?>">
                                 <?= $in_wishlist ? '♥' : '♡' ?>
@@ -284,7 +408,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             <h3 class="font-bold text-gray-800 mb-4">More from "<?= htmlspecialchars($product['product_series']) ?>"</h3>
             <div class="flex gap-4 overflow-x-auto pb-2">
                 <?php foreach ($related as $r): ?>
-                <a href="product_detail.php?id=<?= $r['product_id'] ?>"
+                <a href="product_detail.php?id=<?= (int) $r['product_id'] ?>"
                    class="flex-shrink-0 w-28 hover:-translate-y-1 transition-all duration-200 group">
                     <?php if ($r['product_cover_image']): ?>
                         <img src="../assets/images/<?= htmlspecialchars($r['product_cover_image']) ?>"
@@ -356,7 +480,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
 
                     <div class="mb-4">
                         <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Your Review *</label>
-                        <textarea name="comment" rows="4" required
+                        <textarea name="comment" rows="4" maxlength="2000" required
                                   placeholder="Share your thoughts about this product..."
                                   class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-white resize-none"></textarea>
                     </div>
@@ -469,7 +593,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
     fetch(recommendationUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'type=product&product_id=<?= $id ?>'
+        body: 'type=product&product_id=<?= (int) $id ?>'
     })
     .then(r => r.json())
     .then(data => {

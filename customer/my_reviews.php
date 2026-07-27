@@ -1,90 +1,247 @@
 <?php
+
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
-$user_id = $_SESSION['user_id'];
+$user_id = current_user_id();
 $success = '';
 $error = '';
 
-// Handle review submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_review'])) {
-    $product_id = intval($_POST['product_id']);
-    $order_id = intval($_POST['order_id']);
-    $rating = intval($_POST['rating'] ?? 0);
-    $comment = trim($_POST['comment'] ?? '');
+function requireReviewId(
+    mixed $value,
+    string $label
+): int {
+    $id = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
 
-    if ($rating < 1 || $rating > 5) {
-        $error = 'Please select a rating.';
-    } elseif (empty($comment)) {
-        $error = 'Please write a comment.';
-    } else {
-        // Verify eligible
-        $check = $pdo->prepare("
-            SELECT o.order_id FROM order_items oi
-            JOIN orders o ON oi.order_item_order_id = o.order_id
-            WHERE o.order_user_id = ? AND oi.order_item_product_id = ? AND o.order_id = ?
-            AND o.order_status = 'delivered' AND o.order_payment_status = 'confirmed'
-        ");
-        $check->execute([$user_id, $product_id, $order_id]);
-        if ($check->fetch()) {
-            // Check not already reviewed
-            $existing = $pdo->prepare("SELECT review_id FROM product_reviews WHERE review_user_id = ? AND review_product_id = ? AND review_order_id = ?");
-            $existing->execute([$user_id, $product_id, $order_id]);
-            if ($existing->fetch()) {
-                $error = 'You have already reviewed this product.';
-            } else {
-                $pdo->prepare("INSERT INTO product_reviews (review_user_id, review_product_id, review_order_id, review_rating, review_comment, review_status) VALUES (?, ?, ?, ?, ?, 'approved')")
-                    ->execute([$user_id, $product_id, $order_id, $rating, $comment]);
-                $success = 'Review submitted successfully!';
+    if ($id === false || $id === null) {
+        throw new RuntimeException(
+            'Invalid ' . $label . '.'
+        );
+    }
+
+    return (int) $id;
+}
+
+function normalizeReviewComment(mixed $value): string
+{
+    if (!is_string($value)) {
+        throw new RuntimeException(
+            'Please write a valid comment.'
+        );
+    }
+
+    $comment = trim($value);
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($comment, 'UTF-8')
+        : strlen($comment);
+
+    if ($comment === '') {
+        throw new RuntimeException(
+            'Please write a comment.'
+        );
+    }
+
+    if ($length > 2000) {
+        throw new RuntimeException(
+            'Review comment cannot exceed 2000 characters.'
+        );
+    }
+
+    return $comment;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
+    try {
+        if (isset($_POST['submit_review'])) {
+            $product_id = requireReviewId(
+                $_POST['product_id'] ?? null,
+                'product'
+            );
+            $order_id = requireReviewId(
+                $_POST['order_id'] ?? null,
+                'order'
+            );
+            $rating = filter_var(
+                $_POST['rating'] ?? null,
+                FILTER_VALIDATE_INT,
+                [
+                    'options' => [
+                        'min_range' => 1,
+                        'max_range' => 5,
+                    ],
+                ]
+            );
+            $comment = normalizeReviewComment(
+                $_POST['comment'] ?? null
+            );
+
+            if ($rating === false || $rating === null) {
+                throw new RuntimeException(
+                    'Please select a rating.'
+                );
             }
+
+            $eligible = $pdo->prepare("
+                SELECT o.order_id
+                FROM order_items oi
+                JOIN orders o
+                    ON oi.order_item_order_id =
+                        o.order_id
+                WHERE o.order_user_id = ?
+                AND oi.order_item_product_id = ?
+                AND o.order_id = ?
+                AND o.order_status = 'delivered'
+                AND o.order_payment_status = 'confirmed'
+                LIMIT 1
+            ");
+            $eligible->execute([
+                $user_id,
+                $product_id,
+                $order_id,
+            ]);
+
+            if (!$eligible->fetchColumn()) {
+                throw new RuntimeException(
+                    'Invalid review request.'
+                );
+            }
+
+            $existing = $pdo->prepare("
+                SELECT review_id
+                FROM product_reviews
+                WHERE review_user_id = ?
+                AND review_product_id = ?
+                AND review_order_id = ?
+                LIMIT 1
+            ");
+            $existing->execute([
+                $user_id,
+                $product_id,
+                $order_id,
+            ]);
+
+            if ($existing->fetchColumn()) {
+                throw new RuntimeException(
+                    'You have already reviewed this product.'
+                );
+            }
+
+            $insert = $pdo->prepare("
+                INSERT INTO product_reviews (
+                    review_user_id,
+                    review_product_id,
+                    review_order_id,
+                    review_rating,
+                    review_comment,
+                    review_status
+                )
+                VALUES (?, ?, ?, ?, ?, 'approved')
+            ");
+            $insert->execute([
+                $user_id,
+                $product_id,
+                $order_id,
+                (int) $rating,
+                $comment,
+            ]);
+
+            $success =
+                'Review submitted successfully!';
+        } elseif (isset($_POST['delete_review'])) {
+            $review_id = requireReviewId(
+                $_POST['review_id'] ?? null,
+                'review'
+            );
+
+            $delete = $pdo->prepare("
+                DELETE FROM product_reviews
+                WHERE review_id = ?
+                AND review_user_id = ?
+            ");
+            $delete->execute([
+                $review_id,
+                $user_id,
+            ]);
+
+            if ($delete->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Review not found.'
+                );
+            }
+
+            $success = 'Review deleted.';
         } else {
-            $error = 'Invalid review request.';
+            throw new RuntimeException(
+                'Invalid review action.'
+            );
         }
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
     }
 }
 
-// Handle delete review
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_review'])) {
-    $review_id = intval($_POST['review_id']);
-    $pdo->prepare("DELETE FROM product_reviews WHERE review_id = ? AND review_user_id = ?")
-        ->execute([$review_id, $user_id]);
-    $success = 'Review deleted.';
-}
-
-// Get all delivered order items (can review)
 $pending_reviews = $pdo->prepare("
-    SELECT DISTINCT oi.order_item_product_id as product_id, oi.order_item_id,
-    o.order_id, o.order_created_at,
-    oi.order_item_product_title AS product_title, p.product_cover_image, p.product_type,
-    p.product_author, p.product_series, p.product_volume_number
+    SELECT DISTINCT
+        oi.order_item_product_id AS product_id,
+        oi.order_item_id,
+        o.order_id,
+        o.order_created_at,
+        oi.order_item_product_title AS product_title,
+        p.product_cover_image,
+        p.product_type,
+        p.product_author,
+        p.product_series,
+        p.product_volume_number
     FROM order_items oi
-    JOIN orders o ON oi.order_item_order_id = o.order_id
-    JOIN products p ON oi.order_item_product_id = p.product_id
+    JOIN orders o
+        ON oi.order_item_order_id = o.order_id
+    JOIN products p
+        ON oi.order_item_product_id = p.product_id
     WHERE o.order_user_id = ?
     AND o.order_status = 'delivered'
     AND o.order_payment_status = 'confirmed'
     AND NOT EXISTS (
-        SELECT 1 FROM product_reviews r
-        WHERE r.review_user_id = ? AND r.review_product_id = oi.order_item_product_id
+        SELECT 1
+        FROM product_reviews r
+        WHERE r.review_user_id = ?
+        AND r.review_product_id =
+            oi.order_item_product_id
         AND r.review_order_id = o.order_id
     )
     ORDER BY o.order_created_at DESC
 ");
-$pending_reviews->execute([$user_id, $user_id]);
-$pending_reviews = $pending_reviews->fetchAll(PDO::FETCH_ASSOC);
+$pending_reviews->execute([
+    $user_id,
+    $user_id,
+]);
+$pending_reviews =
+    $pending_reviews->fetchAll(PDO::FETCH_ASSOC);
 
-// Get my existing reviews
 $my_reviews = $pdo->prepare("
-    SELECT r.*, p.product_title, p.product_cover_image, p.product_series, p.product_volume_number
+    SELECT
+        r.*,
+        p.product_title,
+        p.product_cover_image,
+        p.product_series,
+        p.product_volume_number
     FROM product_reviews r
-    JOIN products p ON r.review_product_id = p.product_id
+    JOIN products p
+        ON r.review_product_id = p.product_id
     WHERE r.review_user_id = ?
     ORDER BY r.review_created_at DESC
 ");
 $my_reviews->execute([$user_id]);
-$my_reviews = $my_reviews->fetchAll(PDO::FETCH_ASSOC);
+$my_reviews =
+    $my_reviews->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -162,9 +319,19 @@ $my_reviews = $my_reviews->fetchAll(PDO::FETCH_ASSOC);
                                 <?php if ($item['product_series']): ?>
                                 <p class="text-xs text-gray-400"><?= htmlspecialchars($item['product_series']) ?><?= $item['product_volume_number'] ? ' Vol.' . $item['product_volume_number'] : '' ?></p>
                                 <?php endif; ?>
-                                <p class="text-xs text-gray-400 mt-0.5">Order #<?= str_pad($item['order_id'], 4, '0', STR_PAD_LEFT) ?> · <?= date('d M Y', strtotime($item['order_created_at'])) ?></p>
+                                <p class="text-xs text-gray-400 mt-0.5">Order #<?= str_pad((string) ((int) $item['order_id']), 4, '0', STR_PAD_LEFT) ?> · <?= date('d M Y', strtotime($item['order_created_at'])) ?></p>
                             </div>
-                            <button onclick="openReviewModal(<?= $item['product_id'] ?>, <?= $item['order_id'] ?>, '<?= htmlspecialchars(addslashes($item['product_title'])) ?>')"
+                            <button onclick="openReviewModal(
+                                <?= (int) $item['product_id'] ?>,
+                                <?= (int) $item['order_id'] ?>,
+                                <?= json_encode(
+                                    (string) $item['product_title'],
+                                    JSON_HEX_TAG |
+                                    JSON_HEX_AMP |
+                                    JSON_HEX_APOS |
+                                    JSON_HEX_QUOT
+                                ) ?>
+                            )"
                                     class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition-colors flex-shrink-0">
                                 ✍️ Write Review
                             </button>
@@ -207,8 +374,9 @@ $my_reviews = $my_reviews->fetchAll(PDO::FETCH_ASSOC);
                                     <p class="text-xs text-gray-400 mt-2"><?= date('d M Y, h:i A', strtotime($review['review_created_at'])) ?></p>
                                 </div>
                                 <form method="POST" class="flex-shrink-0">
+                                    <?php csrf_field(); ?>
                                     <input type="hidden" name="delete_review" value="1">
-                                    <input type="hidden" name="review_id" value="<?= $review['review_id'] ?>">
+                                    <input type="hidden" name="review_id" value="<?= (int) $review['review_id'] ?>">
                                     <button type="submit" onclick="return confirm('Delete this review?')"
                                             class="text-xs text-gray-400 hover:text-red-600 transition-colors border border-gray-200 hover:border-red-300 px-3 py-1.5 rounded-lg">
                                         🗑️ Delete
@@ -233,6 +401,7 @@ $my_reviews = $my_reviews->fetchAll(PDO::FETCH_ASSOC);
                 <button onclick="closeReviewModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
             <form method="POST" class="p-6 space-y-4">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="submit_review" value="1">
                 <input type="hidden" name="product_id" id="modalProductId">
                 <input type="hidden" name="order_id" id="modalOrderId">
@@ -253,7 +422,7 @@ $my_reviews = $my_reviews->fetchAll(PDO::FETCH_ASSOC);
 
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Your Review *</label>
-                    <textarea name="comment" rows="4" required
+                    <textarea name="comment" rows="4" maxlength="2000" required
                               placeholder="Share your thoughts about this product..."
                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white resize-none"></textarea>
                 </div>

@@ -2,38 +2,92 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_admin_or_staff();
 
 $success = '';
+$error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? '';
-    $review_id = $_POST['review_id'] ?? null;
+    csrf_verify();
 
-    if ($action === 'approve') {
-        $pdo->prepare("UPDATE product_reviews SET review_status = 'approved' WHERE review_id = ?")
-            ->execute([$review_id]);
-        $success = 'Review approved!';
-    } elseif ($action === 'reject') {
-        $pdo->prepare("UPDATE product_reviews SET review_status = 'rejected' WHERE review_id = ?")
-            ->execute([$review_id]);
-        $success = 'Review rejected.';
+    $action = $_POST['action'] ?? null;
+    $review_id = filter_var(
+        $_POST['review_id'] ?? null,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
+
+    if (
+        !is_string($action) ||
+        !in_array($action, ['approve', 'reject', 'delete'], true) ||
+        $review_id === false ||
+        $review_id === null
+    ) {
+        $error = 'Invalid review action.';
     } elseif ($action === 'delete') {
-        $pdo->prepare("DELETE FROM product_reviews WHERE review_id = ?")
-            ->execute([$review_id]);
-        $success = 'Review deleted.';
+        $delete = $pdo->prepare("
+            DELETE FROM product_reviews
+            WHERE review_id = ?
+        ");
+        $delete->execute([$review_id]);
+
+        if ($delete->rowCount() === 1) {
+            $success = 'Review deleted.';
+        } else {
+            $error = 'Review not found.';
+        }
+    } else {
+        $new_status =
+            $action === 'approve'
+                ? 'approved'
+                : 'rejected';
+
+        $update = $pdo->prepare("
+            UPDATE product_reviews
+            SET review_status = ?
+            WHERE review_id = ?
+            AND review_status != ?
+        ");
+        $update->execute([
+            $new_status,
+            $review_id,
+            $new_status,
+        ]);
+
+        if ($update->rowCount() === 1) {
+            $success =
+                $action === 'approve'
+                    ? 'Review approved!'
+                    : 'Review rejected.';
+        } else {
+            $error = 'Review not found or unchanged.';
+        }
     }
 }
 
 $reviews = $pdo->query("
-    SELECT r.*, u.user_first_name, u.user_last_name, u.user_gmail,
-    p.product_title, p.product_cover_image
+    SELECT
+        r.*,
+        u.user_first_name,
+        u.user_last_name,
+        u.user_gmail,
+        p.product_title,
+        p.product_cover_image
     FROM product_reviews r
-    JOIN users u ON r.review_user_id = u.user_id
-    JOIN products p ON r.review_product_id = p.product_id
+    JOIN users u
+        ON r.review_user_id = u.user_id
+    JOIN products p
+        ON r.review_product_id = p.product_id
     ORDER BY r.review_created_at DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+$status_styles = [
+    'pending' => 'bg-yellow-100 text-yellow-700',
+    'approved' => 'bg-green-100 text-green-700',
+    'rejected' => 'bg-red-100 text-red-700',
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -60,13 +114,18 @@ $reviews = $pdo->query("
             </div>
         </div>
 
-        <?php if ($success): ?>
+        <?php if ($success !== ''): ?>
         <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">
-            ✅ <?= htmlspecialchars($success) ?>
+            ✅ <?= htmlspecialchars($success, ENT_QUOTES, 'UTF-8') ?>
         </div>
         <?php endif; ?>
 
-        <!-- Filter Tabs -->
+        <?php if ($error !== ''): ?>
+        <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5">
+            ❌ <?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?>
+        </div>
+        <?php endif; ?>
+
         <div class="flex items-center justify-between mb-6">
             <p class="text-sm text-gray-500">Total <?= count($reviews) ?> review(s)</p>
         </div>
@@ -74,63 +133,60 @@ $reviews = $pdo->query("
         <?php if (count($reviews) === 0): ?>
         <div class="bg-white rounded-2xl shadow-sm p-12 text-center">
             <div class="text-5xl mb-4">⭐</div>
-            <p class="text-gray-500 font-medium">No <?= $filter ?> reviews</p>
+            <p class="text-gray-500 font-medium">No reviews found.</p>
         </div>
         <?php else: ?>
         <div class="space-y-4">
-            <?php foreach ($reviews as $review): ?>
+            <?php foreach ($reviews as $review):
+                $status = (string) $review['review_status'];
+                $status_class =
+                    $status_styles[$status]
+                    ?? 'bg-gray-100 text-gray-600';
+            ?>
             <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
                 <div class="flex items-start gap-4 p-5">
 
-                    <!-- Product -->
                     <div class="flex items-center gap-3 w-48 flex-shrink-0">
                         <?php if ($review['product_cover_image']): ?>
-                        <img src="../assets/images/<?= htmlspecialchars($review['product_cover_image']) ?>"
+                        <img src="../assets/images/<?= htmlspecialchars($review['product_cover_image'], ENT_QUOTES, 'UTF-8') ?>"
                              class="w-10 h-14 object-cover rounded-lg flex-shrink-0">
                         <?php endif; ?>
                         <div class="min-w-0">
-                            <p class="text-xs font-semibold text-gray-800 line-clamp-2"><?= htmlspecialchars($review['product_title']) ?></p>
+                            <p class="text-xs font-semibold text-gray-800 line-clamp-2"><?= htmlspecialchars($review['product_title'], ENT_QUOTES, 'UTF-8') ?></p>
                         </div>
                     </div>
 
-                    <!-- Review Content -->
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-3 mb-2 flex-wrap">
                             <div class="flex items-center gap-2">
                                 <div class="w-7 h-7 bg-red-600 rounded-full flex items-center justify-center text-white text-xs font-black">
-                                    <?= strtoupper(substr($review['user_first_name'], 0, 1)) ?>
+                                    <?= strtoupper(substr((string) $review['user_first_name'], 0, 1)) ?>
                                 </div>
                                 <span class="text-sm font-semibold text-gray-800">
-                                    <?= htmlspecialchars($review['user_first_name'] . ' ' . $review['user_last_name']) ?>
+                                    <?= htmlspecialchars($review['user_first_name'] . ' ' . $review['user_last_name'], ENT_QUOTES, 'UTF-8') ?>
                                 </span>
-                                <span class="text-xs text-gray-400"><?= htmlspecialchars($review['user_gmail']) ?></span>
+                                <span class="text-xs text-gray-400"><?= htmlspecialchars($review['user_gmail'], ENT_QUOTES, 'UTF-8') ?></span>
                             </div>
                             <div class="flex gap-0.5">
                                 <?php for ($s = 1; $s <= 5; $s++): ?>
-                                <span class="<?= $s <= $review['review_rating'] ? 'text-yellow-400' : 'text-gray-200' ?>">★</span>
+                                <span class="<?= $s <= (int) $review['review_rating'] ? 'text-yellow-400' : 'text-gray-200' ?>">★</span>
                                 <?php endfor; ?>
                             </div>
-                            <?php
-                            $status_styles = [
-                                'pending' => 'bg-yellow-100 text-yellow-700',
-                                'approved' => 'bg-green-100 text-green-700',
-                                'rejected' => 'bg-red-100 text-red-700',
-                            ];
-                            ?>
-                            <span class="<?= $status_styles[$review['review_status']] ?> text-xs px-2 py-0.5 rounded-full font-semibold capitalize">
-                                <?= $review['review_status'] ?>
+                            <span class="<?= $status_class ?> text-xs px-2 py-0.5 rounded-full font-semibold capitalize">
+                                <?= htmlspecialchars($status, ENT_QUOTES, 'UTF-8') ?>
                             </span>
                             <span class="text-xs text-gray-400"><?= date('d M Y, h:i A', strtotime($review['review_created_at'])) ?></span>
                         </div>
-                        <p class="text-sm text-gray-600 leading-relaxed"><?= nl2br(htmlspecialchars($review['review_comment'])) ?></p>
+                        <p class="text-sm text-gray-600 leading-relaxed"><?= nl2br(htmlspecialchars($review['review_comment'], ENT_QUOTES, 'UTF-8')) ?></p>
                     </div>
 
-                    <!-- Actions -->
                     <div class="flex flex-col gap-2 flex-shrink-0">
                         <form method="POST" class="inline">
+                            <?php csrf_field(); ?>
                             <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="review_id" value="<?= $review['review_id'] ?>">
-                            <button type="submit" onclick="return confirm('Delete this review?')"
+                            <input type="hidden" name="review_id" value="<?= (int) $review['review_id'] ?>">
+                            <button type="submit"
+                                    onclick="return confirm('Delete this review?')"
                                     class="border border-red-200 text-red-600 hover:bg-red-50 text-xs font-semibold px-4 py-2 rounded-lg transition-colors">
                                 🗑️ Delete
                             </button>

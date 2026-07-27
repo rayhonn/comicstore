@@ -1,9 +1,9 @@
 <?php
 
-require_once '../includes/db.php';
-require_once '../includes/auth.php';
-require_once '../includes/csrf.php';
-require_once '../includes/money_helper.php';
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
 require_admin();
 
@@ -12,17 +12,64 @@ date_default_timezone_set('Asia/Kuala_Lumpur');
 $success = '';
 $error = '';
 
-function normalizeVoucherAmounts(
-    array $input,
-    string $type
-): array {
+function requireVoucherId(mixed $value): int
+{
+    $id = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
+
+    if ($id === false || $id === null) {
+        throw new InvalidArgumentException(
+            'Invalid voucher.'
+        );
+    }
+
+    return (int) $id;
+}
+
+function normalizeVoucherCode(mixed $value): string
+{
+    if (!is_string($value)) {
+        throw new InvalidArgumentException(
+            'Voucher code is required.'
+        );
+    }
+
+    $code = strtoupper(trim($value));
+    $length = function_exists('mb_strlen')
+        ? mb_strlen($code, 'UTF-8')
+        : strlen($code);
+
+    if ($code === '') {
+        throw new InvalidArgumentException(
+            'Voucher code is required.'
+        );
+    }
+
+    if ($length > 50) {
+        throw new InvalidArgumentException(
+            'Voucher code cannot exceed 50 characters.'
+        );
+    }
+
+    if (!preg_match('/\A[A-Z0-9_-]+\z/', $code)) {
+        throw new InvalidArgumentException(
+            'Voucher code may only contain letters, numbers, hyphens and underscores.'
+        );
+    }
+
+    return $code;
+}
+
+function normalizeVoucherType(mixed $value): string
+{
     if (
+        !is_string($value) ||
         !in_array(
-            $type,
-            [
-                'percentage',
-                'fixed',
-            ],
+            $value,
+            ['percentage', 'fixed'],
             true
         )
     ) {
@@ -31,41 +78,36 @@ function normalizeVoucherAmounts(
         );
     }
 
+    return $value;
+}
+
+function normalizeVoucherAmounts(
+    array $input,
+    string $type
+): array {
     try {
         $value = moneyNormalizeDecimal(
-            (string) (
-                $input['voucher_value'] ?? ''
-            )
+            (string) ($input['voucher_value'] ?? '')
         );
 
-        $minOrderRaw = trim(
-            (string) (
-                $input['voucher_min_order'] ?? ''
-            )
+        $minimum_raw = trim(
+            (string) ($input['voucher_min_order'] ?? '')
+        );
+        $minimum_order = moneyNormalizeDecimal(
+            $minimum_raw === '' ? '0' : $minimum_raw
         );
 
-        $minimumOrder = moneyNormalizeDecimal(
-            $minOrderRaw === ''
-                ? '0'
-                : $minOrderRaw
-        );
-
-        $maxDiscountRaw = trim(
+        $maximum_raw = trim(
             (string) (
                 $input['voucher_max_discount'] ?? ''
             )
         );
-
-        $maximumDiscount =
-            $maxDiscountRaw === ''
+        $maximum_discount =
+            $maximum_raw === ''
                 ? null
-                : moneyNormalizeDecimal(
-                    $maxDiscountRaw
-                );
+                : moneyNormalizeDecimal($maximum_raw);
 
-        $valueSen = moneyDecimalToSen(
-            $value
-        );
+        $value_sen = moneyDecimalToSen($value);
     } catch (MoneyValueException $e) {
         throw new InvalidArgumentException(
             'Please enter valid voucher amounts with up to two decimal places.',
@@ -74,7 +116,7 @@ function normalizeVoucherAmounts(
         );
     }
 
-    if ($valueSen < 1) {
+    if ($value_sen < 1) {
         throw new InvalidArgumentException(
             'Voucher value must be at least 0.01.'
         );
@@ -82,7 +124,7 @@ function normalizeVoucherAmounts(
 
     if (
         $type === 'percentage' &&
-        $valueSen > 10000
+        $value_sen > 10000
     ) {
         throw new InvalidArgumentException(
             'Percentage voucher value cannot exceed 100.00.'
@@ -91,101 +133,283 @@ function normalizeVoucherAmounts(
 
     return [
         $value,
-        $minimumOrder,
-        $maximumDiscount,
+        $minimum_order,
+        $maximum_discount,
     ];
+}
+
+function normalizeVoucherUsageLimit(
+    mixed $value
+): ?int {
+    if ($value === null || $value === '') {
+        return null;
+    }
+
+    $limit = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+                'max_range' => 2147483647,
+            ],
+        ]
+    );
+
+    if ($limit === false || $limit === null) {
+        throw new InvalidArgumentException(
+            'Usage limit must be a positive whole number.'
+        );
+    }
+
+    return (int) $limit;
+}
+
+function normalizeVoucherDate(
+    mixed $value,
+    string $label
+): ?string {
+    if ($value === null || $value === '') {
+        return null;
+    }
+
+    if (!is_string($value)) {
+        throw new InvalidArgumentException(
+            'Invalid ' . $label . '.'
+        );
+    }
+
+    $date = DateTimeImmutable::createFromFormat(
+        '!Y-m-d\TH:i',
+        trim($value)
+    );
+    $errors = DateTimeImmutable::getLastErrors();
+
+    if (
+        !$date ||
+        (
+            is_array($errors) &&
+            (
+                $errors['warning_count'] > 0 ||
+                $errors['error_count'] > 0
+            )
+        )
+    ) {
+        throw new InvalidArgumentException(
+            'Invalid ' . $label . '.'
+        );
+    }
+
+    return $date->format('Y-m-d H:i:s');
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
-    $action = $_POST['action'] ?? '';
+    $action = $_POST['action'] ?? null;
 
-    if ($action === 'add') {
-        $code = strtoupper(trim($_POST['voucher_code']));
-        $type = $_POST['voucher_type'];
-        $usage_limit = $_POST['voucher_usage_limit'] ? intval($_POST['voucher_usage_limit']) : null;
-        $start_date = $_POST['voucher_start_date'] ?: null;
-        $end_date = $_POST['voucher_end_date'] ?: null;
-        $is_active = isset($_POST['voucher_is_active']) ? 1 : 0;
+    try {
+        if (
+            !is_string($action) ||
+            !in_array(
+                $action,
+                ['add', 'edit', 'delete', 'toggle'],
+                true
+            )
+        ) {
+            throw new InvalidArgumentException(
+                'Invalid voucher action.'
+            );
+        }
 
-        try {
+        if ($action === 'delete' || $action === 'toggle') {
+            $voucher_id = requireVoucherId(
+                $_POST['voucher_id'] ?? null
+            );
+
+            if ($action === 'delete') {
+                $delete = $pdo->prepare("
+                    DELETE FROM vouchers
+                    WHERE voucher_id = ?
+                ");
+                $delete->execute([$voucher_id]);
+
+                if ($delete->rowCount() !== 1) {
+                    throw new InvalidArgumentException(
+                        'Voucher not found.'
+                    );
+                }
+
+                $success = 'Voucher deleted.';
+            } else {
+                $toggle = $pdo->prepare("
+                    UPDATE vouchers
+                    SET voucher_is_active =
+                        NOT voucher_is_active
+                    WHERE voucher_id = ?
+                ");
+                $toggle->execute([$voucher_id]);
+
+                if ($toggle->rowCount() !== 1) {
+                    throw new InvalidArgumentException(
+                        'Voucher not found.'
+                    );
+                }
+
+                header('Location: vouchers.php');
+                exit;
+            }
+        } else {
+            $voucher_id = null;
+
+            if ($action === 'edit') {
+                $voucher_id = requireVoucherId(
+                    $_POST['voucher_id'] ?? null
+                );
+
+                $exists = $pdo->prepare("
+                    SELECT voucher_id
+                    FROM vouchers
+                    WHERE voucher_id = ?
+                ");
+                $exists->execute([$voucher_id]);
+
+                if (!$exists->fetchColumn()) {
+                    throw new InvalidArgumentException(
+                        'Voucher not found.'
+                    );
+                }
+            }
+
+            $code = normalizeVoucherCode(
+                $_POST['voucher_code'] ?? null
+            );
+            $type = normalizeVoucherType(
+                $_POST['voucher_type'] ?? null
+            );
             [
                 $value,
                 $min_order,
                 $max_discount,
-            ] = normalizeVoucherAmounts(
-                $_POST,
-                $type
+            ] = normalizeVoucherAmounts($_POST, $type);
+
+            $usage_limit = normalizeVoucherUsageLimit(
+                $_POST['voucher_usage_limit'] ?? null
             );
-        } catch (InvalidArgumentException $e) {
-            $error = $e->getMessage();
-        }
+            $start_date = normalizeVoucherDate(
+                $_POST['voucher_start_date'] ?? null,
+                'start date'
+            );
+            $end_date = normalizeVoucherDate(
+                $_POST['voucher_end_date'] ?? null,
+                'end date'
+            );
+            $is_active =
+                isset($_POST['voucher_is_active'])
+                    ? 1
+                    : 0;
 
-        if ($error === '' && empty($code)) {
-            $error = 'Code and value are required.';
-        }
+            if (
+                $start_date !== null &&
+                $end_date !== null &&
+                strtotime($end_date) < strtotime($start_date)
+            ) {
+                throw new InvalidArgumentException(
+                    'End date cannot be earlier than start date.'
+                );
+            }
 
-        if ($error === '') {
-            $check = $pdo->prepare("SELECT voucher_id FROM vouchers WHERE voucher_code = ?");
-            $check->execute([$code]);
-            if ($check->rowCount() > 0) {
-                $error = 'Voucher code already exists.';
-            } else {
-                $pdo->prepare("INSERT INTO vouchers (voucher_code, voucher_type, voucher_value, voucher_min_order, voucher_max_discount, voucher_usage_limit, voucher_start_date, voucher_end_date, voucher_is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                    ->execute([$code, $type, $value, $min_order, $max_discount, $usage_limit, $start_date, $end_date, $is_active]);
+            $duplicate_sql = "
+                SELECT voucher_id
+                FROM vouchers
+                WHERE voucher_code = ?
+            ";
+            $duplicate_params = [$code];
+
+            if ($voucher_id !== null) {
+                $duplicate_sql .= " AND voucher_id != ?";
+                $duplicate_params[] = $voucher_id;
+            }
+
+            $duplicate = $pdo->prepare($duplicate_sql);
+            $duplicate->execute($duplicate_params);
+
+            if ($duplicate->fetchColumn()) {
+                throw new InvalidArgumentException(
+                    'Voucher code already exists.'
+                );
+            }
+
+            if ($action === 'add') {
+                $insert = $pdo->prepare("
+                    INSERT INTO vouchers (
+                        voucher_code,
+                        voucher_type,
+                        voucher_value,
+                        voucher_min_order,
+                        voucher_max_discount,
+                        voucher_usage_limit,
+                        voucher_start_date,
+                        voucher_end_date,
+                        voucher_is_active
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $insert->execute([
+                    $code,
+                    $type,
+                    $value,
+                    $min_order,
+                    $max_discount,
+                    $usage_limit,
+                    $start_date,
+                    $end_date,
+                    $is_active,
+                ]);
+
                 $success = 'Voucher created!';
+            } else {
+                $update = $pdo->prepare("
+                    UPDATE vouchers
+                    SET voucher_code = ?,
+                        voucher_type = ?,
+                        voucher_value = ?,
+                        voucher_min_order = ?,
+                        voucher_max_discount = ?,
+                        voucher_usage_limit = ?,
+                        voucher_start_date = ?,
+                        voucher_end_date = ?,
+                        voucher_is_active = ?
+                    WHERE voucher_id = ?
+                ");
+                $update->execute([
+                    $code,
+                    $type,
+                    $value,
+                    $min_order,
+                    $max_discount,
+                    $usage_limit,
+                    $start_date,
+                    $end_date,
+                    $is_active,
+                    $voucher_id,
+                ]);
+
+                $success = 'Voucher updated!';
             }
         }
-
-    } elseif ($action === 'edit') {
-        $id = $_POST['voucher_id'];
-        $code = strtoupper(trim($_POST['voucher_code']));
-        $type = $_POST['voucher_type'];
-        $usage_limit = $_POST['voucher_usage_limit'] ? intval($_POST['voucher_usage_limit']) : null;
-        $start_date = $_POST['voucher_start_date'] ?: null;
-        $end_date = $_POST['voucher_end_date'] ?: null;
-        $is_active = isset($_POST['voucher_is_active']) ? 1 : 0;
-
-        try {
-            [
-                $value,
-                $min_order,
-                $max_discount,
-            ] = normalizeVoucherAmounts(
-                $_POST,
-                $type
-            );
-        } catch (InvalidArgumentException $e) {
-            $error = $e->getMessage();
-        }
-
-        if ($error === '' && empty($code)) {
-            $error = 'Code and value are required.';
-        }
-
-        if ($error === '') {
-            $pdo->prepare("UPDATE vouchers SET voucher_code=?, voucher_type=?, voucher_value=?, voucher_min_order=?, voucher_max_discount=?, voucher_usage_limit=?, voucher_start_date=?, voucher_end_date=?, voucher_is_active=? WHERE voucher_id=?")
-                ->execute([$code, $type, $value, $min_order, $max_discount, $usage_limit, $start_date, $end_date, $is_active, $id]);
-            $success = 'Voucher updated!';
-        }
-
-    } elseif ($action === 'delete') {
-        $pdo->prepare("DELETE FROM vouchers WHERE voucher_id = ?")->execute([$_POST['voucher_id']]);
-        $success = 'Voucher deleted.';
-
-    } elseif ($action === 'toggle') {
-        $pdo->prepare("UPDATE vouchers SET voucher_is_active = NOT voucher_is_active WHERE voucher_id = ?")->execute([$_POST['voucher_id']]);
-        header('Location: vouchers.php');
-        exit;
+    } catch (InvalidArgumentException $e) {
+        $error = $e->getMessage();
     }
 }
 
 $vouchers = $pdo->query("
-    SELECT v.*, 
-    COUNT(vu.usage_id) as actual_usage
+    SELECT
+        v.*,
+        COUNT(vu.usage_id) AS actual_usage
     FROM vouchers v
-    LEFT JOIN voucher_usage vu ON v.voucher_id = vu.usage_voucher_id
+    LEFT JOIN voucher_usage vu
+        ON v.voucher_id = vu.usage_voucher_id
     GROUP BY v.voucher_id
     ORDER BY v.voucher_created_at DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
@@ -277,10 +501,8 @@ $vouchers = $pdo->query("
                         <td class="px-5 py-4">
                             <p class="font-bold text-red-600">
                                 <?= $v['voucher_type'] === 'percentage'
-                                    ? $v['voucher_value'] . '%'
-                                    : 'RM ' . moneyFormatSen(
-                                        $voucher_value_sen
-                                    ) ?>
+                                    ? htmlspecialchars((string) $v['voucher_value'], ENT_QUOTES, 'UTF-8') . '%'
+                                    : 'RM ' . moneyFormatSen($voucher_value_sen) ?>
                             </p>
                             <?php if (
                                 $voucher_max_discount_sen !== null &&
@@ -291,9 +513,7 @@ $vouchers = $pdo->query("
                         </td>
                         <td class="px-5 py-4 text-sm text-gray-600">
                             <?= $voucher_min_order_sen > 0
-                                ? 'RM ' . moneyFormatSen(
-                                    $voucher_min_order_sen
-                                )
+                                ? 'RM ' . moneyFormatSen($voucher_min_order_sen)
                                 : '—' ?>
                         </td>
                         <td class="px-5 py-4 text-sm">
@@ -330,23 +550,27 @@ $vouchers = $pdo->query("
                         </td>
                         <td class="px-5 py-4">
                             <div class="flex gap-2">
-                                <button onclick="openEditModal(<?= htmlspecialchars(json_encode($v)) ?>)"
+                                <button onclick="openEditModal(<?= htmlspecialchars(
+                                    json_encode($v),
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>)"
                                         class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">
                                     ✏️ Edit
                                 </button>
                                 <form method="POST" class="inline">
-                                    <?php csrf_field() ?>
-                                    <input type="hidden" name="action" value="toggle">
-                                    <input type="hidden" name="voucher_id" value="<?= $v['voucher_id'] ?>">
+                                    <?php csrf_field(); ?>
+<input type="hidden" name="action" value="toggle">
+                                    <input type="hidden" name="voucher_id" value="<?= (int) $v['voucher_id'] ?>">
                                     <button type="submit"
                                             class="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
                                         <?= $v['voucher_is_active'] ? '🙈 Disable' : '👁️ Enable' ?>
                                     </button>
                                 </form>
                                 <form method="POST" class="inline">
-                                    <?php csrf_field() ?>
-                                    <input type="hidden" name="action" value="delete">
-                                    <input type="hidden" name="voucher_id" value="<?= $v['voucher_id'] ?>">
+                                    <?php csrf_field(); ?>
+<input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="voucher_id" value="<?= (int) $v['voucher_id'] ?>">
                                     <button type="submit" onclick="return confirm('Delete this voucher?')"
                                             class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
                                         🗑️
@@ -370,13 +594,13 @@ $vouchers = $pdo->query("
                 <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
             <form method="POST" class="p-5 space-y-4">
-                <?php csrf_field() ?>
+                <?php csrf_field(); ?>
                 <input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="voucher_id" id="formId">
 
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Voucher Code *</label>
-                    <input type="text" name="voucher_code" id="formCode" required
+                    <input type="text" name="voucher_code" id="formCode" maxlength="50" pattern="[A-Za-z0-9_-]+" required
                            placeholder="e.g. MANGA10"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white uppercase">
                 </div>
@@ -392,7 +616,7 @@ $vouchers = $pdo->query("
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Value *</label>
-                        <input type="number" name="voucher_value" id="formValue" required step="0.01" min="0.01"
+                        <input type="number" name="voucher_value" id="formValue" required step="0.01" min="0.01" max="99999999.99"
                                placeholder="e.g. 10"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
@@ -401,12 +625,12 @@ $vouchers = $pdo->query("
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Min Order (RM)</label>
-                        <input type="number" name="voucher_min_order" id="formMinOrder" step="0.01" min="0" value="0"
+                        <input type="number" name="voucher_min_order" id="formMinOrder" step="0.01" min="0" max="99999999.99" value="0"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
                     <div id="maxDiscountDiv">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Max Discount (RM)</label>
-                        <input type="number" name="voucher_max_discount" id="formMaxDiscount" step="0.01" min="0"
+                        <input type="number" name="voucher_max_discount" id="formMaxDiscount" step="0.01" min="0" max="99999999.99"
                                placeholder="Leave empty = no limit"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
@@ -414,7 +638,7 @@ $vouchers = $pdo->query("
 
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Usage Limit</label>
-                    <input type="number" name="voucher_usage_limit" id="formUsageLimit" min="1"
+                    <input type="number" name="voucher_usage_limit" id="formUsageLimit" min="1" max="2147483647"
                            placeholder="Leave empty = unlimited"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
