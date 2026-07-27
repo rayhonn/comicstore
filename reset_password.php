@@ -1,27 +1,28 @@
 <?php
 
-
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/csrf.php';
 
 $error = '';
 $success = '';
 $valid_token = false;
 
-$token = trim(
-    (string) (
-        $_GET['token'] ??
-        $_POST['token'] ??
-        ''
-    )
-);
+$token_raw =
+    $_GET['token'] ??
+    $_POST['token'] ??
+    '';
 
-if ($token === '') {
+if (
+    !is_string($token_raw) ||
+    strlen($token_raw) !== 64 ||
+    !ctype_xdigit($token_raw)
+) {
     header('Location: forgot_password.php');
     exit;
 }
 
-$token_hash =
-    hash('sha256', $token);
+$token = strtolower($token_raw);
+$token_hash = hash('sha256', $token);
 
 $statement = $pdo->prepare("
     SELECT *
@@ -31,11 +32,8 @@ $statement = $pdo->prepare("
     AND reset_expires_at > UTC_TIMESTAMP()
     LIMIT 1
 ");
-
 $statement->execute([$token_hash]);
-
-$reset =
-    $statement->fetch(PDO::FETCH_ASSOC);
+$reset = $statement->fetch(PDO::FETCH_ASSOC);
 
 if ($reset) {
     $valid_token = true;
@@ -49,50 +47,117 @@ if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     $valid_token
 ) {
-    $password = (string) (
-        $_POST['password'] ?? ''
-    );
+    csrf_verify();
 
-    $confirm = (string) (
-        $_POST['confirm_password'] ?? ''
-    );
+    $password = $_POST['password'] ?? null;
+    $confirm = $_POST['confirm_password'] ?? null;
 
-    if ($password === '' || $confirm === '') {
+    if (
+        !is_string($password) ||
+        !is_string($confirm)
+    ) {
+        $error = 'Invalid password input.';
+    } elseif (
+        strlen($password) > 72 ||
+        strlen($confirm) > 72
+    ) {
         $error =
-            'Please fill in all fields.';
-    } elseif (strlen($password) < 6) {
+            'Password cannot exceed 72 characters.';
+    } elseif (
+        !preg_match(
+            '/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)' .
+            '(?=.*[\W_]).{8,72}$/',
+            $password
+        )
+    ) {
         $error =
-            'Password must be at least 6 characters.';
+            'Password must be 8-72 characters with uppercase, ' .
+            'lowercase, number and symbol.';
     } elseif ($password !== $confirm) {
-        $error =
-            'Passwords do not match.';
+        $error = 'Passwords do not match.';
     } else {
-        $hashed_password =
-            password_hash(
-                $password,
-                PASSWORD_DEFAULT
+        try {
+            $pdo->beginTransaction();
+
+            $lock_reset = $pdo->prepare("
+                SELECT reset_email
+                FROM password_resets
+                WHERE reset_token_hash = ?
+                AND reset_used = 0
+                AND reset_expires_at > UTC_TIMESTAMP()
+                LIMIT 1
+                FOR UPDATE
+            ");
+            $lock_reset->execute([$token_hash]);
+            $locked_reset =
+                $lock_reset->fetch(PDO::FETCH_ASSOC);
+
+            if (!$locked_reset) {
+                throw new RuntimeException(
+                    'This reset link is no longer valid.'
+                );
+            }
+
+            $update_user = $pdo->prepare("
+                UPDATE users
+                SET user_password_hash = ?
+                WHERE user_gmail = ?
+                AND user_role = 'customer'
+            ");
+            $update_user->execute([
+                password_hash(
+                    $password,
+                    PASSWORD_DEFAULT
+                ),
+                $locked_reset['reset_email'],
+            ]);
+
+            if ($update_user->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Unable to reset the account password.'
+                );
+            }
+
+            $use_token = $pdo->prepare("
+                UPDATE password_resets
+                SET reset_used = 1
+                WHERE reset_token_hash = ?
+                AND reset_used = 0
+            ");
+            $use_token->execute([$token_hash]);
+
+            if ($use_token->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'This reset link has already been used.'
+                );
+            }
+
+            $pdo->commit();
+
+            $success =
+                'Password reset successfully! ' .
+                'You can now login.';
+            $valid_token = false;
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            $error = $e->getMessage();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            app_error_log(
+                'Password reset failed: ' .
+                $e->getMessage()
             );
 
-        $pdo->prepare("
-            UPDATE users
-            SET user_password_hash = ?
-            WHERE user_gmail = ?
-        ")->execute([
-            $hashed_password,
-            $reset['reset_email'],
-        ]);
-
-        $pdo->prepare("
-            UPDATE password_resets
-            SET reset_used = 1
-            WHERE reset_token_hash = ?
-        ")->execute([$token_hash]);
-
-        $success =
-            'Password reset successfully! ' .
-            'You can now login.';
-
-        $valid_token = false;
+            $error =
+                'Unable to reset the password. ' .
+                'Please request a new reset link.';
+        }
     }
 }
 ?>
@@ -109,7 +174,6 @@ if (
 </head>
 <body class="flex h-screen overflow-hidden">
 
-    <!-- Left Panel -->
     <div class="hidden md:flex md:w-1/2 lg:w-3/5 bg-[#1e2d4a] flex-col justify-center px-16 relative overflow-hidden">
         <div class="absolute -top-24 -right-24 w-80 h-80 bg-white opacity-5 rounded-full"></div>
 
@@ -147,13 +211,16 @@ if (
                         ✓
                     </span>
 
-                    <?= htmlspecialchars($feature) ?>
+                    <?= htmlspecialchars(
+                        $feature,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
                 </li>
             <?php endforeach; ?>
         </ul>
     </div>
 
-    <!-- Right Panel -->
     <div class="w-full md:w-1/2 lg:w-2/5 bg-white flex flex-col justify-center px-8 md:px-14">
 
         <?php if ($success !== ''): ?>
@@ -213,7 +280,11 @@ if (
                 </h2>
 
                 <p class="text-sm text-gray-400 mb-8">
-                    <?= htmlspecialchars($error) ?>
+                    <?= htmlspecialchars(
+                        $error,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
                 </p>
 
                 <a
@@ -230,20 +301,30 @@ if (
             </h2>
 
             <p class="text-sm text-gray-400 mb-8">
-                Your new password must be at least 6 characters.
+                Use 8-72 characters with uppercase, lowercase,
+                number and symbol.
             </p>
 
             <?php if ($error !== ''): ?>
                 <div class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-lg mb-5">
-                    <?= htmlspecialchars($error) ?>
+                    <?= htmlspecialchars(
+                        $error,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
                 </div>
             <?php endif; ?>
 
             <form method="POST" class="space-y-5">
+                <?php csrf_field(); ?>
                 <input
                     type="hidden"
                     name="token"
-                    value="<?= htmlspecialchars($token) ?>"
+                    value="<?= htmlspecialchars(
+                        $token,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>"
                 >
 
                 <div>
@@ -255,8 +336,10 @@ if (
                     <input
                         type="password"
                         name="password"
+                        minlength="8"
+                        maxlength="72"
                         class="w-full px-4 py-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
-                        placeholder="Minimum 6 characters"
+                        placeholder="8-72 characters"
                         required
                     >
                 </div>
@@ -270,6 +353,8 @@ if (
                     <input
                         type="password"
                         name="confirm_password"
+                        minlength="8"
+                        maxlength="72"
                         class="w-full px-4 py-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
                         placeholder="Repeat new password"
                         required

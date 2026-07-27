@@ -1,35 +1,75 @@
 <?php
+
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
-$user_id = $_SESSION['user_id'];
+$user_id = current_user_id();
 
-// Mark all as read
-if (isset($_GET['mark_all_read'])) {
-    $pdo->prepare("UPDATE notifications SET notif_is_read = 1 WHERE notif_user_id = ?")
-        ->execute([$user_id]);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
+    $action = $_POST['action'] ?? null;
+
+    if ($action === 'mark_all_read') {
+        $mark_all = $pdo->prepare("
+            UPDATE notifications
+            SET notif_is_read = 1
+            WHERE notif_user_id = ?
+            AND notif_is_read = 0
+        ");
+        $mark_all->execute([$user_id]);
+    } elseif ($action === 'mark_read') {
+        $notification_id = filter_var(
+            $_POST['notification_id'] ?? null,
+            FILTER_VALIDATE_INT,
+            [
+                'options' => [
+                    'min_range' => 1,
+                ],
+            ]
+        );
+
+        if (
+            $notification_id !== false &&
+            $notification_id !== null
+        ) {
+            $mark_read = $pdo->prepare("
+                UPDATE notifications
+                SET notif_is_read = 1
+                WHERE notif_id = ?
+                AND notif_user_id = ?
+            ");
+            $mark_read->execute([
+                $notification_id,
+                $user_id,
+            ]);
+        }
+    }
+
     header('Location: notifications.php');
     exit;
 }
 
-// Mark single as read
-if (isset($_GET['read'])) {
-    $pdo->prepare("UPDATE notifications SET notif_is_read = 1 WHERE notif_id = ? AND notif_user_id = ?")
-        ->execute([$_GET['read'], $user_id]);
-}
-
-// Get all notifications
-$notifications = $pdo->prepare("
-    SELECT * FROM notifications
+$notification_query = $pdo->prepare("
+    SELECT *
+    FROM notifications
     WHERE notif_user_id = ?
     ORDER BY notif_created_at DESC
 ");
-$notifications->execute([$user_id]);
-$notifications = $notifications->fetchAll(PDO::FETCH_ASSOC);
+$notification_query->execute([$user_id]);
+$notifications =
+    $notification_query->fetchAll(PDO::FETCH_ASSOC);
 
-$unread_count = count(array_filter($notifications, fn($n) => !$n['notif_is_read']));
+$unread_count = count(
+    array_filter(
+        $notifications,
+        static fn(array $notification): bool =>
+            !(bool) $notification['notif_is_read']
+    )
+);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -68,11 +108,18 @@ $unread_count = count(array_filter($notifications, fn($n) => !$n['notif_is_read'
                             <p class="text-sm text-gray-400"><?= $unread_count ?> unread</p>
                         <?php endif; ?>
                     </div>
+
                     <?php if ($unread_count > 0): ?>
-                        <a href="notifications.php?mark_all_read=1"
-                           class="text-xs text-red-600 hover:underline font-medium">
-                            Mark all as read
-                        </a>
+                        <form method="POST">
+                            <?php csrf_field(); ?>
+                            <input type="hidden" name="action" value="mark_all_read">
+                            <button
+                                type="submit"
+                                class="text-xs text-red-600 hover:underline font-medium"
+                            >
+                                Mark all as read
+                            </button>
+                        </form>
                     <?php endif; ?>
                 </div>
 
@@ -84,33 +131,64 @@ $unread_count = count(array_filter($notifications, fn($n) => !$n['notif_is_read'
                     </div>
                 <?php else: ?>
                     <div class="space-y-3">
-                        <?php foreach ($notifications as $notif): ?>
-                        <a href="notifications.php?read=<?= $notif['notif_id'] ?>"
-                           class="block bg-white rounded-2xl shadow-sm p-4 hover:shadow-md transition-all duration-200 <?= !$notif['notif_is_read'] ? 'border-l-4 border-red-500' : '' ?>">
-                            <div class="flex items-start gap-4">
-                                <!-- Icon -->
-                                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-lg
-                                    <?= $notif['notif_type'] === 'order' ? 'bg-blue-50' :
-                                       ($notif['notif_type'] === 'return' ? 'bg-orange-50' :
-                                       ($notif['notif_type'] === 'promo' ? 'bg-yellow-50' : 'bg-gray-50')) ?>">
-                                    <?= $notif['notif_type'] === 'order' ? '📦' :
-                                       ($notif['notif_type'] === 'return' ? '↩️' :
-                                       ($notif['notif_type'] === 'promo' ? '🎉' : '🔔')) ?>
-                                </div>
-
-                                <!-- Content -->
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-start justify-between gap-2">
-                                        <p class="font-semibold text-sm text-gray-800"><?= htmlspecialchars($notif['notif_title']) ?></p>
-                                        <?php if (!$notif['notif_is_read']): ?>
-                                            <span class="w-2 h-2 bg-red-600 rounded-full flex-shrink-0 mt-1.5"></span>
-                                        <?php endif; ?>
+                        <?php foreach ($notifications as $notification): ?>
+                        <form method="POST">
+                            <?php csrf_field(); ?>
+                            <input type="hidden" name="action" value="mark_read">
+                            <input
+                                type="hidden"
+                                name="notification_id"
+                                value="<?= (int) $notification['notif_id'] ?>"
+                            >
+                            <button
+                                type="submit"
+                                class="text-left w-full block bg-white rounded-2xl shadow-sm p-4 hover:shadow-md transition-all duration-200 <?= !(int) $notification['notif_is_read'] ? 'border-l-4 border-red-500' : '' ?>"
+                            >
+                                <div class="flex items-start gap-4">
+                                    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-lg
+                                        <?= $notification['notif_type'] === 'order' ? 'bg-blue-50' :
+                                           ($notification['notif_type'] === 'return' ? 'bg-orange-50' :
+                                           ($notification['notif_type'] === 'promo' ? 'bg-yellow-50' : 'bg-gray-50')) ?>">
+                                        <?= $notification['notif_type'] === 'order' ? '📦' :
+                                           ($notification['notif_type'] === 'return' ? '↩️' :
+                                           ($notification['notif_type'] === 'promo' ? '🎉' : '🔔')) ?>
                                     </div>
-                                    <p class="text-sm text-gray-500 mt-0.5"><?= htmlspecialchars($notif['notif_message']) ?></p>
-                                    <p class="text-xs text-gray-400 mt-1"><?= date('d M Y, h:i A', strtotime($notif['notif_created_at'])) ?></p>
+
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-start justify-between gap-2">
+                                            <p class="font-semibold text-sm text-gray-800">
+                                                <?= htmlspecialchars(
+                                                    $notification['notif_title'],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+
+                                            <?php if (!(int) $notification['notif_is_read']): ?>
+                                                <span class="w-2 h-2 bg-red-600 rounded-full flex-shrink-0 mt-1.5"></span>
+                                            <?php endif; ?>
+                                        </div>
+
+                                        <p class="text-sm text-gray-500 mt-0.5">
+                                            <?= htmlspecialchars(
+                                                $notification['notif_message'],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>
+                                        </p>
+
+                                        <p class="text-xs text-gray-400 mt-1">
+                                            <?= date(
+                                                'd M Y, h:i A',
+                                                strtotime(
+                                                    $notification['notif_created_at']
+                                                )
+                                            ) ?>
+                                        </p>
+                                    </div>
                                 </div>
-                            </div>
-                        </a>
+                            </button>
+                        </form>
                         <?php endforeach; ?>
                     </div>
                 <?php endif; ?>

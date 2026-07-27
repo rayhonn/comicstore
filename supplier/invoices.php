@@ -1,80 +1,236 @@
 <?php
 
-date_default_timezone_set(
-    'Asia/Kuala_Lumpur'
-);
+date_default_timezone_set('Asia/Kuala_Lumpur');
 
-require_once '../includes/db.php';
-require_once '../includes/auth.php';
-require_once '../includes/csrf.php';
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
 require_supplier();
 
-$supplier_id = $_SESSION['supplier_id'];
+$supplier_id = (int) $_SESSION['supplier_id'];
 $error = '';
 $success = '';
 
 if (isset($_SESSION['flash_success'])) {
-    $success = $_SESSION['flash_success'];
+    $success = (string) $_SESSION['flash_success'];
     unset($_SESSION['flash_success']);
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_invoice'])) {
+function requireSupplierInvoiceId(
+    mixed $value,
+    string $label
+): int {
+    $id = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
+    );
+
+    if ($id === false || $id === null) {
+        throw new RuntimeException(
+            'Invalid ' . $label . '.'
+        );
+    }
+
+    return (int) $id;
+}
+
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['submit_invoice'])
+) {
     csrf_verify();
 
-    $po_id  = $_POST['po_id'] ?? null;
-    $suffix = trim($_POST['invoice_number_suffix'] ?? '');
-    $amount = $_POST['invoice_amount'] ?? 0;
+    try {
+        $po_id = requireSupplierInvoiceId(
+            $_POST['po_id'] ?? null,
+            'purchase order'
+        );
 
-    if (empty($suffix) || !preg_match('/^[0-9]{4}$/', $suffix) || empty($po_id)) {
-        $error = 'Please enter a valid 4-digit invoice number and select an order.';
-    } else {
-        $invoice_number = 'INV-' . date('Y') . '-' . $suffix;
+        $suffix_raw =
+            $_POST['invoice_number_suffix'] ?? null;
 
-        $dup_check = $pdo->prepare("SELECT invoice_id FROM supplier_invoices WHERE invoice_number = ? AND invoice_supplier_id = ?");
-        $dup_check->execute([$invoice_number, $supplier_id]);
-        if ($dup_check->fetch()) {
-            $error = "Invoice number $invoice_number has already been used. Please use a different number.";
-        } else {
-            $po_check = $pdo->prepare("SELECT po_total_amount FROM purchase_orders WHERE po_id = ?");
-            $po_check->execute([$po_id]);
-            $po_total = $po_check->fetchColumn();
-
-            $is_mismatch = abs($po_total - $amount) > 0.01;
-
-            $po_verify = $pdo->prepare("SELECT po_id FROM purchase_orders WHERE po_id = ? AND po_supplier_id = ? AND po_status = 'completed'");
-            $po_verify->execute([$po_id, $supplier_id]);
-            if (!$po_verify->fetch()) {
-                $error = 'Invalid order or order not yet completed.';
-            } else {
-                $pdo->prepare("INSERT INTO supplier_invoices (invoice_number, invoice_supplier_id, invoice_po_id, invoice_amount, invoice_due_date, invoice_is_mismatch) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 DAY), ?)")
-                    ->execute([$invoice_number, $supplier_id, $po_id, $amount, $is_mismatch ? 1 : 0]);
-                $_SESSION['flash_success'] = 'Invoice submitted successfully. MangaVault will review and process payment.';
-                header('Location: invoices.php');
-                exit;
-            }
+        if (
+            !is_string($suffix_raw) ||
+            !preg_match('/\A\d{4}\z/', $suffix_raw)
+        ) {
+            throw new RuntimeException(
+                'Please enter a valid 4-digit invoice number.'
+            );
         }
+
+        $amount_raw = $_POST['invoice_amount'] ?? null;
+
+        if (!is_string($amount_raw)) {
+            throw new RuntimeException(
+                'Please enter a valid invoice amount.'
+            );
+        }
+
+        try {
+            $amount = moneyNormalizeDecimal(
+                trim($amount_raw)
+            );
+            $amount_sen = moneyDecimalToSen($amount);
+        } catch (MoneyValueException $e) {
+            throw new RuntimeException(
+                'Please enter a valid invoice amount with up to two decimal places.',
+                0,
+                $e
+            );
+        }
+
+        if ($amount_sen < 1) {
+            throw new RuntimeException(
+                'Invoice amount must be at least RM 0.01.'
+            );
+        }
+
+        $po_check = $pdo->prepare("
+            SELECT
+                po_id,
+                po_total_amount
+            FROM purchase_orders
+            WHERE po_id = ?
+            AND po_supplier_id = ?
+            AND po_status = 'completed'
+            LIMIT 1
+        ");
+        $po_check->execute([
+            $po_id,
+            $supplier_id,
+        ]);
+        $purchase_order =
+            $po_check->fetch(PDO::FETCH_ASSOC);
+
+        if (!$purchase_order) {
+            throw new RuntimeException(
+                'Invalid order or order not yet completed.'
+            );
+        }
+
+        $invoice_number =
+            'INV-' . date('Y') . '-' . $suffix_raw;
+
+        $duplicate = $pdo->prepare("
+            SELECT invoice_id
+            FROM supplier_invoices
+            WHERE invoice_number = ?
+            AND invoice_supplier_id = ?
+            LIMIT 1
+        ");
+        $duplicate->execute([
+            $invoice_number,
+            $supplier_id,
+        ]);
+
+        if ($duplicate->fetchColumn()) {
+            throw new RuntimeException(
+                'Invoice number ' .
+                $invoice_number .
+                ' has already been used. ' .
+                'Please use a different number.'
+            );
+        }
+
+        $po_total_sen = moneyDecimalToSen(
+            (string) $purchase_order['po_total_amount']
+        );
+
+        $is_mismatch =
+            $po_total_sen !== $amount_sen;
+
+        $insert = $pdo->prepare("
+            INSERT INTO supplier_invoices (
+                invoice_number,
+                invoice_supplier_id,
+                invoice_po_id,
+                invoice_amount,
+                invoice_due_date,
+                invoice_is_mismatch
+            )
+            VALUES (
+                ?,
+                ?,
+                ?,
+                ?,
+                DATE_ADD(NOW(), INTERVAL 30 DAY),
+                ?
+            )
+        ");
+        $insert->execute([
+            $invoice_number,
+            $supplier_id,
+            $po_id,
+            $amount,
+            $is_mismatch ? 1 : 0,
+        ]);
+
+        $_SESSION['flash_success'] =
+            'Invoice submitted successfully. ' .
+            'MangaVault will review and process payment.';
+
+        header('Location: invoices.php');
+        exit;
+    } catch (RuntimeException $e) {
+        $error = $e->getMessage();
     }
 }
 
 if (isset($_GET['download_receipt'])) {
-    require_once '../vendor/autoload.php';
-    $invoice_id = $_GET['download_receipt'];
+    try {
+        $invoice_id = requireSupplierInvoiceId(
+            $_GET['download_receipt'],
+            'invoice'
+        );
+    } catch (RuntimeException $e) {
+        header('Location: invoices.php');
+        exit;
+    }
+
+    require_once __DIR__ . '/../vendor/autoload.php';
 
     $inv = $pdo->prepare("
-        SELECT si.*, s.supplier_name, s.supplier_contact_person, s.supplier_address, s.supplier_email, po.po_number, sr.return_credit_note_number
+        SELECT
+            si.*,
+            s.supplier_name,
+            s.supplier_contact_person,
+            s.supplier_address,
+            s.supplier_email,
+            po.po_number,
+            sr.return_credit_note_number
         FROM supplier_invoices si
-        JOIN suppliers s ON s.supplier_id = si.invoice_supplier_id
-        LEFT JOIN purchase_orders po ON po.po_id = si.invoice_po_id
-        LEFT JOIN supplier_returns sr ON sr.return_id = si.invoice_credit_note_id
-        WHERE si.invoice_id = ? AND si.invoice_supplier_id = ? AND si.invoice_status = 'paid'
+        JOIN suppliers s
+            ON s.supplier_id = si.invoice_supplier_id
+        LEFT JOIN purchase_orders po
+            ON po.po_id = si.invoice_po_id
+        LEFT JOIN supplier_returns sr
+            ON sr.return_id = si.invoice_credit_note_id
+        WHERE si.invoice_id = ?
+        AND si.invoice_supplier_id = ?
+        AND si.invoice_status = 'paid'
     ");
-    $inv->execute([$invoice_id, $supplier_id]);
+    $inv->execute([
+        $invoice_id,
+        $supplier_id,
+    ]);
     $inv = $inv->fetch(PDO::FETCH_ASSOC);
 
-    if (!$inv) { header('Location: invoices.php'); exit; }
+    if (!$inv) {
+        header('Location: invoices.php');
+        exit;
+    }
 
-    $receipt_number = 'RCT-' . str_pad($invoice_id, 5, '0', STR_PAD_LEFT);
+    $receipt_number =
+        'RCT-' .
+        str_pad(
+            (string) $invoice_id,
+            5,
+            '0',
+            STR_PAD_LEFT
+        );
 
     $html = "
     <!DOCTYPE html><html><head><meta charset='UTF-8'></head>
@@ -125,15 +281,23 @@ if (isset($_GET['download_receipt'])) {
     $dompdf->loadHtml($html);
     $dompdf->setPaper('A4', 'portrait');
     $dompdf->render();
-    $dompdf->stream("Receipt_{$receipt_number}.pdf", ['Attachment' => true]);
+    $dompdf->stream(
+        "Receipt_{$receipt_number}.pdf",
+        ['Attachment' => true]
+    );
     exit;
 }
 
 $invoices = $pdo->prepare("
-    SELECT si.*, po.po_number, sr.return_credit_note_number
+    SELECT
+        si.*,
+        po.po_number,
+        sr.return_credit_note_number
     FROM supplier_invoices si
-    LEFT JOIN purchase_orders po ON po.po_id = si.invoice_po_id
-    LEFT JOIN supplier_returns sr ON sr.return_id = si.invoice_credit_note_id
+    LEFT JOIN purchase_orders po
+        ON po.po_id = si.invoice_po_id
+    LEFT JOIN supplier_returns sr
+        ON sr.return_id = si.invoice_credit_note_id
     WHERE si.invoice_supplier_id = ?
     ORDER BY si.invoice_created_at DESC
 ");
@@ -141,15 +305,23 @@ $invoices->execute([$supplier_id]);
 $invoices = $invoices->fetchAll(PDO::FETCH_ASSOC);
 
 $available_pos = $pdo->prepare("
-    SELECT po_id, po_number, po_total_amount FROM purchase_orders
-    WHERE po_supplier_id = ? AND po_status = 'completed'
+    SELECT
+        po_id,
+        po_number,
+        po_total_amount
+    FROM purchase_orders
+    WHERE po_supplier_id = ?
+    AND po_status = 'completed'
     AND po_id NOT IN (
-        SELECT invoice_po_id FROM supplier_invoices
-        WHERE invoice_po_id IS NOT NULL AND invoice_status != 'rejected'
+        SELECT invoice_po_id
+        FROM supplier_invoices
+        WHERE invoice_po_id IS NOT NULL
+        AND invoice_status != 'rejected'
     )
 ");
 $available_pos->execute([$supplier_id]);
-$available_pos = $available_pos->fetchAll(PDO::FETCH_ASSOC);
+$available_pos =
+    $available_pos->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -208,7 +380,7 @@ $available_pos = $available_pos->fetchAll(PDO::FETCH_ASSOC);
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($invoices as $inv):
+                    <?php foreach ($invoices as $inv): 
                         $is_overdue = $inv['invoice_status'] === 'unpaid' && $inv['invoice_due_date'] && strtotime($inv['invoice_due_date']) < time();
                     ?>
                     <tr class="border-b border-gray-50 hover:bg-gray-50 transition-colors">
@@ -222,8 +394,8 @@ $available_pos = $available_pos->fetchAll(PDO::FETCH_ASSOC);
                         <td class="px-5 py-4 text-right text-sm">
                             <p class="font-bold text-gray-800">RM <?= number_format($inv['invoice_amount'], 2) ?></p>
                             <?php if ($inv['invoice_credit_applied_amount'] > 0): ?>
-                            <p class="text-xs text-orange-600">− RM <?= number_format($inv['invoice_credit_applied_amount'], 2) ?> credit (<?= htmlspecialchars($inv['return_credit_note_number']) ?>)</p>
-                            <p class="text-xs text-gray-400">Net: RM <?= number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) ?></p>
+                            <p class="text-xs text-orange-600">− RM <?= number_format($inv['invoice_credit_applied_amount'], 2) ?> credit applied (<?= htmlspecialchars($inv['return_credit_note_number']) ?>)</p>
+                            <p class="text-xs text-gray-400">Net Payable: RM <?= number_format($inv['invoice_amount'] - $inv['invoice_credit_applied_amount'], 2) ?></p>
                             <?php endif; ?>
                         </td>
                         <td class="px-5 py-4 text-sm <?= $is_overdue ? 'text-red-500 font-semibold' : 'text-gray-500' ?>">
@@ -232,9 +404,9 @@ $available_pos = $available_pos->fetchAll(PDO::FETCH_ASSOC);
                         </td>
                         <td class="px-5 py-4 text-center">
                             <?php if ($inv['invoice_status'] === 'paid'): ?>
-                            <a href="?download_receipt=<?= $inv['invoice_id'] ?>" class="text-xs text-green-600 hover:underline font-semibold">✅ Paid — Download Receipt</a>
+                            <a href="?download_receipt=<?= (int) $inv['invoice_id'] ?>" class="text-xs text-green-600 hover:underline font-semibold">✅ Paid — Download Receipt</a>
                             <?php elseif ($inv['invoice_status'] === 'rejected'): ?>
-                            <span class="bg-red-100 text-red-700 text-xs px-3 py-1 rounded-full font-semibold">❌ Rejected</span>
+                            <span class="bg-red-100 text-red-700 text-xs px-3 py-1 rounded-full font-semibold">❌ Rejected — Please Resubmit</span>
                             <?php else: ?>
                             <span class="bg-yellow-100 text-yellow-700 text-xs px-3 py-1 rounded-full font-semibold">⏳ Awaiting Payment</span>
                             <?php endif; ?>
@@ -265,7 +437,7 @@ $available_pos = $available_pos->fetchAll(PDO::FETCH_ASSOC);
             </div>
             <?php endif; ?>
             <form method="POST">
-                <?php csrf_field() ?>
+                <?php csrf_field(); ?>
                 <input type="hidden" name="submit_invoice" value="1">
 
                 <div class="space-y-4">
@@ -275,7 +447,7 @@ $available_pos = $available_pos->fetchAll(PDO::FETCH_ASSOC);
                                 class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-blue-400 transition-colors">
                             <option value="">Select order...</option>
                             <?php foreach ($available_pos as $po): ?>
-                            <option value="<?= $po['po_id'] ?>" data-amount="<?= $po['po_total_amount'] ?>">
+                            <option value="<?= (int) $po['po_id'] ?>" data-amount="<?= $po['po_total_amount'] ?>">
                                 <?= htmlspecialchars($po['po_number']) ?> (RM <?= number_format($po['po_total_amount'], 2) ?>)
                             </option>
                             <?php endforeach; ?>
@@ -286,14 +458,14 @@ $available_pos = $available_pos->fetchAll(PDO::FETCH_ASSOC);
                         <div class="flex items-center border-2 border-gray-100 rounded-xl overflow-hidden focus-within:border-blue-400 transition-colors">
                             <span class="px-3 py-2.5 bg-gray-50 text-sm text-gray-500 font-mono border-r border-gray-100">INV-<?= date('Y') ?>-</span>
                             <input type="text" name="invoice_number_suffix" required maxlength="4" pattern="[0-9]{4}"
-                                   placeholder="0001" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4)"
-                                   class="flex-1 px-3 py-2.5 text-sm focus:outline-none">
+                                placeholder="0001" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4)"
+                                class="flex-1 px-3 py-2.5 text-sm focus:outline-none">
                         </div>
                         <p class="text-xs text-gray-400 mt-1">4-digit number only, e.g. 0001</p>
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Amount (RM) *</label>
-                        <input type="number" step="0.01" name="invoice_amount" id="amount_input" required
+                        <input type="number" step="0.01" min="0.01" max="99999999.99" name="invoice_amount" id="amount_input" required
                                class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-blue-400 transition-colors">
                     </div>
                     <p class="text-xs text-gray-400">Payment terms: 30 days from submission</p>
@@ -314,15 +486,16 @@ $available_pos = $available_pos->fetchAll(PDO::FETCH_ASSOC);
     </div>
 
     <script>
-    function openModal() { document.getElementById('invoiceModal').classList.remove('hidden'); }
-    function closeModal() { document.getElementById('invoiceModal').classList.add('hidden'); }
+    function openModal() {
+        document.getElementById('invoiceModal').classList.remove('hidden');
+    }
+    function closeModal() {
+        document.getElementById('invoiceModal').classList.add('hidden');
+    }
     function autofillAmount(select) {
         const amount = select.options[select.selectedIndex].dataset.amount;
         if (amount) document.getElementById('amount_input').value = amount;
     }
-    <?php if ($error): ?>
-    document.addEventListener('DOMContentLoaded', () => openModal());
-    <?php endif; ?>
     </script>
 
 </body>

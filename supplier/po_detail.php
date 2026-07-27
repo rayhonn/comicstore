@@ -2,62 +2,141 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_supplier();
 
-$supplier_id = $_SESSION['supplier_id'];
+$supplier_id = (int) $_SESSION['supplier_id'];
 
-$po_id = $_GET['id'] ?? null;
-if (!$po_id) { header('Location: purchase_orders.php'); exit; }
+$po_id = filter_input(
+    INPUT_GET,
+    'id',
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
 
-$po = $pdo->prepare("SELECT * FROM purchase_orders WHERE po_id = ? AND po_supplier_id = ?");
-$po->execute([$po_id, $supplier_id]);
-$po = $po->fetch(PDO::FETCH_ASSOC);
-if (!$po) { header('Location: purchase_orders.php'); exit; }
+if ($po_id === false || $po_id === null) {
+    header('Location: purchase_orders.php');
+    exit;
+}
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acknowledge_po'])) {
-    $pdo->prepare("UPDATE purchase_orders SET po_acknowledged_at = NOW() WHERE po_id = ? AND po_supplier_id = ?")
-        ->execute([$po_id, $supplier_id]);
-    header('Location: po_detail.php?id=' . $po_id);
+$po_id = (int) $po_id;
+
+$po_statement = $pdo->prepare("
+    SELECT *
+    FROM purchase_orders
+    WHERE po_id = ?
+    AND po_supplier_id = ?
+    LIMIT 1
+");
+$po_statement->execute([
+    $po_id,
+    $supplier_id,
+]);
+$po = $po_statement->fetch(PDO::FETCH_ASSOC);
+
+if (!$po) {
+    header('Location: purchase_orders.php');
+    exit;
+}
+
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['acknowledge_po'])
+) {
+    csrf_verify();
+
+    $acknowledge = $pdo->prepare("
+        UPDATE purchase_orders
+        SET po_acknowledged_at = NOW()
+        WHERE po_id = ?
+        AND po_supplier_id = ?
+        AND po_status = 'confirmed'
+        AND po_acknowledged_at IS NULL
+    ");
+    $acknowledge->execute([
+        $po_id,
+        $supplier_id,
+    ]);
+
+    header(
+        'Location: po_detail.php?id=' .
+        $po_id
+    );
     exit;
 }
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
-$items = $pdo->prepare("
-    SELECT pi.*, p.product_title, p.product_volume_number, p.product_cover_image
+$item_statement = $pdo->prepare("
+    SELECT
+        pi.*,
+        p.product_title,
+        p.product_volume_number,
+        p.product_cover_image
     FROM po_items pi
-    JOIN products p ON p.product_id = pi.po_item_product_id
+    JOIN products p
+        ON p.product_id = pi.po_item_product_id
     WHERE pi.po_item_po_id = ?
 ");
-$items->execute([$po_id]);
-$items = $items->fetchAll(PDO::FETCH_ASSOC);
+$item_statement->execute([$po_id]);
+$items =
+    $item_statement->fetchAll(PDO::FETCH_ASSOC);
 
-$gri = $pdo->prepare("
-    SELECT gri.*, p.product_title, pi.po_item_unit_price
+$gri_statement = $pdo->prepare("
+    SELECT
+        gri.*,
+        p.product_title,
+        pi.po_item_unit_price
     FROM goods_received_items gri
-    JOIN goods_received gr ON gr.gr_id = gri.gri_gr_id
-    JOIN po_items pi ON pi.po_item_id = gri.gri_po_item_id
-    JOIN products p ON p.product_id = pi.po_item_product_id
-    WHERE gr.gr_po_id = ? AND gri.gri_rejected_quantity > 0
+    JOIN goods_received gr
+        ON gr.gr_id = gri.gri_gr_id
+    JOIN po_items pi
+        ON pi.po_item_id = gri.gri_po_item_id
+    JOIN products p
+        ON p.product_id = pi.po_item_product_id
+    WHERE gr.gr_po_id = ?
+    AND gri.gri_rejected_quantity > 0
 ");
-$gri->execute([$po_id]);
-$rejected_items = $gri->fetchAll(PDO::FETCH_ASSOC);
-$rejected_total = array_sum(array_map(fn($r) => $r['gri_rejected_quantity'] * $r['po_item_unit_price'], $rejected_items));
+$gri_statement->execute([$po_id]);
+$rejected_items =
+    $gri_statement->fetchAll(PDO::FETCH_ASSOC);
+
+$rejected_total = array_sum(
+    array_map(
+        static fn(array $row): float =>
+            (int) $row['gri_rejected_quantity'] *
+            (float) $row['po_item_unit_price'],
+        $rejected_items
+    )
+);
 
 if (isset($_GET['download_pdf'])) {
-    require_once '../vendor/autoload.php';
+    require_once __DIR__ . '/../vendor/autoload.php';
 
-    $supplier_info = $pdo->prepare("SELECT * FROM suppliers WHERE supplier_id = ?");
-    $supplier_info->execute([$supplier_id]);
-    $supplier_info = $supplier_info->fetch(PDO::FETCH_ASSOC);
+    $supplier_info_statement = $pdo->prepare("
+        SELECT *
+        FROM suppliers
+        WHERE supplier_id = ?
+        LIMIT 1
+    ");
+    $supplier_info_statement->execute([
+        $supplier_id,
+    ]);
+    $supplier_info =
+        $supplier_info_statement->fetch(PDO::FETCH_ASSOC);
+
+    if (!$supplier_info) {
+        header('Location: purchase_orders.php');
+        exit;
+    }
 
     $html = "
     <!DOCTYPE html>
     <html>
     <head><meta charset='UTF-8'></head>
     <body style='font-family: Arial, sans-serif; margin:0; padding:30px; color:#111827;'>
-        
+
         <div style='background:#1e2d4a; padding:24px; border-radius:8px; margin-bottom:30px;'>
             <h1 style='color:#ffffff; font-size:22px; margin:0; font-weight:900;'>MANGA<span style='color:#ef4444;'>VAULT</span></h1>
             <p style='color:rgba(255,255,255,0.7); font-size:12px; margin:4px 0 0;'>Purchase Order</p>
@@ -95,7 +174,7 @@ if (isset($_GET['download_pdf'])) {
         $html .= "
             <tr style='border-bottom:1px solid #e5e7eb;'>
                 <td style='padding:10px 12px; font-size:12px;'>" . htmlspecialchars($item['product_title']) . ($item['product_volume_number'] ? ' (Vol.' . $item['product_volume_number'] . ')' : '') . "</td>
-                <td style='padding:10px 12px; font-size:12px; text-align:center;'>" . $item['po_item_quantity'] . "</td>
+                <td style='padding:10px 12px; font-size:12px; text-align:center;'>" . (int) $item['po_item_quantity'] . "</td>
                 <td style='padding:10px 12px; font-size:12px; text-align:right;'>RM " . number_format($item['po_item_unit_price'], 2) . "</td>
                 <td style='padding:10px 12px; font-size:12px; text-align:right; font-weight:600;'>RM " . number_format($item['po_item_unit_price'] * $item['po_item_quantity'], 2) . "</td>
             </tr>";
@@ -110,10 +189,26 @@ if (isset($_GET['download_pdf'])) {
 
     if (count($rejected_items) > 0) {
         $rejected_rows = '';
-        foreach ($rejected_items as $ri) {
-            $amt = $ri['gri_rejected_quantity'] * $ri['po_item_unit_price'];
-            $rejected_rows .= "<tr><td style='padding:8px 12px; font-size:11px;'>" . htmlspecialchars($ri['product_title']) . "</td><td style='padding:8px 12px; font-size:11px; text-align:center;'>" . $ri['gri_rejected_quantity'] . "</td><td style='padding:8px 12px; font-size:11px;'>" . htmlspecialchars($ri['gri_reject_reason'] ?? '—') . "</td><td style='padding:8px 12px; font-size:11px; text-align:right;'>RM " . number_format($amt, 2) . "</td></tr>";
+
+        foreach ($rejected_items as $return_item) {
+            $amount =
+                (int) $return_item['gri_rejected_quantity'] *
+                (float) $return_item['po_item_unit_price'];
+
+            $rejected_rows .=
+                "<tr><td style='padding:8px 12px; font-size:11px;'>" .
+                htmlspecialchars($return_item['product_title']) .
+                "</td><td style='padding:8px 12px; font-size:11px; text-align:center;'>" .
+                (int) $return_item['gri_rejected_quantity'] .
+                "</td><td style='padding:8px 12px; font-size:11px;'>" .
+                htmlspecialchars(
+                    $return_item['gri_reject_reason'] ?? '—'
+                ) .
+                "</td><td style='padding:8px 12px; font-size:11px; text-align:right;'>RM " .
+                number_format($amount, 2) .
+                '</td></tr>';
         }
+
         $html .= "
         <div style='background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:14px; margin-bottom:24px;'>
             <p style='font-size:12px; color:#991b1b; margin:0 0 8px; font-weight:700;'>[!] Items Returned (Excluded from Payment)</p>
@@ -160,7 +255,6 @@ if (isset($_GET['download_pdf'])) {
             <p style='font-size:11px; color:#9ca3af; margin:0;'>This is an official purchase order issued by MangaVault Sdn Bhd.</p>
             <p style='font-size:11px; color:#9ca3af; margin:4px 0 0;'>Generated on " . date('d F Y, h:i A') . "</p>
         </div>
-
     </body>
     </html>";
 
@@ -168,17 +262,24 @@ if (isset($_GET['download_pdf'])) {
     $dompdf->loadHtml($html);
     $dompdf->setPaper('A4', 'portrait');
     $dompdf->render();
-    $dompdf->stream("{$po['po_number']}.pdf", ['Attachment' => true]);
+    $dompdf->stream(
+        $po['po_number'] . '.pdf',
+        ['Attachment' => true]
+    );
     exit;
 }
 
 $status_colors = [
-    'draft'     => 'bg-gray-100 text-gray-500',
-    'sent'      => 'bg-yellow-100 text-yellow-700',
+    'draft' => 'bg-gray-100 text-gray-500',
+    'sent' => 'bg-yellow-100 text-yellow-700',
     'confirmed' => 'bg-blue-100 text-blue-700',
     'completed' => 'bg-green-100 text-green-700',
     'cancelled' => 'bg-red-100 text-red-700',
 ];
+
+$status_class =
+    $status_colors[$po['po_status']]
+    ?? 'bg-gray-100 text-gray-500';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -208,7 +309,7 @@ $status_colors = [
                 <p class="text-xs text-purple-500 mt-1">📌 <?= htmlspecialchars($po['po_notes']) ?></p>
                 <?php endif; ?>
             </div>
-            <span class="<?= $status_colors[$po['po_status']] ?> text-sm px-4 py-2 rounded-full font-semibold capitalize">
+            <span class="<?= $status_class ?> text-sm px-4 py-2 rounded-full font-semibold capitalize">
                 <?= $po['po_status'] ?>
             </span>
         </div>
@@ -226,6 +327,7 @@ $status_colors = [
             <p class="text-xs text-blue-500">✓ You acknowledged this PO on <?= date('d M Y, h:i A', strtotime($po['po_acknowledged_at'])) ?></p>
             <?php else: ?>
             <form method="POST">
+                <?php csrf_field(); ?>
                 <input type="hidden" name="acknowledge_po" value="1">
                 <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors">
                     ✓ Acknowledge This PO
@@ -308,13 +410,13 @@ $status_colors = [
         </div>
 
         <div class="flex gap-3">
-            <a href="?id=<?= $po_id ?>&download_pdf=1"
+            <a href="?id=<?= (int) $po_id ?>&download_pdf=1"
             class="bg-gray-700 hover:bg-gray-800 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
                 📄 Download PO (PDF)
             </a>
             <?php if ($po['po_status'] === 'confirmed'): ?>
                 <?php if ($po['po_acknowledged_at']): ?>
-                <a href="delivery_order.php?po_id=<?= $po_id ?>"
+                <a href="delivery_order.php?po_id=<?= (int) $po_id ?>"
                 class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors">
                     🚚 Generate Delivery Order
                 </a>
