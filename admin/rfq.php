@@ -178,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_rfq'])) {
                 );
             }
 
-            $temporary_number = 'TMP-RFQ-' . bin2hex(random_bytes(8));
+            $temporary_number = 'TMP-RFQ-' . bin2hex(random_bytes(6));
             $insert_rfq = $pdo->prepare("
                 INSERT INTO rfq (rfq_number, rfq_notes, rfq_created_by)
                 VALUES (?, ?, ?)
