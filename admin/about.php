@@ -1,14 +1,22 @@
 <?php
-
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_admin();
+
 $success = '';
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
     $action = $_POST['action'] ?? '';
+    foreach ($_POST as $value) {
+        if (is_string($value) && strlen($value) > 5000) {
+            $error = 'Submitted content is too long.';
+            break;
+        }
+    }
 
     if ($action === 'update_sections') {
         $fields = ['hero_subtitle', 'our_story', 'mission', 'stat_titles', 'stat_customers', 'stat_years', 'stat_rating'];
@@ -36,13 +44,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
     } elseif ($action === 'edit_award') {
-        $id = $_POST['award_id'];
+        $id = filter_var($_POST['award_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($id === false || $id === null) { $error = 'Invalid award.'; } else
         $pdo->prepare("UPDATE about_awards SET award_emoji=?, award_title=?, award_organization=?, award_result=?, award_order=? WHERE award_id=?")
             ->execute([trim($_POST['award_emoji']), trim($_POST['award_title']), trim($_POST['award_organization']), trim($_POST['award_result']), intval($_POST['award_order']), $id]);
         $success = 'Award updated!';
 
     } elseif ($action === 'delete_award') {
-        $pdo->prepare("DELETE FROM about_awards WHERE award_id = ?")->execute([$_POST['award_id']]);
+        $pdo->prepare("DELETE FROM about_awards WHERE award_id = ?")->execute([filter_var($_POST['award_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])]);
         $success = 'Award deleted.';
 
     } elseif ($action === 'add_team') {
@@ -51,13 +60,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $success = 'Team member added!';
 
     } elseif ($action === 'edit_team') {
-        $id = $_POST['team_id'];
+        $id = filter_var($_POST['team_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($id === false || $id === null) { $error = 'Invalid team member.'; } else
         $pdo->prepare("UPDATE about_team SET team_name=?, team_role=?, team_bio=?, team_initials=?, team_color=?, team_order=? WHERE team_id=?")
             ->execute([trim($_POST['team_name']), trim($_POST['team_role']), trim($_POST['team_bio']), trim($_POST['team_initials']), trim($_POST['team_color']), intval($_POST['team_order']), $id]);
         $success = 'Team member updated!';
 
     } elseif ($action === 'delete_team') {
-        $pdo->prepare("DELETE FROM about_team WHERE team_id = ?")->execute([$_POST['team_id']]);
+        $pdo->prepare("DELETE FROM about_team WHERE team_id = ?")->execute([filter_var($_POST['team_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])]);
         $success = 'Team member deleted.';
     }
 }
@@ -122,23 +132,24 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
         <!-- Content Tab -->
         <div id="content-content" class="tab-content active">
             <form method="POST">
-                <input type="hidden" name="action" value="update_sections">
+                <?php csrf_field(); ?>
+<input type="hidden" name="action" value="update_sections">
                 <div class="bg-white rounded-2xl shadow-sm p-6 space-y-5">
                     <h3 class="font-bold text-gray-800 mb-2">Page Content</h3>
 
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Hero Subtitle</label>
-                        <input type="text" name="hero_subtitle" value="<?= htmlspecialchars($s['hero_subtitle'] ?? '') ?>"
+                        <input type="text" name="hero_subtitle" maxlength="255" value="<?= htmlspecialchars($s['hero_subtitle'] ?? '') ?>"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Our Story</label>
-                        <textarea name="our_story" rows="5"
+                        <textarea name="our_story" maxlength="5000" rows="5"
                                   class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white resize-none"><?= htmlspecialchars($s['our_story'] ?? '') ?></textarea>
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Mission Statement</label>
-                        <textarea name="mission" rows="3"
+                        <textarea name="mission" maxlength="3000" rows="3"
                                   class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white resize-none"><?= htmlspecialchars($s['mission'] ?? '') ?></textarea>
                     </div>
 
@@ -146,22 +157,22 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1.5">Titles Available</label>
-                            <input type="text" name="stat_titles" value="<?= htmlspecialchars($s['stat_titles'] ?? '5K+') ?>"
+                            <input type="text" name="stat_titles" maxlength="50" value="<?= htmlspecialchars($s['stat_titles'] ?? '5K+') ?>"
                                    class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                         </div>
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1.5">Happy Customers</label>
-                            <input type="text" name="stat_customers" value="<?= htmlspecialchars($s['stat_customers'] ?? '50K+') ?>"
+                            <input type="text" name="stat_customers" maxlength="50" value="<?= htmlspecialchars($s['stat_customers'] ?? '50K+') ?>"
                                    class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                         </div>
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1.5">Years in Business</label>
-                            <input type="text" name="stat_years" value="<?= htmlspecialchars($s['stat_years'] ?? '4+') ?>"
+                            <input type="text" name="stat_years" maxlength="50" value="<?= htmlspecialchars($s['stat_years'] ?? '4+') ?>"
                                    class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                         </div>
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1.5">Average Rating</label>
-                            <input type="text" name="stat_rating" value="<?= htmlspecialchars($s['stat_rating'] ?? '4.9★') ?>"
+                            <input type="text" name="stat_rating" maxlength="50" value="<?= htmlspecialchars($s['stat_rating'] ?? '4.9★') ?>"
                                    class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                         </div>
                     </div>
@@ -201,7 +212,8 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
                         <button onclick="openEditAwardModal(<?= htmlspecialchars(json_encode($award)) ?>)"
                                 class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">✏️ Edit</button>
                         <form method="POST" class="inline">
-                            <input type="hidden" name="action" value="delete_award">
+                            <?php csrf_field(); ?>
+<input type="hidden" name="action" value="delete_award">
                             <input type="hidden" name="award_id" value="<?= $award['award_id'] ?>">
                             <button type="submit" onclick="return confirm('Delete this award?')"
                                     class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">🗑️ Delete</button>
@@ -244,7 +256,8 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
                         <button onclick="openEditTeamModal(<?= htmlspecialchars(json_encode($member)) ?>)"
                                 class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">✏️ Edit</button>
                         <form method="POST" class="inline">
-                            <input type="hidden" name="action" value="delete_team">
+                            <?php csrf_field(); ?>
+<input type="hidden" name="action" value="delete_team">
                             <input type="hidden" name="team_id" value="<?= $member['team_id'] ?>">
                             <button type="submit" onclick="return confirm('Delete this team member?')"
                                     class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">🗑️ Delete</button>
@@ -265,12 +278,13 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
                 <button onclick="closeAwardModal()" class="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <form method="POST" class="p-5 space-y-4">
-                <input type="hidden" name="action" id="awardAction" value="add_award">
+                <?php csrf_field(); ?>
+<input type="hidden" name="action" id="awardAction" value="add_award">
                 <input type="hidden" name="award_id" id="awardId">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5">Emoji</label>
-                        <input type="text" name="award_emoji" id="awardEmoji" value="🏆" maxlength="5"
+                        <input type="text" name="award_emoji" maxlength="20" id="awardEmoji" value="🏆" maxlength="5"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
                     <div>
@@ -281,18 +295,18 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Award Title *</label>
-                    <input type="text" name="award_title" id="awardTitle" required
+                    <input type="text" name="award_title" maxlength="255" id="awardTitle" required
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Organization *</label>
-                    <input type="text" name="award_organization" id="awardOrg" required
+                    <input type="text" name="award_organization" maxlength="255" id="awardOrg" required
                            placeholder="e.g. Malaysia Digital Awards 2023"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Result *</label>
-                    <input type="text" name="award_result" id="awardResult" required
+                    <input type="text" name="award_result" maxlength="255" id="awardResult" required
                            placeholder="e.g. Gold Award, Winner, 1st Place"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
@@ -314,35 +328,36 @@ $team = $pdo->query("SELECT * FROM about_team ORDER BY team_order ASC")->fetchAl
                 <button onclick="closeTeamModal()" class="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <form method="POST" class="p-5 space-y-4">
-                <input type="hidden" name="action" id="teamAction" value="add_team">
+                <?php csrf_field(); ?>
+<input type="hidden" name="action" id="teamAction" value="add_team">
                 <input type="hidden" name="team_id" id="teamId">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5">Full Name *</label>
-                        <input type="text" name="team_name" id="teamName" required
+                        <input type="text" name="team_name" maxlength="150" id="teamName" required
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5">Initials *</label>
-                        <input type="text" name="team_initials" id="teamInitials" required maxlength="3"
+                        <input type="text" name="team_initials" maxlength="10" id="teamInitials" required maxlength="3"
                                placeholder="e.g. RH"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                     </div>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Role *</label>
-                    <input type="text" name="team_role" id="teamRole" required
+                    <input type="text" name="team_role" maxlength="150" id="teamRole" required
                            placeholder="e.g. CEO & Co-Founder"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Bio</label>
-                    <input type="text" name="team_bio" id="teamBio"
+                    <input type="text" name="team_bio" maxlength="2000" id="teamBio"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Avatar Color (CSS gradient)</label>
-                    <input type="text" name="team_color" id="teamColor" value="linear-gradient(135deg, #1e2d4a, #2c3e6b)"
+                    <input type="text" name="team_color" maxlength="50" id="teamColor" value="linear-gradient(135deg, #1e2d4a, #2c3e6b)"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>

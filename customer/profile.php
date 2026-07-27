@@ -1,12 +1,11 @@
 <?php
-
-require_once '../includes/db.php';
-require_once '../includes/auth.php';
-require_once '../includes/csrf.php';
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_customer();
 
-$user_id = $_SESSION['user_id'];
+$user_id = (int) $_SESSION['user_id'];
 
 $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
 $stmt->execute([$user_id]);
@@ -15,18 +14,38 @@ $user = $stmt->fetch(PDO::FETCH_ASSOC);
 $error = '';
 $success = '';
 
+function profileInput(mixed $value, string $label, int $maxLength): string
+{
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
+    $value = trim($value);
+    $length = function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
+    if ($length > $maxLength) {
+        throw new RuntimeException($label . ' cannot exceed ' . $maxLength . ' characters.');
+    }
+    return $value;
+}
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
-
     $action = $_POST['action'] ?? '';
 
     if ($action === 'update_profile') {
-        $first_name = trim($_POST['user_first_name']);
-        $last_name = trim($_POST['user_last_name']);
-        $phone = trim($_POST['user_phone']);
-        $new_dob = trim($_POST['user_dob'] ?? '');
+        try {
+            $first_name = profileInput($_POST['user_first_name'] ?? '', 'First name', 100);
+            $last_name = profileInput($_POST['user_last_name'] ?? '', 'Last name', 100);
+            $phone = profileInput($_POST['user_phone'] ?? '', 'Phone number', 11);
+            $new_dob = profileInput($_POST['user_dob'] ?? '', 'Date of birth', 10);
+        } catch (RuntimeException $e) {
+            $error = $e->getMessage();
+            $first_name = $last_name = $phone = $new_dob = '';
+        }
 
-        if (empty($first_name)) {
+        if ($error !== '') {
+            // Validation error already set.
+        } elseif (empty($first_name)) {
             $error = "First name is required.";
         } elseif ($phone && !preg_match('/^01[0-9]{8,9}$/', $phone)) {
             $error = "Please enter a valid Malaysian phone number.";
@@ -64,11 +83,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
     } elseif ($action === 'change_password') {
-        $current = $_POST['current_password'];
-        $new = $_POST['new_password'];
-        $confirm = $_POST['confirm_password'];
+        $current = $_POST['current_password'] ?? null;
+        $new = $_POST['new_password'] ?? null;
+        $confirm = $_POST['confirm_password'] ?? null;
 
-        if (!password_verify($current, $user['user_password_hash'])) {
+        if (!is_string($current) || !is_string($new) || !is_string($confirm) || strlen($current) > 72 || strlen($new) > 72 || strlen($confirm) > 72) {
+            $error = 'Password input is invalid or exceeds 72 characters.';
+        } elseif (!password_verify($current, $user['user_password_hash'])) {
             $error = "Current password is incorrect.";
         } elseif (!preg_match('/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/', $new)) {
             $error = "New password must be at least 8 characters with uppercase, lowercase, number and symbol.";
@@ -129,18 +150,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Personal Information
                         </h3>
                         <form method="POST" class="space-y-4">
-                            <?php csrf_field() ?>
-                            <input type="hidden" name="action" value="update_profile">
+                            <?php csrf_field(); ?>
+<input type="hidden" name="action" value="update_profile">
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
                                     <label class="block text-xs font-medium text-gray-500 mb-1">First Name *</label>
-                                    <input type="text" name="user_first_name" required
+                                    <input type="text" name="user_first_name" maxlength="100" required
                                            value="<?= htmlspecialchars($user['user_first_name'] ?? '') ?>"
                                            class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
                                 </div>
                                 <div>
                                     <label class="block text-xs font-medium text-gray-500 mb-1">Last Name</label>
-                                    <input type="text" name="user_last_name"
+                                    <input type="text" name="user_last_name" maxlength="100"
                                            value="<?= htmlspecialchars($user['user_last_name'] ?? '') ?>"
                                            class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
                                 </div>
@@ -206,22 +227,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Change Password
                         </h3>
                         <form method="POST" class="space-y-4">
-                            <?php csrf_field() ?>
-                            <input type="hidden" name="action" value="change_password">
+                            <?php csrf_field(); ?>
+<input type="hidden" name="action" value="change_password">
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">Current Password *</label>
-                                <input type="password" name="current_password" required
+                                <input type="password" name="current_password" maxlength="72" required
                                        class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">New Password *</label>
-                                <input type="password" name="new_password" id="newPassInput" required
+                                <input type="password" name="new_password" id="newPassInput" maxlength="72" required
                                        class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
                                        placeholder="Min 8 chars, upper, lower, number, symbol">
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">Confirm New Password *</label>
-                                <input type="password" name="confirm_password" id="confirmPassInput" required
+                                <input type="password" name="confirm_password" id="confirmPassInput" maxlength="72" required
                                        class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors">
                                 <p id="passMatchMsg" class="text-xs mt-1 hidden"></p>
                             </div>

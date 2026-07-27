@@ -3,13 +3,25 @@ require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
-$user_id = $_SESSION['user_id'];
+$user_id = (int) $_SESSION['user_id'];
 $error = '';
 $success = '';
 
+function paymentInput(mixed $value, string $label, int $maxLength): string
+{
+    if (!is_string($value)) throw new RuntimeException('Invalid ' . $label . '.');
+    $value = trim($value);
+    $length = function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
+    if ($value === '' || $length > $maxLength) throw new RuntimeException($label . ' is invalid.');
+    return $value;
+}
+
+
 // Handle actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add_card') {
@@ -18,9 +30,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $last_four = trim($_POST['pm_last_four']);
         $expiry = trim($_POST['pm_expiry']);
         $is_default = isset($_POST['pm_is_default']) ? 1 : 0;
-        $pin = trim($_POST['confirm_pin']);
+        $pin = is_string($_POST['confirm_pin'] ?? null) ? trim($_POST['confirm_pin']) : '';
+        if (!is_string($_POST['pm_label'] ?? null) || !is_string($_POST['pm_holder_name'] ?? null) || strlen($label) > 100 || strlen($holder) > 150) {
+            $error = 'Card label or holder name is invalid.';
+        }
 
-        if (empty($label) || empty($holder) || empty($last_four) || empty($expiry) || empty($pin)) {
+        if ($error !== '') {
+            // Validation error already set.
+        } elseif (empty($label) || empty($holder) || empty($last_four) || empty($expiry) || empty($pin)) {
             $error = "Please fill in all required fields.";
         } elseif (!preg_match('/^\d{4}$/', $last_four)) {
             $error = "Last 4 digits must be exactly 4 numbers.";
@@ -43,9 +60,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ewallet_name = trim($_POST['pm_ewallet_name']);
         $phone = trim($_POST['pm_phone']);
         $is_default = isset($_POST['pm_is_default']) ? 1 : 0;
-        $pin = trim($_POST['confirm_pin']);
+        $pin = is_string($_POST['confirm_pin'] ?? null) ? trim($_POST['confirm_pin']) : '';
+        if (!is_string($_POST['pm_label'] ?? null) || !is_string($_POST['pm_ewallet_name'] ?? null) || !is_string($_POST['pm_phone'] ?? null) || strlen($label) > 100 || strlen($ewallet_name) > 50) {
+            $error = 'E-wallet input is invalid.';
+        }
 
-        if (empty($label) || empty($ewallet_name) || empty($phone) || empty($pin)) {
+        if ($error !== '') {
+            // Validation error already set.
+        } elseif (empty($label) || empty($ewallet_name) || empty($phone) || empty($pin)) {
             $error = "Please fill in all required fields.";
         } elseif (!preg_match('/^[0-9]{9,10}$/', $phone)) {
             $error = "Please enter a valid phone number.";
@@ -62,13 +84,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
     } elseif ($action === 'delete') {
-        $pm_id = $_POST['pm_id'];
+        $pm_id = filter_var($_POST['pm_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($pm_id === false || $pm_id === null) { $error = 'Invalid payment method.'; } else
         $pdo->prepare("DELETE FROM payment_methods WHERE pm_id = ? AND pm_user_id = ?")
             ->execute([$pm_id, $user_id]);
         $success = "Payment method removed.";
 
     } elseif ($action === 'set_default') {
-        $pm_id = $_POST['pm_id'];
+        $pm_id = filter_var($_POST['pm_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($pm_id === false || $pm_id === null) { $error = 'Invalid payment method.'; } else
         $pdo->prepare("UPDATE payment_methods SET pm_is_default = 0 WHERE pm_user_id = ?")
             ->execute([$user_id]);
         $pdo->prepare("UPDATE payment_methods SET pm_is_default = 1 WHERE pm_id = ? AND pm_user_id = ?")
@@ -163,7 +187,8 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
                                     <div class="flex gap-2">
                                         <?php if (!$pm['pm_is_default']): ?>
                                         <form method="POST" class="inline">
-                                            <input type="hidden" name="action" value="set_default">
+                                            <?php csrf_field(); ?>
+<input type="hidden" name="action" value="set_default">
                                             <input type="hidden" name="pm_id" value="<?= $pm['pm_id'] ?>">
                                             <button type="submit" class="text-xs px-3 py-1.5 bg-green-100 text-green-700 hover:bg-green-200 rounded-lg transition-colors">Set Default</button>
                                         </form>
@@ -189,15 +214,16 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
                         <p class="text-xs text-gray-400 mb-5">Your card info is encrypted and stored securely.</p>
 
                         <form method="POST" id="addCardForm" class="space-y-4">
-                            <input type="hidden" name="action" value="add_card">
+                            <?php csrf_field(); ?>
+<input type="hidden" name="action" value="add_card">
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1.5">Card Label *</label>
-                                <input type="text" name="pm_label" placeholder="e.g. My Visa Card" required
+                                <input type="text" name="pm_label" maxlength="100" placeholder="e.g. My Visa Card" required
                                        class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1.5">Card Holder Name *</label>
-                                <input type="text" name="pm_holder_name" placeholder="JOHN DOE" required
+                                <input type="text" name="pm_holder_name" maxlength="150" placeholder="JOHN DOE" required
                                        class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white uppercase">
                             </div>
                             <div class="grid grid-cols-2 gap-3">
@@ -249,15 +275,16 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
                         <p class="text-xs text-gray-400 mb-5">Link your e-wallet for faster checkout.</p>
 
                         <form method="POST" id="addWalletForm" class="space-y-4">
-                            <input type="hidden" name="action" value="add_ewallet">
+                            <?php csrf_field(); ?>
+<input type="hidden" name="action" value="add_ewallet">
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1.5">Wallet Label *</label>
-                                <input type="text" name="pm_label" placeholder="e.g. My TNG Wallet" required
+                                <input type="text" name="pm_label" maxlength="100" placeholder="e.g. My TNG Wallet" required
                                        class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1.5">E-Wallet Type *</label>
-                                <select name="pm_ewallet_name" required
+                                <select name="pm_ewallet_name" maxlength="50" required
                                         class="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                                     <option value="">Select e-wallet...</option>
                                     <?php foreach ($ewallets as $ew): ?>
@@ -316,7 +343,8 @@ $ewallets = ['Touch n Go', 'GrabPay', 'ShopeePay', 'Boost'];
             <h3 class="font-bold text-gray-800 mb-2">Remove Payment Method?</h3>
             <p class="text-sm text-gray-500 mb-5">This action cannot be undone.</p>
             <form method="POST" id="deleteForm">
-                <input type="hidden" name="action" value="delete">
+                <?php csrf_field(); ?>
+<input type="hidden" name="action" value="delete">
                 <input type="hidden" name="pm_id" id="deletePmId">
                 <div class="flex gap-3">
                     <button type="button" onclick="document.getElementById('deleteModal').classList.add('hidden')"

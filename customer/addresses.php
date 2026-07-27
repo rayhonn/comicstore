@@ -1,28 +1,50 @@
 <?php
-
-require_once '../includes/db.php';
-require_once '../includes/auth.php';
-require_once '../includes/csrf.php';
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_customer();
 
-$user_id = $_SESSION['user_id'];
+$user_id = (int) $_SESSION['user_id'];
 
+function addressInput(mixed $value, string $label, int $maxLength, bool $required = false): string
+{
+    if (!is_string($value)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
+    $value = trim($value);
+    $length = function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
+    if (($required && $value === '') || $length > $maxLength) {
+        throw new RuntimeException($label . ' is invalid.');
+    }
+    return $value;
+}
+
+
+// Handle actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
-
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add') {
-        $recipient  = trim($_POST['address_recipient_name']);
-        $taman      = trim($_POST['address_taman'] ?? '');
-        $street     = trim($_POST['address_street']);
-        $city       = trim($_POST['address_city']);
-        $state      = trim($_POST['address_state'] ?? '');
-        $postal     = trim($_POST['address_postal_code']);
-        $country    = trim($_POST['address_country'] ?? 'Malaysia');
-        $phone      = trim($_POST['address_phone']);
-        $is_default = isset($_POST['is_default']) ? 1 : 0;
+        try {
+            $recipient = addressInput($_POST['address_recipient_name'] ?? '', 'Recipient name', 150, true);
+            $taman = addressInput($_POST['address_taman'] ?? '', 'Taman or apartment', 150, true);
+            $street = addressInput($_POST['address_street'] ?? '', 'Street address', 255, true);
+            $city = addressInput($_POST['address_city'] ?? '', 'City', 100, true);
+            $state = addressInput($_POST['address_state'] ?? '', 'State', 100);
+            $postal = addressInput($_POST['address_postal_code'] ?? '', 'Postal code', 20, true);
+            $country = addressInput($_POST['address_country'] ?? 'Malaysia', 'Country', 100, true);
+            $phone = addressInput($_POST['address_phone'] ?? '', 'Phone number', 20, true);
+            if (!preg_match('/^01[0-9]{8,9}$/', $phone)) {
+                throw new RuntimeException('Please enter a valid Malaysian phone number.');
+            }
+            $is_default = isset($_POST['is_default']) ? 1 : 0;
+        } catch (RuntimeException $e) {
+            $_SESSION['addr_success'] = $e->getMessage();
+            header('Location: addresses.php');
+            exit;
+        }
 
         if ($is_default) {
             $pdo->prepare("UPDATE addresses SET address_is_default = 0 WHERE address_user_id = ?")
@@ -37,16 +59,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
 
     } elseif ($action === 'edit') {
-        $addr_id    = $_POST['address_id'];
-        $recipient  = trim($_POST['address_recipient_name']);
-        $taman      = trim($_POST['address_taman'] ?? '');
-        $street     = trim($_POST['address_street']);
-        $city       = trim($_POST['address_city']);
-        $state      = trim($_POST['address_state'] ?? '');
-        $postal     = trim($_POST['address_postal_code']);
-        $country    = trim($_POST['address_country'] ?? 'Malaysia');
-        $phone      = trim($_POST['address_phone']);
-        $is_default = isset($_POST['is_default']) ? 1 : 0;
+        $addr_id   = $_POST['address_id'];
+        try {
+            $recipient = addressInput($_POST['address_recipient_name'] ?? '', 'Recipient name', 150, true);
+            $taman = addressInput($_POST['address_taman'] ?? '', 'Taman or apartment', 150, true);
+            $street = addressInput($_POST['address_street'] ?? '', 'Street address', 255, true);
+            $city = addressInput($_POST['address_city'] ?? '', 'City', 100, true);
+            $state = addressInput($_POST['address_state'] ?? '', 'State', 100);
+            $postal = addressInput($_POST['address_postal_code'] ?? '', 'Postal code', 20, true);
+            $country = addressInput($_POST['address_country'] ?? 'Malaysia', 'Country', 100, true);
+            $phone = addressInput($_POST['address_phone'] ?? '', 'Phone number', 20, true);
+            if (!preg_match('/^01[0-9]{8,9}$/', $phone)) {
+                throw new RuntimeException('Please enter a valid Malaysian phone number.');
+            }
+            $is_default = isset($_POST['is_default']) ? 1 : 0;
+        } catch (RuntimeException $e) {
+            $_SESSION['addr_success'] = $e->getMessage();
+            header('Location: addresses.php');
+            exit;
+        }
 
         $check = $pdo->prepare("SELECT address_id FROM addresses WHERE address_id = ? AND address_user_id = ?");
         $check->execute([$addr_id, $user_id]);
@@ -63,7 +94,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
 
     } elseif ($action === 'delete') {
-        $addr_id = $_POST['address_id'];
+        $addr_id = filter_var($_POST['address_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($addr_id === false || $addr_id === null) { header('Location: addresses.php'); exit; }
         $check = $pdo->prepare("SELECT address_id FROM addresses WHERE address_id = ? AND address_user_id = ?");
         $check->execute([$addr_id, $user_id]);
         if ($check->fetch()) {
@@ -74,7 +106,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
 
     } elseif ($action === 'set_default') {
-        $addr_id = $_POST['address_id'];
+        $addr_id = filter_var($_POST['address_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($addr_id === false || $addr_id === null) { header('Location: addresses.php'); exit; }
         $check = $pdo->prepare("SELECT address_id FROM addresses WHERE address_id = ? AND address_user_id = ?");
         $check->execute([$addr_id, $user_id]);
         if ($check->fetch()) {
@@ -182,8 +215,8 @@ unset($_SESSION['addr_success']);
                         <div class="flex items-center gap-2 flex-wrap">
                             <?php if (!$addr['address_is_default']): ?>
                             <form method="POST" class="inline">
-                                <?php csrf_field() ?>
-                                <input type="hidden" name="action" value="set_default">
+                                <?php csrf_field(); ?>
+<input type="hidden" name="action" value="set_default">
                                 <input type="hidden" name="address_id" value="<?= $addr['address_id'] ?>">
                                 <button type="submit" class="text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-300 px-3 py-1.5 rounded-lg transition-colors">
                                     Set Default
@@ -215,14 +248,14 @@ unset($_SESSION['addr_success']);
                 <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
             <form method="POST" class="p-6 space-y-4">
-                <?php csrf_field() ?>
-                <input type="hidden" name="action" id="formAction" value="add">
+                <?php csrf_field(); ?>
+<input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="address_id" id="formAddressId">
 
                 <div class="grid grid-cols-2 gap-4">
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Recipient Name *</label>
-                        <input type="text" name="address_recipient_name" id="formRecipient" required
+                        <input type="text" name="address_recipient_name" maxlength="150" id="formRecipient" required
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div class="col-span-2">
@@ -234,31 +267,31 @@ unset($_SESSION['addr_success']);
                     </div>
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Taman / Apartment *</label>
-                        <input type="text" name="address_taman" id="formTaman" required
+                        <input type="text" name="address_taman" maxlength="150" id="formTaman" required
                                placeholder="e.g. Taman Desa Jaya"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Street Address *</label>
-                        <input type="text" name="address_street" id="formStreet" required
+                        <input type="text" name="address_street" maxlength="255" id="formStreet" required
                                placeholder="e.g. No. 12, Jalan ABC"
                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">City *</label>
-                        <input type="text" name="address_city" id="formCity" required
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                        <input type="text" name="address_city" maxlength="100" id="formCity" required
+                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Postal Code *</label>
-                        <input type="text" name="address_postal_code" id="formPostal" required
-                               oninput="this.value = this.value.replace(/[^0-9]/g, '')" maxlength="5"
-                               placeholder="e.g. 80300"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                        <input type="text" name="address_postal_code" maxlength="20" id="formPostal" required
+                                oninput="this.value = this.value.replace(/[^0-9]/g, '')" maxlength="5"
+                                placeholder="e.g. 80300"
+                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                     </div>
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">State *</label>
-                        <select name="address_state" id="formState" required onchange="autoPostcode(this.value)"
+                        <select name="address_state" maxlength="100" id="formState" required onchange="autoPostcode(this.value)"
                                 class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                             <option value="">Select state</option>
                             <option>Johor</option>
@@ -281,8 +314,8 @@ unset($_SESSION['addr_success']);
                     </div>
                     <div class="col-span-2">
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Country</label>
-                        <input type="text" name="address_country" id="formCountry" value="Malaysia" readonly
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm bg-gray-100 text-gray-400 cursor-not-allowed">
+                        <input type="text" name="address_country" maxlength="100" id="formCountry" value="Malaysia" readonly
+                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm bg-gray-100 text-gray-400 cursor-not-allowed">
                     </div>
                     <div class="col-span-2">
                         <label class="flex items-center gap-3 cursor-pointer">
@@ -315,8 +348,8 @@ unset($_SESSION['addr_success']);
             <h3 class="font-black text-gray-800 mb-2">Delete Address?</h3>
             <p class="text-sm text-gray-500 mb-6">Are you sure you want to delete <strong id="deleteAddrName"></strong>'s address?</p>
             <form method="POST">
-                <?php csrf_field() ?>
-                <input type="hidden" name="action" value="delete">
+                <?php csrf_field(); ?>
+<input type="hidden" name="action" value="delete">
                 <input type="hidden" name="address_id" id="deleteAddrId">
                 <div class="flex gap-3">
                     <button type="button" onclick="closeDeleteModal()"
@@ -379,6 +412,7 @@ unset($_SESSION['addr_success']);
         document.getElementById('deleteModal').classList.remove('active');
     }
 
+    // Close modal on backdrop click
     document.getElementById('addressModal').addEventListener('click', function(e) {
         if (e.target === this) closeModal();
     });
@@ -387,11 +421,22 @@ unset($_SESSION['addr_success']);
     });
 
     const statePostcodePrefix = {
-        'Johor': '79', 'Kedah': '05', 'Kelantan': '15', 'Melaka': '75',
-        'Negeri Sembilan': '70', 'Pahang': '25', 'Perak': '30', 'Perlis': '02',
-        'Pulau Pinang': '10', 'Sabah': '88', 'Sarawak': '93', 'Selangor': '40',
-        'Terengganu': '20', 'Wilayah Persekutuan Kuala Lumpur': '50',
-        'Wilayah Persekutuan Labuan': '87', 'Wilayah Persekutuan Putrajaya': '62',
+        'Johor': '79',
+        'Kedah': '05',
+        'Kelantan': '15',
+        'Melaka': '75',
+        'Negeri Sembilan': '70',
+        'Pahang': '25',
+        'Perak': '30',
+        'Perlis': '02',
+        'Pulau Pinang': '10',
+        'Sabah': '88',
+        'Sarawak': '93',
+        'Selangor': '40',
+        'Terengganu': '20',
+        'Wilayah Persekutuan Kuala Lumpur': '50',
+        'Wilayah Persekutuan Labuan': '87',
+        'Wilayah Persekutuan Putrajaya': '62',
     };
 
     function autoPostcode(state) {

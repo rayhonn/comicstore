@@ -3,12 +3,14 @@ require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
-$user_id = $_SESSION['user_id'];
-$order_id = $_GET['order_id'] ?? null;
-$item_id  = $_GET['item_id'] ?? null;
+$user_id = (int) $_SESSION['user_id'];
+$order_id = filter_input(INPUT_GET, 'order_id', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+$item_id = filter_input(INPUT_GET, 'item_id', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
 
-if (!$order_id || !$item_id) {
+if ($order_id === false || $order_id === null || $item_id === false || $item_id === null) {
     header('Location: orders.php');
     exit;
 }
@@ -44,15 +46,39 @@ $existing = $pdo->prepare("SELECT return_id, return_status, return_admin_note FR
 $existing->execute([$item_id]);
 $existing = $existing->fetch(PDO::FETCH_ASSOC);
 
-$order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
+$order_num = '#' . str_pad((string) $order_id, 4, '0', STR_PAD_LEFT);
+$return_amount_sen = moneyDecimalToSen((string) $order['order_item_price']) * (int) $order['order_item_quantity'];
 $error = '';
 $submitted = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$existing && $within_window) {
-    $reason_type = trim($_POST['reason_type'] ?? '');
-    $reason_detail = trim($_POST['reason_detail'] ?? '');
+    csrf_verify();
+    $reason_type = $_POST['reason_type'] ?? null;
+    $reason_detail_raw = $_POST['reason_detail'] ?? '';
+    $reason_options = [
+        'Wrong item received',
+        'Item damaged / defective',
+        'Item not as described',
+        'Missing item / incomplete order',
+        'Other',
+    ];
 
-    if (empty($reason_type)) {
+    if (!is_string($reason_type) || !in_array($reason_type, $reason_options, true) || !is_string($reason_detail_raw)) {
+        $error = 'Please select a valid reason for return.';
+        $reason_detail = '';
+    } else {
+        $reason_detail = trim($reason_detail_raw);
+        $reason_detail_length = function_exists('mb_strlen') ? mb_strlen($reason_detail, 'UTF-8') : strlen($reason_detail);
+        if ($reason_detail_length > 2000) {
+            $error = 'Additional details cannot exceed 2000 characters.';
+        } elseif ($reason_type === 'Other' && $reason_detail === '') {
+            $error = 'Please provide details for the selected reason.';
+        }
+    }
+
+    if ($error !== '') {
+        // Validation error already set.
+    } elseif (empty($reason_type)) {
         $error = 'Please select a reason for return.';
     } else {
         $full_reason = $reason_type;
@@ -167,7 +193,7 @@ $reason_options = [
                 <?php if ($existing['return_status'] === 'pending'): ?>
                     <p class="text-sm <?= $sc['text'] ?> opacity-80">Please wait up to <strong>3 working days</strong> for our team to review your request.</p>
                 <?php elseif ($existing['return_status'] === 'approved'): ?>
-                    <p class="text-sm <?= $sc['text'] ?> opacity-80">Your return has been approved. A refund of <strong>RM <?= number_format($order['order_item_price'] * $order['order_item_quantity'], 2) ?></strong> will be processed to your original payment method within <strong>5-7 working days</strong>.</p>
+                    <p class="text-sm <?= $sc['text'] ?> opacity-80">Your return has been approved. A refund of <strong>RM <?= moneyFormatSen($return_amount_sen) ?></strong> will be processed to your original payment method within <strong>5-7 working days</strong>.</p>
                 <?php elseif ($existing['return_status'] === 'rejected'): ?>
                     <p class="text-sm <?= $sc['text'] ?> opacity-80">Your return request was not approved.</p>
                 <?php endif; ?>
@@ -211,7 +237,7 @@ $reason_options = [
                 <?php endif; ?>
                 <div class="flex-1">
                     <p class="font-bold text-sm text-gray-800"><?= htmlspecialchars($order['product_title']) ?></p>
-                    <p class="text-xs text-gray-400">Qty: <?= $order['order_item_quantity'] ?> · RM <?= number_format($order['order_item_price'] * $order['order_item_quantity'], 2) ?></p>
+                    <p class="text-xs text-gray-400">Qty: <?= $order['order_item_quantity'] ?> · RM <?= moneyFormatSen($return_amount_sen) ?></p>
                 </div>
             </div>
 
@@ -222,7 +248,8 @@ $reason_options = [
             <?php endif; ?>
 
             <form method="POST" id="returnForm">
-                <!-- Reason Options -->
+                <?php csrf_field(); ?>
+<!-- Reason Options -->
                 <div class="mb-5">
                     <label class="block text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Reason for Return *</label>
                     <div class="space-y-2">
@@ -240,7 +267,7 @@ $reason_options = [
                 <!-- Additional Details -->
                 <div class="mb-5" id="detailsField">
                     <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Additional Details <span class="text-gray-300 normal-case font-normal">(optional)</span></label>
-                    <textarea name="reason_detail" rows="3"
+                    <textarea name="reason_detail" rows="3" maxlength="2000"
                               placeholder="Provide more details about your return..."
                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none bg-gray-50 focus:bg-white"></textarea>
                 </div>
