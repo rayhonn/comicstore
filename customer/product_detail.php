@@ -542,7 +542,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         <div class="bg-white rounded-2xl shadow-sm p-6 mb-8" id="also-like-section">
             <div class="text-center mb-5">
                 <h3 class="font-bold text-gray-800 text-lg">✨ You Might Also Like</h3>
-                <p class="text-xs text-gray-400 mt-0.5">Powered by Claude AI</p>
+                <!-- <p class="text-xs text-gray-400 mt-0.5">Powered by Claude AI</p> -->
             </div>
             <div id="also-like-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <?php for ($i = 0; $i < 3; $i++): ?>
