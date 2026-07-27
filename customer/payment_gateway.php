@@ -1371,6 +1371,14 @@ if ($has_active_stripe_session) {
                 return;
             }
 
+            /*
+             * Allow normal navigation after checkout
+             * has expired or navigation was approved.
+             */
+            if (allowNavigation) {
+                return;
+            }
+
             if (
                 link.dataset.checkoutCancel
                 === 'true'
