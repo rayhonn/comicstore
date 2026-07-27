@@ -1,110 +1,85 @@
 <?php
 
-require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/auth.php';
-require_once __DIR__ .
-    '/../includes/login_rate_limit.php';
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 if (
     !empty($_SESSION['supplier_id']) &&
     ($_SESSION['role'] ?? '') === 'supplier'
 ) {
-    redirect_to(
-        app_path('supplier/dashboard.php')
-    );
+    redirect_to(app_path('supplier/dashboard.php'));
 }
 
 $error = '';
-$login_scope = 'supplier_login';
+$username_value = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = trim(
-        (string) ($_POST['username'] ?? '')
-    );
+    csrf_verify();
 
-    $password = (string) (
-        $_POST['password'] ?? ''
-    );
+    $username_raw = $_POST['username'] ?? null;
+    $password = $_POST['password'] ?? null;
 
-    if ($username === '' || $password === '') {
-        $error =
-            'Please enter username and password.';
+    if (!is_string($username_raw)) {
+        $error = 'Please enter a valid username.';
     } else {
-        $rate_limit = login_rate_limit_status(
-            $pdo,
-            $login_scope,
-            $username
-        );
+        $username_value = trim($username_raw);
+    }
 
-        if ($rate_limit['blocked']) {
-            $error =
-                'Too many login attempts. ' .
-                'Please try again in 15 minutes.';
-        } else {
-            $statement = $pdo->prepare("
-                SELECT *
-                FROM suppliers
-                WHERE supplier_username = ?
-                AND supplier_status = 'active'
-            ");
+    if (
+        $error === '' &&
+        (
+            $username_value === '' ||
+            strlen($username_value) > 50
+        )
+    ) {
+        $error =
+            'Username must be between 1 and 50 characters.';
+    } elseif (
+        $error === '' &&
+        (
+            !is_string($password) ||
+            $password === '' ||
+            strlen($password) > 72
+        )
+    ) {
+        $error =
+            'Password must be between 1 and 72 characters.';
+    }
 
-            $statement->execute([$username]);
+    if ($error === '') {
+        $stmt = $pdo->prepare("
+            SELECT *
+            FROM suppliers
+            WHERE supplier_username = ?
+            AND supplier_status = 'active'
+            LIMIT 1
+        ");
+        $stmt->execute([$username_value]);
+        $supplier =
+            $stmt->fetch(PDO::FETCH_ASSOC);
 
-            $supplier =
-                $statement->fetch(PDO::FETCH_ASSOC);
+        if (
+            $supplier &&
+            password_verify(
+                $password,
+                $supplier['supplier_password']
+            )
+        ) {
+            session_regenerate_id(true);
 
-            if (
-                $supplier &&
-                password_verify(
-                    $password,
-                    $supplier[
-                        'supplier_password'
-                    ]
-                )
-            ) {
-                login_rate_limit_clear_identifier(
-                    $pdo,
-                    $login_scope,
-                    $username
-                );
+            $_SESSION['supplier_id'] =
+                (int) $supplier['supplier_id'];
+            $_SESSION['supplier_name'] =
+                $supplier['supplier_name'];
+            $_SESSION['role'] = 'supplier';
 
-                regenerate_session();
-
-                $_SESSION['supplier_id'] =
-                    $supplier['supplier_id'];
-
-                $_SESSION['supplier_name'] =
-                    $supplier['supplier_name'];
-
-                $_SESSION['role'] = 'supplier';
-
-                redirect_to(
-                    app_path(
-                        'supplier/dashboard.php'
-                    )
-                );
-            }
-
-            login_rate_limit_record_failure(
-                $pdo,
-                $login_scope,
-                $username
+            redirect_to(
+                app_path('supplier/dashboard.php')
             );
-
-            $rate_limit =
-                login_rate_limit_status(
-                    $pdo,
-                    $login_scope,
-                    $username
-                );
-
-            $error =
-                $rate_limit['blocked']
-                    ? 'Too many login attempts. ' .
-                        'Please try again in ' .
-                        '15 minutes.'
-                    : 'Invalid username or password.';
         }
+
+        $error = 'Invalid username or password.';
     }
 }
 ?>
@@ -130,19 +105,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <?php if ($error): ?>
             <div class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl mb-5">
-                ❌ <?= htmlspecialchars($error) ?>
+                ❌ <?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?>
             </div>
             <?php endif; ?>
 
             <form method="POST">
+                <?php csrf_field(); ?>
                 <div class="mb-4">
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Username</label>
-                    <input type="text" name="username" required
+                    <input type="text" name="username" maxlength="50" required
+                           value="<?= htmlspecialchars($username_value, ENT_QUOTES, 'UTF-8') ?>"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-blue-400 transition-colors bg-gray-50 focus:bg-white">
                 </div>
                 <div class="mb-6">
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Password</label>
-                    <input type="password" name="password" required
+                    <input type="password" name="password" maxlength="72" required
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-blue-400 transition-colors bg-gray-50 focus:bg-white">
                 </div>
                 <button type="submit"

@@ -1,84 +1,188 @@
 <?php
-require_once __DIR__ . '/../includes/auth.php';
-require_admin();
 
+require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
 
-// Toggle product availability for soft delete and restore
-if (
-    $_SERVER['REQUEST_METHOD'] === 'POST' &&
-    isset($_POST['toggle_id'])
-) {
+require_admin_or_staff();
+
+$error = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
-    $toggle_id = filter_input(
-        INPUT_POST,
-        'toggle_id',
-        FILTER_VALIDATE_INT
+    $action = $_POST['action'] ?? null;
+    $product_id = filter_var(
+        $_POST['product_id'] ?? null,
+        FILTER_VALIDATE_INT,
+        ['options' => ['min_range' => 1]]
     );
 
-    if (!$toggle_id) {
-        header('Location: products.php');
+    if (
+        !is_string($action) ||
+        !in_array($action, ['toggle', 'delete'], true) ||
+        $product_id === false ||
+        $product_id === null
+    ) {
+        header('Location: products.php?error=invalid');
         exit;
     }
 
-    $stmt = $pdo->prepare(
-        "UPDATE products
-         SET product_is_available = NOT product_is_available
-         WHERE product_id = ?"
-    );
-    $stmt->execute([$toggle_id]);
+    $product_id = (int) $product_id;
 
-    header('Location: products.php?success=1');
-    exit;
+    try {
+        if ($action === 'toggle') {
+            $update = $pdo->prepare("
+                UPDATE products
+                SET product_is_available =
+                    NOT product_is_available
+                WHERE product_id = ?
+            ");
+            $update->execute([$product_id]);
+
+            if ($update->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Product not found.'
+                );
+            }
+        } else {
+            $delete = $pdo->prepare("
+                DELETE FROM products
+                WHERE product_id = ?
+            ");
+            $delete->execute([$product_id]);
+
+            if ($delete->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Product not found.'
+                );
+            }
+        }
+
+        header('Location: products.php?success=1');
+        exit;
+    } catch (PDOException $e) {
+        error_log(
+            'Product action failed: ' .
+            $e->getMessage()
+        );
+
+        header('Location: products.php?error=in_use');
+        exit;
+    } catch (RuntimeException $e) {
+        header('Location: products.php?error=not_found');
+        exit;
+    }
 }
 
+$search_raw = $_GET['search'] ?? '';
 
-$search = trim($_GET['search'] ?? '');
-$type = $_GET['type'] ?? '';
-$filter = $_GET['filter'] ?? '';
+if (!is_string($search_raw)) {
+    $search_raw = '';
+}
+
+$search = trim($search_raw);
+$search_length = function_exists('mb_strlen')
+    ? mb_strlen($search, 'UTF-8')
+    : strlen($search);
+
+if ($search_length > 100) {
+    $error = 'Search cannot exceed 100 characters.';
+    $search = '';
+}
+
+$type_raw = $_GET['type'] ?? '';
+$type =
+    is_string($type_raw) &&
+    in_array($type_raw, ['', 'physical', 'ebook'], true)
+        ? $type_raw
+        : '';
+
+$filter_raw = $_GET['filter'] ?? '';
+$filter =
+    is_string($filter_raw) &&
+    in_array(
+        $filter_raw,
+        ['', 'low_stock', 'inactive'],
+        true
+    )
+        ? $filter_raw
+        : '';
 
 $sql = "
-    SELECT p.*, c.category_name,
-    pp.physical_stock_quantity, pp.physical_low_stock_threshold,
-    pe.ebook_download_limit,
-    COALESCE(AVG(r.review_rating), 0) as avg_rating,
-    COUNT(DISTINCT r.review_id) as review_count
+    SELECT
+        p.*,
+        c.category_name,
+        pp.physical_stock_quantity,
+        pp.physical_low_stock_threshold,
+        pe.ebook_download_limit,
+        COALESCE(AVG(r.review_rating), 0) AS avg_rating,
+        COUNT(DISTINCT r.review_id) AS review_count
     FROM products p
-    LEFT JOIN categories c ON p.product_category_id = c.category_id
-    LEFT JOIN product_physical pp ON p.product_id = pp.physical_product_id
-    LEFT JOIN product_ebook pe ON p.product_id = pe.ebook_product_id
-    LEFT JOIN product_reviews r ON p.product_id = r.review_product_id AND r.review_status = 'approved'
-    WHERE 1=1
+    LEFT JOIN categories c
+        ON p.product_category_id = c.category_id
+    LEFT JOIN product_physical pp
+        ON p.product_id = pp.physical_product_id
+    LEFT JOIN product_ebook pe
+        ON p.product_id = pe.ebook_product_id
+    LEFT JOIN product_reviews r
+        ON p.product_id = r.review_product_id
+        AND r.review_status = 'approved'
+    WHERE 1 = 1
 ";
+
 $params = [];
 
-if ($search) {
-    $sql .= " AND (p.product_title LIKE ? OR p.product_series LIKE ? OR p.product_author LIKE ?)";
-    $params[] = "%$search%";
-    $params[] = "%$search%";
-    $params[] = "%$search%";
+if ($search !== '') {
+    $sql .= "
+        AND (
+            p.product_title LIKE ?
+            OR p.product_series LIKE ?
+            OR p.product_author LIKE ?
+        )
+    ";
+    $params = array_fill(0, 3, '%' . $search . '%');
 }
-if ($type) {
+
+if ($type !== '') {
     $sql .= " AND p.product_type = ?";
     $params[] = $type;
 }
+
 if ($filter === 'low_stock') {
-    $sql .= " AND pp.physical_stock_quantity <= pp.physical_low_stock_threshold";
-}
-if ($filter === 'inactive') {
+    $sql .= "
+        AND pp.physical_stock_quantity <=
+            pp.physical_low_stock_threshold
+    ";
+} elseif ($filter === 'inactive') {
     $sql .= " AND p.product_is_available = 0";
 }
 
-$sql .= " GROUP BY p.product_id ORDER BY p.product_created_at DESC";
+$sql .= "
+    GROUP BY p.product_id
+    ORDER BY p.product_created_at DESC
+";
+
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$total_products = $pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
-$total_active = $pdo->query("SELECT COUNT(*) FROM products WHERE product_is_available = 1")->fetchColumn();
-$total_low_stock = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE physical_stock_quantity <= physical_low_stock_threshold")->fetchColumn();
+$total_products = (int) $pdo->query("
+    SELECT COUNT(*) FROM products
+")->fetchColumn();
+
+$total_active = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM products
+    WHERE product_is_available = 1
+")->fetchColumn();
+
+$total_low_stock = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM product_physical
+    WHERE physical_stock_quantity <=
+        physical_low_stock_threshold
+")->fetchColumn();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -113,10 +217,24 @@ $total_low_stock = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE phys
         <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">✅ Action completed.</div>
         <?php endif; ?>
 
+        <?php if (isset($_GET['error'])): ?>
+        <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5">
+            ❌ <?= $_GET['error'] === 'in_use'
+                ? 'This product cannot be deleted because it is in use.'
+                : 'Unable to complete the product action.' ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($error !== ''): ?>
+        <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5">
+            ❌ <?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?>
+        </div>
+        <?php endif; ?>
+
         <!-- Search + Filter -->
         <div class="bg-white rounded-2xl shadow-sm p-4 mb-6">
             <form method="GET" class="flex gap-3 flex-wrap items-center">
-                <input type="text" name="search" value="<?= htmlspecialchars($search) ?>"
+                <input type="text" name="search" maxlength="100" value="<?= htmlspecialchars($search, ENT_QUOTES, 'UTF-8') ?>"
                        placeholder="Search title, series, author..."
                        class="flex-1 min-w-48 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors">
                 <select name="type" class="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400">
@@ -230,21 +348,26 @@ $total_low_stock = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE phys
                         </td>
                         <td class="px-4 py-3">
                             <div class="flex items-center gap-2">
-                                <a href="edit_product.php?id=<?= $p['product_id'] ?>"
+                                <a href="edit_product.php?id=<?= (int) $p['product_id'] ?>"
                                    class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">
                                     ✏️ Edit
                                 </a>
                                 <form method="POST" class="inline">
                                     <?php csrf_field(); ?>
-
-                                    <input
-                                        type="hidden"
-                                        name="toggle_id"
-                                        value="<?= (int) $p['product_id'] ?>"
-                                    >
+                                    <input type="hidden" name="action" value="toggle">
+                                    <input type="hidden" name="product_id" value="<?= (int) $p['product_id'] ?>">
                                     <button type="submit"
                                             class="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
                                         <?= $p['product_is_available'] ? '🙈 Hide' : '👁️ Show' ?>
+                                    </button>
+                                </form>
+                                <form method="POST" class="inline">
+                                    <?php csrf_field(); ?>
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="product_id" value="<?= (int) $p['product_id'] ?>">
+                                    <button type="submit" onclick="return confirm('Delete this product permanently?')"
+                                            class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
+                                        🗑️
                                     </button>
                                 </form>
                             </div>

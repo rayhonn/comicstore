@@ -1,164 +1,138 @@
 <?php
 
-require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/auth.php';
-require_once __DIR__ .
-    '/../includes/login_rate_limit.php';
+require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
+
+$redirect_raw =
+    $_GET['redirect'] ??
+    $_POST['redirect'] ??
+    'dashboard.php';
+
+if (
+    !is_string($redirect_raw) ||
+    strlen($redirect_raw) > 255
+) {
+    $redirect_raw = 'dashboard.php';
+}
 
 $redirect_to = safe_redirect_target(
-    $_GET['redirect'] ?? '',
+    $redirect_raw,
     'dashboard.php'
 );
 
 if (
-    isset($_SESSION['user_id']) &&
+    !empty($_SESSION['user_id']) &&
     in_array(
         $_SESSION['role'] ?? '',
         ['admin', 'staff'],
         true
     )
 ) {
-    redirect_to(
-        $_SESSION['role'] === 'admin'
-            ? $redirect_to
-            : app_path('staff/dashboard.php')
-    );
+    if (($_SESSION['role'] ?? '') === 'admin') {
+        redirect_to($redirect_to);
+    }
+
+    redirect_to(app_path('staff/dashboard.php'));
 }
 
 $error = '';
-$login_scope = 'management_login';
+$identifier_value = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $user_name = trim(
-        (string) ($_POST['user_name'] ?? '')
-    );
+    csrf_verify();
 
-    $password = (string) (
-        $_POST['password'] ?? ''
-    );
+    $identifier_raw = $_POST['user_name'] ?? null;
+    $password = $_POST['password'] ?? null;
 
-    if ($user_name === '' || $password === '') {
-        $error =
-            'Please enter username and password.';
+    if (!is_string($identifier_raw)) {
+        $error = 'Please enter a valid username or email.';
     } else {
-        $rate_limit = login_rate_limit_status(
-            $pdo,
-            $login_scope,
-            $user_name
-        );
+        $identifier_value = trim($identifier_raw);
+    }
 
-        if ($rate_limit['blocked']) {
-            $error =
-                'Too many login attempts. ' .
-                'Please try again in 15 minutes.';
-        } else {
-            $statement = $pdo->prepare("
-                SELECT *
-                FROM users
-                WHERE (
-                    user_name = ?
-                    OR user_gmail = ?
-                    OR user_staff_id = ?
-                )
-                AND user_is_active = 1
-                AND user_role IN ('admin', 'staff')
-                AND (
-                    user_role = 'staff'
-                    OR (
-                        user_role = 'admin'
-                        AND user_admin_level IN (
-                            'staff_admin',
-                            'senior_admin'
-                        )
-                    )
-                )
+    if (
+        $error === '' &&
+        (
+            $identifier_value === '' ||
+            strlen($identifier_value) > 100
+        )
+    ) {
+        $error =
+            'Username or email must be between 1 and 100 characters.';
+    } elseif (
+        $error === '' &&
+        (
+            !is_string($password) ||
+            $password === '' ||
+            strlen($password) > 72
+        )
+    ) {
+        $error =
+            'Password must be between 1 and 72 characters.';
+    }
+
+    if ($error === '') {
+        $stmt = $pdo->prepare("
+            SELECT *
+            FROM users
+            WHERE (
+                user_name = ?
+                OR user_gmail = ?
+                OR user_staff_id = ?
+            )
+            AND user_is_active = 1
+            AND user_role IN ('admin', 'staff')
+            LIMIT 1
+        ");
+        $stmt->execute([
+            $identifier_value,
+            $identifier_value,
+            $identifier_value,
+        ]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (
+            $user &&
+            password_verify(
+                $password,
+                $user['user_password_hash']
+            )
+        ) {
+            session_regenerate_id(true);
+
+            $_SESSION['user_id'] =
+                (int) $user['user_id'];
+            $_SESSION['user_name'] =
+                $user['user_name'];
+            $_SESSION['user_first_name'] =
+                $user['user_first_name'];
+            $_SESSION['role'] =
+                $user['user_role'];
+            $_SESSION['admin_level'] =
+                $user['user_admin_level']
+                ?? 'senior_admin';
+
+            $update_login = $pdo->prepare("
+                UPDATE users
+                SET user_last_login = NOW()
+                WHERE user_id = ?
             ");
-
-            $statement->execute([
-                $user_name,
-                $user_name,
-                $user_name,
+            $update_login->execute([
+                (int) $user['user_id'],
             ]);
 
-            $user =
-                $statement->fetch(PDO::FETCH_ASSOC);
-
-            if (
-                $user &&
-                password_verify(
-                    $password,
-                    $user['user_password_hash']
-                )
-            ) {
-                login_rate_limit_clear_identifier(
-                    $pdo,
-                    $login_scope,
-                    $user_name
-                );
-
-                $pdo->prepare("
-                    UPDATE users
-                    SET user_last_login = NOW()
-                    WHERE user_id = ?
-                ")->execute([
-                    $user['user_id'],
-                ]);
-
-                regenerate_session();
-
-                $_SESSION['user_id'] =
-                    $user['user_id'];
-
-                $_SESSION['user_name'] =
-                    $user['user_name'];
-
-                $_SESSION['user_first_name'] =
-                    $user['user_first_name'];
-
-                $_SESSION['role'] =
-                    $user['user_role'];
-
-                if (
-                    $user['user_role'] === 'admin'
-                ) {
-                    $_SESSION['admin_level'] =
-                        (string) $user[
-                            'user_admin_level'
-                        ];
-                }
-
-                if (
-                    $user['user_role'] === 'admin'
-                ) {
-                    redirect_to($redirect_to);
-                }
-
-                redirect_to(
-                    app_path('staff/dashboard.php')
-                );
+            if ($user['user_role'] === 'admin') {
+                redirect_to($redirect_to);
             }
 
-            login_rate_limit_record_failure(
-                $pdo,
-                $login_scope,
-                $user_name
+            redirect_to(
+                app_path('staff/dashboard.php')
             );
-
-            $rate_limit =
-                login_rate_limit_status(
-                    $pdo,
-                    $login_scope,
-                    $user_name
-                );
-
-            $error =
-                $rate_limit['blocked']
-                    ? 'Too many login attempts. ' .
-                        'Please try again in ' .
-                        '15 minutes.'
-                    : 'Invalid credentials or ' .
-                        'insufficient permissions.';
         }
+
+        $error =
+            'Invalid credentials or insufficient permissions.';
     }
 }
 ?>
@@ -177,6 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body class="bg-[#1e2d4a] min-h-screen flex items-center justify-center px-6">
     <div class="w-full max-w-md">
 
+        <!-- Logo -->
         <div class="text-center mb-8">
             <h1 class="text-3xl font-black text-white tracking-wide">
                 MANGA<span class="text-red-400">VAULT</span>
@@ -190,21 +165,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <?php if ($error): ?>
             <div class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl mb-5">
-                ❌ <?= htmlspecialchars($error) ?>
+                ❌ <?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?>
             </div>
             <?php endif; ?>
 
-            <form method="POST" action="?redirect=<?= urlencode($redirect_to) ?>" class="space-y-4">
+            <form method="POST" class="space-y-4">
+                <?php csrf_field(); ?>
+                <input
+                    type="hidden"
+                    name="redirect"
+                    value="<?= htmlspecialchars($redirect_to, ENT_QUOTES, 'UTF-8') ?>"
+                >
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Username or Email</label>
-                    <input type="text" name="user_name" required
-                           value="<?= htmlspecialchars($_POST['user_name'] ?? '') ?>"
-                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white"
-                           placeholder="Staff ID, username or email">
+                    <input type="text" name="user_name" maxlength="100" required
+                           value="<?= htmlspecialchars($identifier_value, ENT_QUOTES, 'UTF-8') ?>"
+                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white" placeholder="Staff ID, username or email">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Password</label>
-                    <input type="password" name="password" required
+                    <input type="password" name="password" maxlength="72" required
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                 </div>
                 <button type="submit"

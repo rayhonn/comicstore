@@ -2,59 +2,129 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
 require_admin();
 
-$supplier_id = $_GET['id'] ?? null;
-if (!$supplier_id) { header('Location: suppliers.php'); exit; }
+$supplier_id = filter_input(
+    INPUT_GET,
+    'id',
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
 
-$supplier = $pdo->prepare("SELECT * FROM suppliers WHERE supplier_id = ?");
-$supplier->execute([$supplier_id]);
-$supplier = $supplier->fetch(PDO::FETCH_ASSOC);
-if (!$supplier) { header('Location: suppliers.php'); exit; }
+if ($supplier_id === false || $supplier_id === null) {
+    header('Location: suppliers.php');
+    exit;
+}
 
-$stats = $pdo->prepare("
+$supplier_id = (int) $supplier_id;
+
+$supplier_stmt = $pdo->prepare("
+    SELECT *
+    FROM suppliers
+    WHERE supplier_id = ?
+");
+$supplier_stmt->execute([$supplier_id]);
+$supplier = $supplier_stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$supplier) {
+    header('Location: suppliers.php');
+    exit;
+}
+
+$stats_stmt = $pdo->prepare("
     SELECT
-    COUNT(*) as total_pos,
-    SUM(CASE WHEN po_status = 'completed' THEN po_total_amount ELSE 0 END) as total_spend,
-    SUM(CASE WHEN po_status = 'completed' THEN 1 ELSE 0 END) as completed_pos,
-    AVG(po_rating) as avg_rating,
-    COUNT(po_rating) as rating_count
+        COUNT(*) AS total_pos,
+        SUM(
+            CASE
+                WHEN po_status = 'completed'
+                THEN po_total_amount
+                ELSE 0
+            END
+        ) AS total_spend,
+        SUM(
+            CASE
+                WHEN po_status = 'completed'
+                THEN 1
+                ELSE 0
+            END
+        ) AS completed_pos,
+        AVG(po_rating) AS avg_rating,
+        COUNT(po_rating) AS rating_count
     FROM purchase_orders
     WHERE po_supplier_id = ?
 ");
-$stats->execute([$supplier_id]);
-$stats = $stats->fetch(PDO::FETCH_ASSOC);
+$stats_stmt->execute([$supplier_id]);
+$stats = $stats_stmt->fetch(PDO::FETCH_ASSOC) ?: [
+    'total_pos' => 0,
+    'total_spend' => '0.00',
+    'completed_pos' => 0,
+    'avg_rating' => null,
+    'rating_count' => 0,
+];
+
+$total_spend_sen = moneyDecimalToSen(
+    (string) ($stats['total_spend'] ?? '0')
+);
 
 $lead_time = $pdo->prepare("
-    SELECT AVG(DATEDIFF(gr.gr_received_at, po.po_created_at)) as avg_lead_time
+    SELECT
+        AVG(
+            DATEDIFF(
+                gr.gr_received_at,
+                po.po_created_at
+            )
+        ) AS avg_lead_time
     FROM purchase_orders po
-    JOIN goods_received gr ON gr.gr_po_id = po.po_id AND gr.gr_status = 'completed'
+    JOIN goods_received gr
+        ON gr.gr_po_id = po.po_id
+        AND gr.gr_status = 'completed'
     WHERE po.po_supplier_id = ?
 ");
 $lead_time->execute([$supplier_id]);
 $avg_lead_time = $lead_time->fetchColumn();
 
 $disputes = $pdo->prepare("
-    SELECT COUNT(*) FROM supplier_returns sr
-    JOIN purchase_orders po ON po.po_id = sr.return_po_id
-    WHERE po.po_supplier_id = ? AND sr.return_supplier_response = 'disputed'
+    SELECT COUNT(*)
+    FROM supplier_returns sr
+    JOIN purchase_orders po
+        ON po.po_id = sr.return_po_id
+    WHERE po.po_supplier_id = ?
+    AND sr.return_supplier_response = 'disputed'
 ");
 $disputes->execute([$supplier_id]);
-$dispute_count = $disputes->fetchColumn();
+$dispute_count = (int) $disputes->fetchColumn();
 
-$po_history = $pdo->prepare("
-    SELECT po.*, COUNT(pi.po_item_id) as item_count
+$po_history_stmt = $pdo->prepare("
+    SELECT
+        po.*,
+        COUNT(pi.po_item_id) AS item_count
     FROM purchase_orders po
-    LEFT JOIN po_items pi ON pi.po_item_po_id = po.po_id
+    LEFT JOIN po_items pi
+        ON pi.po_item_po_id = po.po_id
     WHERE po.po_supplier_id = ?
     GROUP BY po.po_id
     ORDER BY po.po_created_at DESC
 ");
-$po_history->execute([$supplier_id]);
-$po_history = $po_history->fetchAll(PDO::FETCH_ASSOC);
+$po_history_stmt->execute([$supplier_id]);
+$po_history =
+    $po_history_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$completion_rate = $stats['total_pos'] > 0 ? ($stats['completed_pos'] / $stats['total_pos']) * 100 : null;
+$total_pos = (int) $stats['total_pos'];
+$completed_pos = (int) $stats['completed_pos'];
+$completion_rate =
+    $total_pos > 0
+        ? ($completed_pos / $total_pos) * 100
+        : null;
+
+$status_colors = [
+    'draft' => 'bg-gray-100 text-gray-500',
+    'sent' => 'bg-yellow-100 text-yellow-700',
+    'confirmed' => 'bg-blue-100 text-blue-700',
+    'completed' => 'bg-green-100 text-green-700',
+    'cancelled' => 'bg-red-100 text-red-700',
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -84,11 +154,11 @@ $completion_rate = $stats['total_pos'] > 0 ? ($stats['completed_pos'] / $stats['
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
             <div class="bg-white rounded-2xl shadow-sm p-5">
                 <p class="text-xs text-gray-400 uppercase font-semibold mb-1">Total POs</p>
-                <p class="text-2xl font-black text-gray-800"><?= $stats['total_pos'] ?></p>
+                <p class="text-2xl font-black text-gray-800"><?= $total_pos ?></p>
             </div>
             <div class="bg-white rounded-2xl shadow-sm p-5">
                 <p class="text-xs text-gray-400 uppercase font-semibold mb-1">Total Spend</p>
-                <p class="text-2xl font-black text-red-600">RM <?= number_format($stats['total_spend'] ?? 0, 0) ?></p>
+                <p class="text-2xl font-black text-red-600">RM <?= moneyFormatSen($total_spend_sen) ?></p>
             </div>
             <div class="bg-white rounded-2xl shadow-sm p-5">
                 <p class="text-xs text-gray-400 uppercase font-semibold mb-1">Avg Rating</p>
@@ -113,7 +183,7 @@ $completion_rate = $stats['total_pos'] > 0 ? ($stats['completed_pos'] / $stats['
             <div class="w-full bg-gray-100 rounded-full h-2">
                 <div class="bg-green-500 h-2 rounded-full" style="width: <?= $completion_rate ?>%"></div>
             </div>
-            <p class="text-xs text-gray-400 mt-2"><?= $stats['completed_pos'] ?> of <?= $stats['total_pos'] ?> purchase orders fully completed</p>
+            <p class="text-xs text-gray-400 mt-2"><?= $stats['completed_pos'] ?> of <?= $total_pos ?> purchase orders fully completed</p>
         </div>
         <?php endif; ?>
 
@@ -138,24 +208,24 @@ $completion_rate = $stats['total_pos'] > 0 ? ($stats['completed_pos'] / $stats['
                     </tr>
                 </thead>
                 <tbody>
-                    <?php
-                    $status_colors = [
-                        'draft'     => 'bg-gray-100 text-gray-500',
-                        'sent'      => 'bg-yellow-100 text-yellow-700',
-                        'confirmed' => 'bg-blue-100 text-blue-700',
-                        'completed' => 'bg-green-100 text-green-700',
-                        'cancelled' => 'bg-red-100 text-red-700',
-                    ];
-                    foreach ($po_history as $po):
+                    <?php foreach ($po_history as $po):
+                        $po_total_sen = moneyDecimalToSen(
+                            (string) $po['po_total_amount']
+                        );
+                        $po_status =
+                            (string) $po['po_status'];
+                        $po_status_class =
+                            $status_colors[$po_status]
+                            ?? 'bg-gray-100 text-gray-500';
                     ?>
                     <tr class="border-t border-gray-50">
                         <td class="px-5 py-4">
-                            <a href="po_detail.php?id=<?= $po['po_id'] ?>" class="text-sm font-semibold text-blue-600 hover:underline"><?= htmlspecialchars($po['po_number']) ?></a>
+                            <a href="po_detail.php?id=<?= (int) $po['po_id'] ?>" class="text-sm font-semibold text-blue-600 hover:underline"><?= htmlspecialchars($po['po_number']) ?></a>
                         </td>
-                        <td class="px-5 py-4 text-center text-sm text-gray-600"><?= $po['item_count'] ?></td>
-                        <td class="px-5 py-4 text-right text-sm font-bold text-gray-800">RM <?= number_format($po['po_total_amount'], 2) ?></td>
+                        <td class="px-5 py-4 text-center text-sm text-gray-600"><?= (int) $po['item_count'] ?></td>
+                        <td class="px-5 py-4 text-right text-sm font-bold text-gray-800">RM <?= moneyFormatSen($po_total_sen) ?></td>
                         <td class="px-5 py-4 text-center">
-                            <span class="<?= $status_colors[$po['po_status']] ?> text-xs px-3 py-1 rounded-full font-semibold capitalize"><?= $po['po_status'] ?></span>
+                            <span class="<?= $po_status_class ?> text-xs px-3 py-1 rounded-full font-semibold capitalize"><?= htmlspecialchars($po_status, ENT_QUOTES, 'UTF-8') ?></span>
                         </td>
                         <td class="px-5 py-4 text-center text-sm">
                             <?= $po['po_rating'] ? str_repeat('★', $po['po_rating']) : '—' ?>
