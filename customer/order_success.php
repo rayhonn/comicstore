@@ -47,11 +47,18 @@ if (!$order) {
 
 // Get order items
 $stmt2 = $pdo->prepare("
-    SELECT oi.*, oi.order_item_product_title AS product_title, p.product_cover_image,
-    pe.ebook_file_path, pe.ebook_download_limit
+    SELECT
+        oi.*,
+        oi.order_item_product_title
+            AS product_title,
+        oi.order_item_product_cover_image
+            AS product_cover_image,
+        pe.ebook_file_path,
+        pe.ebook_download_limit
     FROM order_items oi
-    JOIN products p ON oi.order_item_product_id = p.product_id
-    LEFT JOIN product_ebook pe ON p.product_id = pe.ebook_product_id
+    LEFT JOIN product_ebook pe
+        ON oi.order_item_product_id =
+            pe.ebook_product_id
     WHERE oi.order_item_order_id = ?
 ");
 $stmt2->execute([$order_id]);
