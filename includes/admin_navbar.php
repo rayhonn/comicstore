@@ -44,6 +44,9 @@ $pending_pr_count = $pdo->query("SELECT COUNT(*) FROM purchase_requisitions WHER
                 <a href="users.php" class="px-3 py-2 rounded-lg transition-colors <?= $admin_current === 'users.php' ? 'bg-white/20 text-white font-semibold' : 'text-white/70 hover:text-white hover:bg-white/10' ?>">
                     Users
                 </a>
+                <a href="reports.php" class="px-3 py-2 rounded-lg transition-colors <?= $admin_current === 'reports.php' ? 'bg-white/20 text-white font-semibold' : 'text-white/70 hover:text-white hover:bg-white/10' ?>">
+                    Reports
+                </a>
 
                 <!-- More dropdown -->
                 <div class="relative" id="moreDropdown">
@@ -132,5 +135,5 @@ $pending_pr_count = $pdo->query("SELECT COUNT(*) FROM purchase_requisitions WHER
             document.getElementById('moreMenu').classList.add('hidden');
         }
     });
-</script>
+    </script>
 </nav>
