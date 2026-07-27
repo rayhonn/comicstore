@@ -2,478 +2,1492 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
 require_admin();
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
-// Stats
-$total_orders = $pdo->query("SELECT COUNT(*) FROM orders WHERE order_payment_status = 'confirmed'")->fetchColumn();
-$total_revenue = $pdo->query("SELECT SUM(order_total_amount) FROM orders WHERE order_payment_status = 'confirmed' AND order_status != 'cancelled'")->fetchColumn();
-$total_products = $pdo->query("SELECT COUNT(*) FROM products WHERE product_is_available = 1")->fetchColumn();
-$total_customers = $pdo->query("SELECT COUNT(*) FROM users WHERE user_role = 'customer'")->fetchColumn();
-$low_stock = $pdo->query("SELECT COUNT(*) FROM product_physical WHERE physical_stock_quantity <= physical_low_stock_threshold")->fetchColumn();
-$pending_orders = $pdo->query("SELECT COUNT(*) FROM orders WHERE order_status = 'pending' AND order_payment_status = 'confirmed'")->fetchColumn();
-$pending_returns = $pdo->query("SELECT COUNT(*) FROM return_requests WHERE return_status = 'pending'")->fetchColumn();
-$pending_reviews = $pdo->query("SELECT COUNT(*) FROM product_reviews WHERE review_status = 'pending'")->fetchColumn();
+$total_orders = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM orders
+    WHERE order_payment_status = 'confirmed'
+    AND order_status != 'cancelled'
+")->fetchColumn();
 
-// Revenue this month
-$revenue_month = $pdo->query("SELECT SUM(order_total_amount) FROM orders WHERE order_payment_status = 'confirmed' AND order_status != 'cancelled' AND MONTH(order_created_at) = MONTH(NOW()) AND YEAR(order_created_at) = YEAR(NOW())")->fetchColumn();
+$total_revenue_decimal = (string) (
+    $pdo->query("
+        SELECT COALESCE(SUM(order_total_amount), 0.00)
+        FROM orders
+        WHERE order_payment_status = 'confirmed'
+        AND order_status != 'cancelled'
+    ")->fetchColumn() ?: '0.00'
+);
+$total_revenue_sen = moneyDecimalToSen(
+    $total_revenue_decimal
+);
 
-// Recent orders
+$revenue_month_decimal = (string) (
+    $pdo->query("
+        SELECT COALESCE(SUM(order_total_amount), 0.00)
+        FROM orders
+        WHERE order_payment_status = 'confirmed'
+        AND order_status != 'cancelled'
+        AND MONTH(order_created_at) = MONTH(NOW())
+        AND YEAR(order_created_at) = YEAR(NOW())
+    ")->fetchColumn() ?: '0.00'
+);
+$revenue_month_sen = moneyDecimalToSen(
+    $revenue_month_decimal
+);
+
+$total_products = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM products
+    WHERE product_is_available = 1
+")->fetchColumn();
+
+$total_customers = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM users
+    WHERE user_role = 'customer'
+")->fetchColumn();
+
+$low_stock = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM product_physical
+    WHERE physical_stock_quantity <=
+        physical_low_stock_threshold
+")->fetchColumn();
+
+$pending_orders = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM orders
+    WHERE order_status = 'pending'
+    AND order_payment_status = 'confirmed'
+")->fetchColumn();
+
+$pending_returns = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM return_requests
+    WHERE return_status = 'pending'
+")->fetchColumn();
+
+$pending_reviews = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM product_reviews
+    WHERE review_status = 'pending'
+")->fetchColumn();
+
+$pending_supplier_returns = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM supplier_returns
+    WHERE return_status IN ('pending', 'escalated')
+")->fetchColumn();
+
+$pending_pr = (int) $pdo->query("
+    SELECT COUNT(*)
+    FROM purchase_requisitions
+    WHERE pr_status IN ('pending', 'approved')
+")->fetchColumn();
+
 $recent_orders = $pdo->query("
-    SELECT o.*, u.user_name, u.user_first_name, u.user_last_name
+    SELECT
+        o.order_id,
+        o.order_total_amount,
+        o.order_status,
+        o.order_created_at,
+        u.user_first_name,
+        u.user_last_name
     FROM orders o
-    JOIN users u ON o.order_user_id = u.user_id
+    JOIN users u
+        ON o.order_user_id = u.user_id
     WHERE o.order_payment_status = 'confirmed'
-    ORDER BY o.order_created_at DESC LIMIT 8
+    ORDER BY o.order_created_at DESC
+    LIMIT 6
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Sales by type
-$physical_sales = $pdo->query("SELECT SUM(oi.order_item_price * oi.order_item_quantity) FROM order_items oi JOIN orders o ON oi.order_item_order_id = o.order_id WHERE oi.order_item_type = 'physical' AND o.order_payment_status = 'confirmed'")->fetchColumn();
-$ebook_sales = $pdo->query("SELECT SUM(oi.order_item_price * oi.order_item_quantity) FROM order_items oi JOIN orders o ON oi.order_item_order_id = o.order_id WHERE oi.order_item_type = 'ebook' AND o.order_payment_status = 'confirmed'")->fetchColumn();
-
-// Low stock products
 $low_stock_products = $pdo->query("
-    SELECT p.product_title, p.product_id, pp.physical_stock_quantity, pp.physical_low_stock_threshold
+    SELECT
+        p.product_id,
+        p.product_title,
+        pp.physical_stock_quantity,
+        pp.physical_low_stock_threshold
     FROM product_physical pp
-    JOIN products p ON pp.physical_product_id = p.product_id
-    WHERE pp.physical_stock_quantity <= pp.physical_low_stock_threshold
-    ORDER BY pp.physical_stock_quantity ASC
+    JOIN products p
+        ON pp.physical_product_id = p.product_id
+    WHERE pp.physical_stock_quantity <=
+        pp.physical_low_stock_threshold
+    ORDER BY
+        pp.physical_stock_quantity ASC,
+        p.product_title ASC
     LIMIT 5
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Revenue last 7 days
+$top_products = $pdo->query("
+    SELECT
+        p.product_id,
+        p.product_title,
+        p.product_cover_image,
+        SUM(oi.order_item_quantity) AS total_sold,
+        SUM(
+            oi.order_item_price *
+            oi.order_item_quantity
+        ) AS revenue
+    FROM order_items oi
+    JOIN products p
+        ON oi.order_item_product_id = p.product_id
+    JOIN orders o
+        ON oi.order_item_order_id = o.order_id
+    WHERE o.order_payment_status = 'confirmed'
+    AND o.order_status != 'cancelled'
+    GROUP BY
+        p.product_id,
+        p.product_title,
+        p.product_cover_image
+    ORDER BY total_sold DESC
+    LIMIT 5
+")->fetchAll(PDO::FETCH_ASSOC);
+
 $revenue_7days = [];
 $labels_7days = [];
+
 for ($i = 6; $i >= 0; $i--) {
-    $date = date('Y-m-d', strtotime("-$i days"));
-    $label = date('d M', strtotime("-$i days"));
-    $rev = $pdo->prepare("SELECT COALESCE(SUM(order_total_amount), 0) FROM orders WHERE DATE(order_created_at) = ? AND order_payment_status = 'confirmed' AND order_status != 'cancelled'");
-    $rev->execute([$date]);
-    $revenue_7days[] = round($rev->fetchColumn(), 2);
-    $labels_7days[] = $label;
+    $date = date(
+        'Y-m-d',
+        strtotime("-$i days")
+    );
+
+    $labels_7days[] = date(
+        'd M',
+        strtotime($date)
+    );
+
+    $revenue_statement = $pdo->prepare("
+        SELECT COALESCE(SUM(order_total_amount), 0.00)
+        FROM orders
+        WHERE DATE(order_created_at) = ?
+        AND order_payment_status = 'confirmed'
+        AND order_status != 'cancelled'
+    ");
+    $revenue_statement->execute([$date]);
+
+    $revenue_decimal = (string) (
+        $revenue_statement->fetchColumn() ?: '0.00'
+    );
+
+    $revenue_7days[] = $revenue_decimal;
 }
 
-// Orders by status
 $order_statuses = $pdo->query("
-    SELECT order_status, COUNT(*) as count FROM orders 
+    SELECT
+        order_status,
+        COUNT(*) AS status_count
+    FROM orders
     WHERE order_payment_status = 'confirmed'
     GROUP BY order_status
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// New customers last 6 months
-$new_customers = [];
-$customer_labels = [];
-for ($i = 5; $i >= 0; $i--) {
-    $month = date('Y-m', strtotime("-$i months"));
-    $label = date('M Y', strtotime("-$i months"));
-    $count = $pdo->prepare("SELECT COUNT(*) FROM users WHERE user_role = 'customer' AND DATE_FORMAT(user_created_at, '%Y-%m') = ?");
-    $count->execute([$month]);
-    $new_customers[] = $count->fetchColumn();
-    $customer_labels[] = $label;
+$status_labels = [];
+$status_counts = [];
+$status_chart_colors = [];
+
+$status_color_map = [
+    'pending' => '#f59e0b',
+    'processing' => '#3b82f6',
+    'shipped' => '#8b5cf6',
+    'delivered' => '#10b981',
+    'cancelled' => '#ef4444',
+];
+
+foreach ($order_statuses as $status_row) {
+    $status = (string) $status_row['order_status'];
+
+    $status_labels[] = ucfirst($status);
+    $status_counts[] =
+        (int) $status_row['status_count'];
+    $status_chart_colors[] =
+        $status_color_map[$status] ?? '#94a3b8';
 }
 
-// Top products
-$top_products = $pdo->query("
-    SELECT p.product_title, p.product_cover_image, SUM(oi.order_item_quantity) as total_sold, SUM(oi.order_item_price * oi.order_item_quantity) as revenue
-    FROM order_items oi
-    JOIN products p ON oi.order_item_product_id = p.product_id
-    JOIN orders o ON oi.order_item_order_id = o.order_id
-    WHERE o.order_payment_status = 'confirmed'
-    GROUP BY p.product_id
-    ORDER BY total_sold DESC
-    LIMIT 5
-")->fetchAll(PDO::FETCH_ASSOC);
+$status_badge_classes = [
+    'pending' =>
+        'bg-amber-50 text-amber-700 border-amber-200',
+    'processing' =>
+        'bg-blue-50 text-blue-700 border-blue-200',
+    'shipped' =>
+        'bg-violet-50 text-violet-700 border-violet-200',
+    'delivered' =>
+        'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'cancelled' =>
+        'bg-red-50 text-red-700 border-red-200',
+];
+
+$task_count =
+    $pending_orders +
+    $pending_returns +
+    $pending_reviews +
+    $pending_supplier_returns +
+    $pending_pr;
+
+$admin_name =
+    $_SESSION['user_first_name'] ??
+    $_SESSION['user_name'] ??
+    'Admin';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
     <title>Admin Dashboard - MangaVault</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { opacity: 0; animation: fadeIn 0.4s ease forwards; }
-        @keyframes fadeIn { to { opacity: 1; } }
+        body {
+            opacity: 0;
+            animation: fadeIn 0.3s ease forwards;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+            }
+        }
+
+        .sidebar-scrollbar::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .sidebar-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.16);
+            border-radius: 999px;
+        }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="bg-[#f5f6fa] text-gray-800">
 
-    <?php include '../includes/admin_navbar.php'; ?>
+    <div
+        id="sidebarOverlay"
+        class="fixed inset-0 bg-black/50 z-30 hidden lg:hidden"
+        onclick="closeSidebar()"
+    ></div>
 
-    <div class="max-w-7xl mx-auto px-6 py-8">
+    <aside
+        id="adminSidebar"
+        class="fixed inset-y-0 left-0 z-40 w-64 bg-[#17243d] text-white -translate-x-full lg:translate-x-0 transition-transform duration-300 flex flex-col"
+    >
+        <div
+            class="h-20 px-6 flex items-center border-b border-white/10"
+        >
+            <a
+                href="dashboard.php"
+                class="text-xl font-black tracking-wide"
+            >
+                MANGA<span class="text-red-400">VAULT</span>
+                <span
+                    class="block text-[10px] tracking-[0.24em] text-white/40 font-semibold mt-0.5"
+                >
+                    ADMIN PORTAL
+                </span>
+            </a>
 
-        <!-- Header -->
-        <div class="flex justify-between items-center mb-8">
-            <div>
-                <h1 class="text-2xl font-black text-gray-800">Dashboard</h1>
-                <p class="text-sm text-gray-400 mt-0.5">Welcome back, <?= htmlspecialchars($_SESSION['user_first_name'] ?? $_SESSION['user_name']) ?>! Here's what's happening.</p>
-            </div>
-            <p class="text-sm text-gray-400"><?= date('l, d F Y') ?></p>
+            <button
+                type="button"
+                onclick="closeSidebar()"
+                class="lg:hidden ml-auto text-white/60 hover:text-white"
+                aria-label="Close navigation"
+            >
+                ✕
+            </button>
         </div>
 
-        <!-- Alert Banners -->
-        <?php if ($pending_orders > 0 || $low_stock > 0 || $pending_returns > 0 || $pending_reviews > 0): ?>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-            <?php if ($pending_orders > 0): ?>
-            <a href="orders.php?filter=pending" class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-center gap-3 hover:bg-yellow-100 transition-colors">
-                <span class="text-2xl">📦</span>
-                <div>
-                    <p class="font-bold text-yellow-800 text-sm"><?= $pending_orders ?> Pending Orders</p>
-                    <p class="text-xs text-yellow-600">Need processing</p>
-                </div>
+        <nav
+            class="sidebar-scrollbar flex-1 overflow-y-auto px-4 py-5"
+        >
+            <p
+                class="px-3 mb-2 text-[10px] uppercase tracking-[0.18em] font-bold text-white/30"
+            >
+                Overview
+            </p>
+
+            <a
+                href="dashboard.php"
+                class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/12 text-white font-semibold text-sm"
+            >
+                <span class="w-6 text-center">⌂</span>
+                Dashboard
             </a>
-            <?php endif; ?>
-            <?php if ($low_stock > 0): ?>
-            <a href="products.php" class="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center gap-3 hover:bg-red-100 transition-colors">
-                <span class="text-2xl">⚠️</span>
-                <div>
-                    <p class="font-bold text-red-800 text-sm"><?= $low_stock ?> Low Stock</p>
-                    <p class="text-xs text-red-600">Restock needed</p>
-                </div>
+
+            <a
+                href="reports.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">▥</span>
+                Reports
             </a>
-            <?php endif; ?>
-            <?php if ($pending_returns > 0): ?>
-            <a href="returns.php" class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center gap-3 hover:bg-orange-100 transition-colors">
-                <span class="text-2xl">↩️</span>
-                <div>
-                    <p class="font-bold text-orange-800 text-sm"><?= $pending_returns ?> Return Requests</p>
-                    <p class="text-xs text-orange-600">Awaiting review</p>
-                </div>
-            </a>
-            <?php endif; ?>
-            <?php if ($pending_reviews > 0): ?>
-            <a href="reviews.php" class="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center gap-3 hover:bg-blue-100 transition-colors">
-                <span class="text-2xl">⭐</span>
-                <div>
-                    <p class="font-bold text-blue-800 text-sm"><?= $pending_reviews ?> Pending Reviews</p>
-                    <p class="text-xs text-blue-600">Need approval</p>
-                </div>
-            </a>
-            <?php endif; ?>
-        </div>
-        <?php endif; ?>
 
-        <!-- Stats Cards -->
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-            <div class="bg-white rounded-2xl shadow-sm p-5 col-span-2 md:col-span-1">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Total Revenue</p>
-                <p class="text-2xl font-black text-green-600">RM <?= number_format($total_revenue ?? 0, 0) ?></p>
-                <p class="text-xs text-gray-400 mt-1">This month: RM <?= number_format($revenue_month ?? 0, 0) ?></p>
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm p-5">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Orders</p>
-                <p class="text-2xl font-black text-blue-600"><?= $total_orders ?></p>
-                <p class="text-xs text-yellow-500 mt-1"><?= $pending_orders ?> pending</p>
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm p-5">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Products</p>
-                <p class="text-2xl font-black text-purple-600"><?= $total_products ?></p>
-                <p class="text-xs text-red-500 mt-1"><?= $low_stock ?> low stock</p>
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm p-5">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Customers</p>
-                <p class="text-2xl font-black text-indigo-600"><?= $total_customers ?></p>
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm p-5">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Physical Sales</p>
-                <p class="text-2xl font-black text-gray-800">RM <?= number_format($physical_sales ?? 0, 0) ?></p>
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm p-5">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">E-Book Sales</p>
-                <p class="text-2xl font-black text-gray-800">RM <?= number_format($ebook_sales ?? 0, 0) ?></p>
-            </div>
-        </div>
+            <p
+                class="px-3 mt-6 mb-2 text-[10px] uppercase tracking-[0.18em] font-bold text-white/30"
+            >
+                Commerce
+            </p>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-
-            <!-- Recent Orders -->
-            <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm overflow-hidden">
-                <div class="px-6 py-4 border-b border-gray-50 flex justify-between items-center">
-                    <h3 class="font-bold text-gray-800">Recent Orders</h3>
-                    <a href="orders.php" class="text-xs text-red-600 hover:underline">View All →</a>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead>
-                            <tr class="bg-gray-50">
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Order</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Customer</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Total</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Date</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($recent_orders as $order):
-                                $status_colors = [
-                                    'pending' => 'bg-yellow-100 text-yellow-700',
-                                    'processing' => 'bg-blue-100 text-blue-700',
-                                    'shipped' => 'bg-purple-100 text-purple-700',
-                                    'delivered' => 'bg-green-100 text-green-700',
-                                    'cancelled' => 'bg-red-100 text-red-700',
-                                ];
-                                $sc = $status_colors[$order['order_status']] ?? 'bg-gray-100 text-gray-700';
-                            ?>
-                            <tr class="border-t border-gray-50 hover:bg-gray-50 transition-colors">
-                                <td class="px-4 py-3 text-sm font-semibold text-gray-800">#<?= str_pad($order['order_id'], 4, '0', STR_PAD_LEFT) ?></td>
-                                <td class="px-4 py-3 text-sm text-gray-600"><?= htmlspecialchars($order['user_first_name'] . ' ' . $order['user_last_name']) ?></td>
-                                <td class="px-4 py-3 text-sm font-semibold text-red-600">RM <?= number_format($order['order_total_amount'], 2) ?></td>
-                                <td class="px-4 py-3">
-                                    <span class="<?= $sc ?> text-xs px-2 py-1 rounded-full font-semibold capitalize"><?= $order['order_status'] ?></span>
-                                </td>
-                                <td class="px-4 py-3 text-xs text-gray-400"><?= date('d M Y', strtotime($order['order_created_at'])) ?></td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Right Column -->
-            <div class="space-y-6">
-
-                <!-- Top Products -->
-                <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-                    <div class="px-5 py-4 border-b border-gray-50 flex justify-between items-center">
-                        <h3 class="font-bold text-gray-800 text-sm">Top Products</h3>
-                        <a href="products.php" class="text-xs text-red-600 hover:underline">View All →</a>
-                    </div>
-                    <div class="p-4 space-y-3">
-                        <?php foreach ($top_products as $i => $p): ?>
-                        <div class="flex items-center gap-3">
-                            <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white flex-shrink-0 <?= $i === 0 ? 'bg-yellow-500' : ($i === 1 ? 'bg-gray-400' : ($i === 2 ? 'bg-orange-500' : 'bg-gray-300')) ?>">
-                                <?= $i + 1 ?>
-                            </span>
-                            <?php if ($p['product_cover_image']): ?>
-                            <img src="../assets/images/<?= htmlspecialchars($p['product_cover_image']) ?>" class="w-8 h-10 object-cover rounded flex-shrink-0">
-                            <?php endif; ?>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs font-semibold text-gray-800 truncate"><?= htmlspecialchars($p['product_title']) ?></p>
-                                <p class="text-xs text-gray-400"><?= $p['total_sold'] ?> sold</p>
-                            </div>
-                            <p class="text-xs font-bold text-green-600 flex-shrink-0">RM <?= number_format($p['revenue'], 0) ?></p>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-
-                <!-- Low Stock -->
-                <?php if (count($low_stock_products) > 0): ?>
-                <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-                    <div class="px-5 py-4 border-b border-gray-50">
-                        <h3 class="font-bold text-gray-800 text-sm">⚠️ Low Stock Alert</h3>
-                    </div>
-                    <div class="p-4 space-y-2">
-                        <?php foreach ($low_stock_products as $p): ?>
-                        <div class="flex items-center justify-between">
-                            <p class="text-xs text-gray-700 truncate flex-1 mr-2"><?= htmlspecialchars($p['product_title']) ?></p>
-                            <span class="text-xs font-black text-red-600 flex-shrink-0"><?= $p['physical_stock_quantity'] ?> left</span>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
+            <a
+                href="products.php"
+                class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">▣</span>
+                Products
+                <?php if ($low_stock > 0): ?>
+                <span
+                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center"
+                >
+                    <?= $low_stock ?>
+                </span>
                 <?php endif; ?>
+            </a>
 
+            <a
+                href="orders.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">▤</span>
+                Orders
+                <?php if ($pending_orders > 0): ?>
+                <span
+                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center"
+                >
+                    <?= $pending_orders ?>
+                </span>
+                <?php endif; ?>
+            </a>
+
+            <a
+                href="returns.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">↩</span>
+                Returns
+                <?php if ($pending_returns > 0): ?>
+                <span
+                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center"
+                >
+                    <?= $pending_returns ?>
+                </span>
+                <?php endif; ?>
+            </a>
+
+            <a
+                href="reviews.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">★</span>
+                Reviews
+                <?php if ($pending_reviews > 0): ?>
+                <span
+                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center"
+                >
+                    <?= $pending_reviews ?>
+                </span>
+                <?php endif; ?>
+            </a>
+
+            <a
+                href="users.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">♙</span>
+                Customers
+            </a>
+
+            <p
+                class="px-3 mt-6 mb-2 text-[10px] uppercase tracking-[0.18em] font-bold text-white/30"
+            >
+                Procurement
+            </p>
+
+            <a
+                href="pr.php"
+                class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">▧</span>
+                Requisitions
+                <?php if ($pending_pr > 0): ?>
+                <span
+                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center"
+                >
+                    <?= $pending_pr ?>
+                </span>
+                <?php endif; ?>
+            </a>
+
+            <a
+                href="rfq.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">▨</span>
+                RFQ
+            </a>
+
+            <a
+                href="purchase_orders.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">▦</span>
+                Purchase Orders
+            </a>
+
+            <a
+                href="suppliers.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">▰</span>
+                Suppliers
+            </a>
+
+            <a
+                href="supplier_invoices.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">▩</span>
+                Supplier Invoices
+            </a>
+
+            <a
+                href="supplier_returns.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span class="w-6 text-center">↪</span>
+                Supplier Returns
+                <?php if ($pending_supplier_returns > 0): ?>
+                <span
+                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center"
+                >
+                    <?= $pending_supplier_returns ?>
+                </span>
+                <?php endif; ?>
+            </a>
+
+            <details class="mt-5 group">
+                <summary
+                    class="cursor-pointer list-none flex items-center justify-between px-3 py-2.5 rounded-xl text-white/55 hover:text-white hover:bg-white/10 transition-colors text-sm"
+                >
+                    <span class="flex items-center gap-3">
+                        <span class="w-6 text-center">⚙</span>
+                        Management
+                    </span>
+                    <span
+                        class="text-xs group-open:rotate-180 transition-transform"
+                    >
+                        ▾
+                    </span>
+                </summary>
+
+                <div class="mt-1 ml-9 space-y-1">
+                    <a
+                        href="categories.php"
+                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
+                    >
+                        Categories
+                    </a>
+                    <a
+                        href="genres.php"
+                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
+                    >
+                        Genres
+                    </a>
+                    <a
+                        href="vouchers.php"
+                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
+                    >
+                        Vouchers
+                    </a>
+                    <a
+                        href="tiers.php"
+                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
+                    >
+                        Tier Management
+                    </a>
+                    <a
+                        href="staff.php"
+                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
+                    >
+                        Staff Accounts
+                    </a>
+                    <a
+                        href="faq.php"
+                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
+                    >
+                        FAQ Content
+                    </a>
+                    <a
+                        href="about.php"
+                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
+                    >
+                        About Content
+                    </a>
+                </div>
+            </details>
+        </nav>
+
+        <div class="p-4 border-t border-white/10">
+            <div
+                class="rounded-xl bg-white/7 px-3 py-3 mb-3"
+            >
+                <p
+                    class="text-xs font-semibold text-white truncate"
+                >
+                    <?= htmlspecialchars(
+                        (string) $admin_name,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </p>
+                <p class="text-[10px] text-white/35 mt-0.5">
+                    <?= htmlspecialchars(
+                        ucfirst(
+                            (string) (
+                                $_SESSION['role'] ?? 'admin'
+                            )
+                        ),
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </p>
             </div>
+
+            <a
+                href="../logout.php"
+                class="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+            >
+                Log Out
+            </a>
         </div>
+    </aside>
 
-        <!-- Analytics Charts -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <!-- Revenue Trend (Last 7 days) -->
-            <div class="bg-white rounded-2xl shadow-sm p-6">
-                <h3 class="font-bold text-gray-800 mb-1">Revenue Trend</h3>
-                <p class="text-xs text-gray-400 mb-4">Last 7 days</p>
-                <canvas id="revenueChart" height="120"></canvas>
+    <main class="min-h-screen lg:ml-64">
+        <header
+            class="h-20 px-5 md:px-8 bg-white border-b border-gray-100 flex items-center justify-between sticky top-0 z-20"
+        >
+            <div class="flex items-center gap-3">
+                <button
+                    type="button"
+                    onclick="openSidebar()"
+                    class="lg:hidden w-10 h-10 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50"
+                    aria-label="Open navigation"
+                >
+                    ☰
+                </button>
+
+                <div>
+                    <h1
+                        class="text-xl md:text-2xl font-black text-gray-900"
+                    >
+                        Dashboard
+                    </h1>
+                    <p class="text-xs text-gray-400 mt-0.5">
+                        Business overview and pending work
+                    </p>
+                </div>
             </div>
 
-            <!-- Orders by Status -->
-            <div class="bg-white rounded-2xl shadow-sm p-6">
-                <h3 class="font-bold text-gray-800 mb-1">Orders by Status</h3>
-                <p class="text-xs text-gray-400 mb-4">All time</p>
-                <canvas id="statusChart" height="120"></canvas>
+            <div class="text-right">
+                <p
+                    class="text-xs font-semibold text-gray-600"
+                >
+                    <?= date('l') ?>
+                </p>
+                <p class="text-xs text-gray-400 mt-0.5">
+                    <?= date('d F Y') ?>
+                </p>
             </div>
+        </header>
+
+        <div class="p-5 md:p-8 max-w-[1600px] mx-auto">
+            <section
+                class="bg-gradient-to-r from-[#17243d] to-[#263b61] rounded-3xl px-6 md:px-8 py-7 text-white mb-6 relative overflow-hidden"
+            >
+                <div
+                    class="absolute -right-16 -top-20 w-64 h-64 rounded-full border-[42px] border-white/5"
+                ></div>
+
+                <div
+                    class="relative flex flex-col md:flex-row md:items-center justify-between gap-5"
+                >
+                    <div>
+                        <p
+                            class="text-sm text-white/55 font-medium"
+                        >
+                            Welcome back,
+                        </p>
+                        <h2
+                            class="text-2xl md:text-3xl font-black mt-1"
+                        >
+                            <?= htmlspecialchars(
+                                (string) $admin_name,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>
+                        </h2>
+                        <p
+                            class="text-sm text-white/55 mt-2 max-w-xl"
+                        >
+                            <?= $task_count > 0
+                                ? 'There are ' .
+                                    number_format($task_count) .
+                                    ' pending operational items requiring attention.'
+                                : 'All tracked operational items are currently up to date.' ?>
+                        </p>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                        <a
+                            href="reports.php"
+                            class="bg-white text-[#17243d] hover:bg-gray-100 font-bold text-sm px-4 py-2.5 rounded-xl transition-colors"
+                        >
+                            View Reports
+                        </a>
+                        <a
+                            href="add_product.php"
+                            class="bg-red-500 hover:bg-red-600 text-white font-bold text-sm px-4 py-2.5 rounded-xl transition-colors"
+                        >
+                            Add Product
+                        </a>
+                    </div>
+                </div>
+            </section>
+
+            <section
+                class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6"
+            >
+                <div
+                    class="bg-white rounded-2xl border border-gray-100 p-5"
+                >
+                    <div
+                        class="flex items-start justify-between gap-3"
+                    >
+                        <div>
+                            <p
+                                class="text-xs font-bold uppercase tracking-wide text-gray-400"
+                            >
+                                Total Revenue
+                            </p>
+                            <p
+                                class="text-2xl font-black text-gray-900 mt-2"
+                            >
+                                RM <?= moneyFormatSen(
+                                    $total_revenue_sen
+                                ) ?>
+                            </p>
+                            <p class="text-xs text-gray-400 mt-1">
+                                This month:
+                                RM <?= moneyFormatSen(
+                                    $revenue_month_sen
+                                ) ?>
+                            </p>
+                        </div>
+                        <div
+                            class="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl"
+                        >
+                            RM
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    class="bg-white rounded-2xl border border-gray-100 p-5"
+                >
+                    <div
+                        class="flex items-start justify-between gap-3"
+                    >
+                        <div>
+                            <p
+                                class="text-xs font-bold uppercase tracking-wide text-gray-400"
+                            >
+                                Confirmed Orders
+                            </p>
+                            <p
+                                class="text-2xl font-black text-gray-900 mt-2"
+                            >
+                                <?= number_format(
+                                    $total_orders
+                                ) ?>
+                            </p>
+                            <p
+                                class="text-xs <?= $pending_orders > 0
+                                    ? 'text-amber-600'
+                                    : 'text-gray-400' ?> mt-1"
+                            >
+                                <?= number_format(
+                                    $pending_orders
+                                ) ?>
+                                pending processing
+                            </p>
+                        </div>
+                        <div
+                            class="w-11 h-11 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl"
+                        >
+                            ▤
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    class="bg-white rounded-2xl border border-gray-100 p-5"
+                >
+                    <div
+                        class="flex items-start justify-between gap-3"
+                    >
+                        <div>
+                            <p
+                                class="text-xs font-bold uppercase tracking-wide text-gray-400"
+                            >
+                                Active Products
+                            </p>
+                            <p
+                                class="text-2xl font-black text-gray-900 mt-2"
+                            >
+                                <?= number_format(
+                                    $total_products
+                                ) ?>
+                            </p>
+                            <p
+                                class="text-xs <?= $low_stock > 0
+                                    ? 'text-red-600'
+                                    : 'text-gray-400' ?> mt-1"
+                            >
+                                <?= number_format(
+                                    $low_stock
+                                ) ?>
+                                low-stock products
+                            </p>
+                        </div>
+                        <div
+                            class="w-11 h-11 rounded-2xl bg-violet-50 text-violet-600 flex items-center justify-center text-xl"
+                        >
+                            ▣
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    class="bg-white rounded-2xl border border-gray-100 p-5"
+                >
+                    <div
+                        class="flex items-start justify-between gap-3"
+                    >
+                        <div>
+                            <p
+                                class="text-xs font-bold uppercase tracking-wide text-gray-400"
+                            >
+                                Customers
+                            </p>
+                            <p
+                                class="text-2xl font-black text-gray-900 mt-2"
+                            >
+                                <?= number_format(
+                                    $total_customers
+                                ) ?>
+                            </p>
+                            <p class="text-xs text-gray-400 mt-1">
+                                Registered customer accounts
+                            </p>
+                        </div>
+                        <div
+                            class="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl"
+                        >
+                            ♙
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section
+                class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6"
+            >
+                <div
+                    class="xl:col-span-2 bg-white rounded-2xl border border-gray-100 p-5 md:p-6"
+                >
+                    <div
+                        class="flex items-center justify-between gap-4 mb-5"
+                    >
+                        <div>
+                            <h3
+                                class="font-black text-gray-900"
+                            >
+                                Revenue Trend
+                            </h3>
+                            <p
+                                class="text-xs text-gray-400 mt-1"
+                            >
+                                Confirmed non-cancelled sales,
+                                last 7 days
+                            </p>
+                        </div>
+                        <a
+                            href="reports.php?report=sales"
+                            class="text-xs font-bold text-red-600 hover:text-red-700"
+                        >
+                            Full report →
+                        </a>
+                    </div>
+
+                    <div class="h-72">
+                        <canvas id="revenueChart"></canvas>
+                    </div>
+                </div>
+
+                <div
+                    class="bg-white rounded-2xl border border-gray-100 p-5 md:p-6"
+                >
+                    <div class="mb-5">
+                        <h3
+                            class="font-black text-gray-900"
+                        >
+                            Order Status
+                        </h3>
+                        <p class="text-xs text-gray-400 mt-1">
+                            Confirmed orders by current status
+                        </p>
+                    </div>
+
+                    <div class="h-72">
+                        <canvas id="statusChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section
+                class="grid grid-cols-1 xl:grid-cols-3 gap-6"
+            >
+                <div
+                    class="xl:col-span-2 bg-white rounded-2xl border border-gray-100 overflow-hidden"
+                >
+                    <div
+                        class="px-5 md:px-6 py-5 border-b border-gray-100 flex items-center justify-between gap-4"
+                    >
+                        <div>
+                            <h3
+                                class="font-black text-gray-900"
+                            >
+                                Recent Orders
+                            </h3>
+                            <p
+                                class="text-xs text-gray-400 mt-1"
+                            >
+                                Latest confirmed customer orders
+                            </p>
+                        </div>
+                        <a
+                            href="orders.php"
+                            class="text-xs font-bold text-red-600 hover:text-red-700"
+                        >
+                            View all →
+                        </a>
+                    </div>
+
+                    <?php if (!$recent_orders): ?>
+                    <div class="py-14 text-center">
+                        <p class="text-sm text-gray-400">
+                            No confirmed orders yet.
+                        </p>
+                    </div>
+                    <?php else: ?>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="bg-gray-50/70">
+                                    <th
+                                        class="px-5 md:px-6 py-3 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400"
+                                    >
+                                        Order
+                                    </th>
+                                    <th
+                                        class="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400"
+                                    >
+                                        Customer
+                                    </th>
+                                    <th
+                                        class="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400"
+                                    >
+                                        Amount
+                                    </th>
+                                    <th
+                                        class="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400"
+                                    >
+                                        Status
+                                    </th>
+                                    <th
+                                        class="px-5 md:px-6 py-3 text-right text-[10px] font-bold uppercase tracking-wide text-gray-400"
+                                    >
+                                        Date
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach (
+                                    $recent_orders as $order
+                                ):
+                                    $order_status =
+                                        (string) $order[
+                                            'order_status'
+                                        ];
+                                    $badge_class =
+                                        $status_badge_classes[
+                                            $order_status
+                                        ] ??
+                                        'bg-gray-50 text-gray-600 border-gray-200';
+                                    $order_amount_sen =
+                                        moneyDecimalToSen(
+                                            (string) $order[
+                                                'order_total_amount'
+                                            ]
+                                        );
+                                ?>
+                                <tr
+                                    class="border-t border-gray-100 hover:bg-gray-50/60 transition-colors"
+                                >
+                                    <td
+                                        class="px-5 md:px-6 py-4"
+                                    >
+                                        <a
+                                            href="orders.php"
+                                            class="text-sm font-black text-gray-900 hover:text-red-600"
+                                        >
+                                            #<?= str_pad(
+                                                (string) (
+                                                    (int) $order[
+                                                        'order_id'
+                                                    ]
+                                                ),
+                                                4,
+                                                '0',
+                                                STR_PAD_LEFT
+                                            ) ?>
+                                        </a>
+                                    </td>
+                                    <td
+                                        class="px-4 py-4 text-sm text-gray-600 whitespace-nowrap"
+                                    >
+                                        <?= htmlspecialchars(
+                                            trim(
+                                                (string) $order[
+                                                    'user_first_name'
+                                                ] .
+                                                ' ' .
+                                                (string) $order[
+                                                    'user_last_name'
+                                                ]
+                                            ),
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </td>
+                                    <td
+                                        class="px-4 py-4 text-sm font-bold text-gray-800 whitespace-nowrap"
+                                    >
+                                        RM <?= moneyFormatSen(
+                                            $order_amount_sen
+                                        ) ?>
+                                    </td>
+                                    <td class="px-4 py-4">
+                                        <span
+                                            class="<?= $badge_class ?> inline-flex border px-2.5 py-1 rounded-full text-[10px] font-bold capitalize"
+                                        >
+                                            <?= htmlspecialchars(
+                                                $order_status,
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>
+                                        </span>
+                                    </td>
+                                    <td
+                                        class="px-5 md:px-6 py-4 text-right text-xs text-gray-400 whitespace-nowrap"
+                                    >
+                                        <?= date(
+                                            'd M Y',
+                                            strtotime(
+                                                $order[
+                                                    'order_created_at'
+                                                ]
+                                            )
+                                        ) ?>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
+                <div class="space-y-6">
+                    <div
+                        class="bg-white rounded-2xl border border-gray-100 overflow-hidden"
+                    >
+                        <div
+                            class="px-5 py-5 border-b border-gray-100 flex items-center justify-between"
+                        >
+                            <div>
+                                <h3
+                                    class="font-black text-gray-900"
+                                >
+                                    Pending Work
+                                </h3>
+                                <p
+                                    class="text-xs text-gray-400 mt-1"
+                                >
+                                    Items requiring attention
+                                </p>
+                            </div>
+                            <span
+                                class="min-w-8 h-8 px-2 rounded-full bg-red-50 text-red-600 text-xs font-black flex items-center justify-center"
+                            >
+                                <?= number_format(
+                                    $task_count
+                                ) ?>
+                            </span>
+                        </div>
+
+                        <div class="p-3">
+                            <?php
+                            $pending_items = [
+                                [
+                                    'label' =>
+                                        'Orders to process',
+                                    'count' =>
+                                        $pending_orders,
+                                    'href' =>
+                                        'orders.php?filter=pending',
+                                    'icon' => '▤',
+                                ],
+                                [
+                                    'label' =>
+                                        'Customer returns',
+                                    'count' =>
+                                        $pending_returns,
+                                    'href' => 'returns.php',
+                                    'icon' => '↩',
+                                ],
+                                [
+                                    'label' =>
+                                        'Reviews to moderate',
+                                    'count' =>
+                                        $pending_reviews,
+                                    'href' => 'reviews.php',
+                                    'icon' => '★',
+                                ],
+                                [
+                                    'label' =>
+                                        'Purchase requisitions',
+                                    'count' => $pending_pr,
+                                    'href' => 'pr.php',
+                                    'icon' => '▧',
+                                ],
+                                [
+                                    'label' =>
+                                        'Supplier returns',
+                                    'count' =>
+                                        $pending_supplier_returns,
+                                    'href' =>
+                                        'supplier_returns.php',
+                                    'icon' => '↪',
+                                ],
+                            ];
+                            ?>
+
+                            <?php foreach (
+                                $pending_items as $item
+                            ): ?>
+                            <a
+                                href="<?= htmlspecialchars(
+                                    $item['href'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>"
+                                class="flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition-colors"
+                            >
+                                <span
+                                    class="w-9 h-9 rounded-xl bg-gray-100 text-gray-600 flex items-center justify-center"
+                                >
+                                    <?= $item['icon'] ?>
+                                </span>
+                                <span
+                                    class="flex-1 text-sm font-semibold text-gray-700"
+                                >
+                                    <?= htmlspecialchars(
+                                        $item['label'],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </span>
+                                <span
+                                    class="<?= $item['count'] > 0
+                                        ? 'bg-red-50 text-red-600'
+                                        : 'bg-emerald-50 text-emerald-600' ?> min-w-7 h-7 px-2 rounded-full text-xs font-black flex items-center justify-center"
+                                >
+                                    <?= (int) $item['count'] ?>
+                                </span>
+                            </a>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <div
+                        class="bg-white rounded-2xl border border-gray-100 overflow-hidden"
+                    >
+                        <div
+                            class="px-5 py-5 border-b border-gray-100 flex items-center justify-between"
+                        >
+                            <div>
+                                <h3
+                                    class="font-black text-gray-900"
+                                >
+                                    Top Products
+                                </h3>
+                                <p
+                                    class="text-xs text-gray-400 mt-1"
+                                >
+                                    Highest units sold
+                                </p>
+                            </div>
+                            <a
+                                href="reports.php?report=product_sales"
+                                class="text-xs font-bold text-red-600"
+                            >
+                                Report →
+                            </a>
+                        </div>
+
+                        <div class="p-4 space-y-3">
+                            <?php if (!$top_products): ?>
+                            <p
+                                class="text-sm text-gray-400 text-center py-5"
+                            >
+                                No sales data yet.
+                            </p>
+                            <?php endif; ?>
+
+                            <?php foreach (
+                                $top_products as $index => $product
+                            ):
+                                $product_revenue_sen =
+                                    moneyDecimalToSen(
+                                        (string) (
+                                            $product['revenue']
+                                            ?? '0.00'
+                                        )
+                                    );
+                            ?>
+                            <div
+                                class="flex items-center gap-3"
+                            >
+                                <span
+                                    class="w-7 h-7 rounded-full bg-[#17243d] text-white text-xs font-black flex items-center justify-center flex-shrink-0"
+                                >
+                                    <?= $index + 1 ?>
+                                </span>
+
+                                <?php if (
+                                    !empty(
+                                        $product[
+                                            'product_cover_image'
+                                        ]
+                                    )
+                                ): ?>
+                                <img
+                                    src="../assets/images/<?= htmlspecialchars(
+                                        basename(
+                                            (string) $product[
+                                                'product_cover_image'
+                                            ]
+                                        ),
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>"
+                                    alt=""
+                                    class="w-8 h-11 object-cover rounded-lg bg-gray-100 flex-shrink-0"
+                                >
+                                <?php else: ?>
+                                <div
+                                    class="w-8 h-11 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300 text-xs flex-shrink-0"
+                                >
+                                    ▣
+                                </div>
+                                <?php endif; ?>
+
+                                <div class="flex-1 min-w-0">
+                                    <p
+                                        class="text-xs font-bold text-gray-800 truncate"
+                                    >
+                                        <?= htmlspecialchars(
+                                            (string) $product[
+                                                'product_title'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </p>
+                                    <p
+                                        class="text-[11px] text-gray-400 mt-0.5"
+                                    >
+                                        <?= number_format(
+                                            (int) $product[
+                                                'total_sold'
+                                            ]
+                                        ) ?>
+                                        sold
+                                    </p>
+                                </div>
+
+                                <p
+                                    class="text-xs font-black text-emerald-600 whitespace-nowrap"
+                                >
+                                    RM <?= moneyFormatSen(
+                                        $product_revenue_sen
+                                    ) ?>
+                                </p>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <?php if ($low_stock_products): ?>
+                    <div
+                        class="bg-white rounded-2xl border border-red-100 overflow-hidden"
+                    >
+                        <div
+                            class="px-5 py-5 border-b border-red-100 bg-red-50/50 flex items-center justify-between"
+                        >
+                            <div>
+                                <h3
+                                    class="font-black text-red-800"
+                                >
+                                    Low Stock
+                                </h3>
+                                <p
+                                    class="text-xs text-red-500 mt-1"
+                                >
+                                    Products to restock
+                                </p>
+                            </div>
+                            <a
+                                href="products.php?filter=low_stock"
+                                class="text-xs font-bold text-red-600"
+                            >
+                                View →
+                            </a>
+                        </div>
+
+                        <div class="p-4 space-y-3">
+                            <?php foreach (
+                                $low_stock_products as $product
+                            ): ?>
+                            <div
+                                class="flex items-center justify-between gap-3"
+                            >
+                                <p
+                                    class="text-xs font-semibold text-gray-700 truncate"
+                                >
+                                    <?= htmlspecialchars(
+                                        (string) $product[
+                                            'product_title'
+                                        ],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </p>
+                                <span
+                                    class="text-xs font-black text-red-600 whitespace-nowrap"
+                                >
+                                    <?= (int) $product[
+                                        'physical_stock_quantity'
+                                    ] ?>
+                                    left
+                                </span>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </section>
         </div>
+    </main>
 
-        <!-- Sales Split + New Customers -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+    <script
+        src="https://cdn.jsdelivr.net/npm/chart.js"
+    ></script>
+    <script>
+    function openSidebar() {
+        document
+            .getElementById('adminSidebar')
+            .classList
+            .remove('-translate-x-full');
 
-            <!-- Physical vs Ebook -->
-            <div class="bg-white rounded-2xl shadow-sm p-6">
-                <h3 class="font-bold text-gray-800 mb-1">Sales Split</h3>
-                <p class="text-xs text-gray-400 mb-4">Physical vs E-Book</p>
-                <canvas id="splitChart" height="180"></canvas>
-            </div>
-
-            <!-- New customers per month -->
-            <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm p-6">
-                <h3 class="font-bold text-gray-800 mb-1">New Customers</h3>
-                <p class="text-xs text-gray-400 mb-4">Last 6 months</p>
-                <canvas id="customersChart" height="120"></canvas>
-            </div>
-        </div>
-        
-        <!-- Quick Actions -->
-        <div class="bg-white rounded-2xl shadow-sm p-6">
-            <h3 class="font-bold text-gray-800 mb-4">Quick Actions</h3>
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                <a href="add_product.php" class="flex flex-col items-center gap-2 p-4 bg-red-50 hover:bg-red-100 rounded-xl transition-colors text-center">
-                    <span class="text-2xl">➕</span>
-                    <span class="text-xs font-semibold text-red-700">Add Product</span>
-                </a>
-                <a href="orders.php" class="flex flex-col items-center gap-2 p-4 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors text-center">
-                    <span class="text-2xl">📦</span>
-                    <span class="text-xs font-semibold text-blue-700">Manage Orders</span>
-                </a>
-                <a href="returns.php" class="flex flex-col items-center gap-2 p-4 bg-orange-50 hover:bg-orange-100 rounded-xl transition-colors text-center">
-                    <span class="text-2xl">↩️</span>
-                    <span class="text-xs font-semibold text-orange-700">Returns</span>
-                </a>
-                <a href="reviews.php" class="flex flex-col items-center gap-2 p-4 bg-yellow-50 hover:bg-yellow-100 rounded-xl transition-colors text-center">
-                    <span class="text-2xl">⭐</span>
-                    <span class="text-xs font-semibold text-yellow-700">Reviews</span>
-                </a>
-                <a href="users.php" class="flex flex-col items-center gap-2 p-4 bg-purple-50 hover:bg-purple-100 rounded-xl transition-colors text-center">
-                    <span class="text-2xl">👥</span>
-                    <span class="text-xs font-semibold text-purple-700">Users</span>
-                </a>
-                <a href="faq.php" class="flex flex-col items-center gap-2 p-4 bg-green-50 hover:bg-green-100 rounded-xl transition-colors text-center">
-                    <span class="text-2xl">❓</span>
-                    <span class="text-xs font-semibold text-green-700">FAQ</span>
-                </a>
-            </div>
-        </div>
-
-    </div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-const chartDefaults = {
-    plugins: { legend: { display: false } },
-    scales: {
-        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
-        y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } }
+        document
+            .getElementById('sidebarOverlay')
+            .classList
+            .remove('hidden');
     }
-};
 
-// Revenue Trend
-new Chart(document.getElementById('revenueChart'), {
-    type: 'line',
-    data: {
-        labels: <?= json_encode($labels_7days) ?>,
-        datasets: [{
-            data: <?= json_encode($revenue_7days) ?>,
-            borderColor: '#dc2626',
-            backgroundColor: 'rgba(220,38,38,0.08)',
-            fill: true,
-            tension: 0.4,
-            pointBackgroundColor: '#dc2626',
-            pointRadius: 4,
-            borderWidth: 2,
-        }]
-    },
-    options: {
-        ...chartDefaults,
-        plugins: { legend: { display: false } },
-        scales: {
-            x: { grid: { display: false }, ticks: { font: { size: 11 } } },
-            y: {
-                grid: { color: '#f3f4f6' },
-                ticks: {
-                    font: { size: 11 },
-                    callback: v => 'RM ' + v.toLocaleString()
-                }
-            }
-        }
+    function closeSidebar() {
+        document
+            .getElementById('adminSidebar')
+            .classList
+            .add('-translate-x-full');
+
+        document
+            .getElementById('sidebarOverlay')
+            .classList
+            .add('hidden');
     }
-});
 
-// Orders by Status (doughnut)
-<?php
-$status_labels = array_column($order_statuses, 'order_status');
-$status_counts = array_column($order_statuses, 'count');
-$status_colors = [];
-foreach ($status_labels as $s) {
-    $status_colors[] = match($s) {
-        'pending' => '#f59e0b',
-        'processing' => '#3b82f6',
-        'shipped' => '#8b5cf6',
-        'delivered' => '#10b981',
-        'cancelled' => '#ef4444',
-        default => '#9ca3af'
+    const chartFont = {
+        family:
+            'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        size: 11,
     };
-}
-?>
-new Chart(document.getElementById('statusChart'), {
-    type: 'doughnut',
-    data: {
-        labels: <?= json_encode(array_map('ucfirst', $status_labels)) ?>,
-        datasets: [{
-            data: <?= json_encode($status_counts) ?>,
-            backgroundColor: <?= json_encode($status_colors) ?>,
-            borderWidth: 0,
-        }]
-    },
-    options: {
-        plugins: {
-            legend: {
-                display: true,
-                position: 'right',
-                labels: { font: { size: 11 }, boxWidth: 12, padding: 10 }
-            }
-        },
-        cutout: '65%',
-    }
-});
 
-// Sales Split (doughnut)
-new Chart(document.getElementById('splitChart'), {
-    type: 'doughnut',
-    data: {
-        labels: ['Physical', 'E-Book'],
-        datasets: [{
-            data: [<?= round($physical_sales ?? 0, 2) ?>, <?= round($ebook_sales ?? 0, 2) ?>],
-            backgroundColor: ['#1e2d4a', '#dc2626'],
-            borderWidth: 0,
-        }]
-    },
-    options: {
-        plugins: {
-            legend: {
-                display: true,
-                position: 'bottom',
-                labels: { font: { size: 11 }, boxWidth: 12 }
-            }
-        },
-        cutout: '60%',
-    }
-});
-
-// New Customers
-new Chart(document.getElementById('customersChart'), {
-    type: 'bar',
-    data: {
-        labels: <?= json_encode($customer_labels) ?>,
-        datasets: [{
-            data: <?= json_encode($new_customers) ?>,
-            backgroundColor: 'rgba(30,45,74,0.8)',
-            borderRadius: 6,
-            borderSkipped: false,
-        }]
-    },
-    options: {
-        ...chartDefaults,
-        plugins: { legend: { display: false } },
-        scales: {
-            x: { grid: { display: false }, ticks: { font: { size: 11 } } },
-            y: {
-                grid: { color: '#f3f4f6' },
-                ticks: { font: { size: 11 }, stepSize: 1 },
-                beginAtZero: true
-            }
+    new Chart(
+        document.getElementById('revenueChart'),
+        {
+            type: 'line',
+            data: {
+                labels: <?= json_encode(
+                    $labels_7days,
+                    JSON_HEX_TAG |
+                    JSON_HEX_AMP |
+                    JSON_HEX_APOS |
+                    JSON_HEX_QUOT
+                ) ?>,
+                datasets: [{
+                    data: <?= json_encode(
+                        $revenue_7days,
+                        JSON_HEX_TAG |
+                        JSON_HEX_AMP |
+                        JSON_HEX_APOS |
+                        JSON_HEX_QUOT
+                    ) ?>,
+                    borderColor: '#ef4444',
+                    backgroundColor:
+                        'rgba(239, 68, 68, 0.08)',
+                    fill: true,
+                    tension: 0.38,
+                    borderWidth: 2.5,
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    pointBackgroundColor: '#ef4444',
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index',
+                },
+                plugins: {
+                    legend: {
+                        display: false,
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: context =>
+                                'RM ' +
+                                Number(
+                                    context.raw
+                                ).toLocaleString(
+                                    'en-MY',
+                                    {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                    }
+                                ),
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            display: false,
+                        },
+                        ticks: {
+                            font: chartFont,
+                            color: '#94a3b8',
+                        },
+                        border: {
+                            display: false,
+                        },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: '#f1f5f9',
+                        },
+                        ticks: {
+                            font: chartFont,
+                            color: '#94a3b8',
+                            callback: value =>
+                                'RM ' +
+                                Number(value).toLocaleString(),
+                        },
+                        border: {
+                            display: false,
+                        },
+                    },
+                },
+            },
         }
-    }
-});
-</script>
+    );
+
+    new Chart(
+        document.getElementById('statusChart'),
+        {
+            type: 'doughnut',
+            data: {
+                labels: <?= json_encode(
+                    $status_labels,
+                    JSON_HEX_TAG |
+                    JSON_HEX_AMP |
+                    JSON_HEX_APOS |
+                    JSON_HEX_QUOT
+                ) ?>,
+                datasets: [{
+                    data: <?= json_encode(
+                        $status_counts
+                    ) ?>,
+                    backgroundColor: <?= json_encode(
+                        $status_chart_colors
+                    ) ?>,
+                    borderWidth: 0,
+                    hoverOffset: 4,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '67%',
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'circle',
+                            boxWidth: 7,
+                            boxHeight: 7,
+                            padding: 14,
+                            font: chartFont,
+                            color: '#64748b',
+                        },
+                    },
+                },
+            },
+        }
+    );
+    </script>
 </body>
 </html>
