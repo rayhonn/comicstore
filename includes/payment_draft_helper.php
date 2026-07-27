@@ -109,14 +109,17 @@ function loadPaymentDraft(
             pdi.payment_draft_item_cart_item_id,
             pdi.payment_draft_item_product_id,
             pdi.payment_draft_item_product_title,
+            pdi.payment_draft_item_product_series,
+            pdi.payment_draft_item_product_volume_number,
+            pdi.payment_draft_item_product_author,
+            pdi.payment_draft_item_product_publisher,
+            pdi.payment_draft_item_product_isbn,
+            pdi.payment_draft_item_product_description,
+            pdi.payment_draft_item_product_cover_image,
             pdi.payment_draft_item_quantity,
             pdi.payment_draft_item_unit_price,
-            pdi.payment_draft_item_type,
-            p.product_cover_image
+            pdi.payment_draft_item_type
         FROM payment_draft_items pdi
-        LEFT JOIN products p
-            ON p.product_id =
-                pdi.payment_draft_item_product_id
         WHERE pdi.payment_draft_item_draft_id = ?
         ORDER BY pdi.payment_draft_item_id
     ");
@@ -146,6 +149,45 @@ function loadPaymentDraft(
                     'payment_draft_item_product_title'
                 ],
 
+            'product_series' =>
+                $item[
+                    'payment_draft_item_product_series'
+                ],
+
+            'product_volume_number' =>
+                $item[
+                    'payment_draft_item_product_volume_number'
+                ] === null
+                    ? null
+                    : (int) $item[
+                        'payment_draft_item_product_volume_number'
+                    ],
+
+            'product_author' =>
+                $item[
+                    'payment_draft_item_product_author'
+                ],
+
+            'product_publisher' =>
+                $item[
+                    'payment_draft_item_product_publisher'
+                ],
+
+            'product_isbn' =>
+                $item[
+                    'payment_draft_item_product_isbn'
+                ],
+
+            'product_description' =>
+                $item[
+                    'payment_draft_item_product_description'
+                ],
+
+            'product_cover_image' =>
+                $item[
+                    'payment_draft_item_product_cover_image'
+                ],
+
             'cart_item_quantity' =>
                 (int) $item[
                     'payment_draft_item_quantity'
@@ -160,9 +202,6 @@ function loadPaymentDraft(
                 $item[
                     'payment_draft_item_type'
                 ],
-
-            'product_cover_image' =>
-                $item['product_cover_image'],
         ];
     }
 
@@ -1006,17 +1045,43 @@ function createPaymentDraft(
             );
         }
 
+        $productSnapshotStatement = $pdo->prepare("
+            SELECT
+                product_title,
+                product_series,
+                product_volume_number,
+                product_author,
+                product_publisher,
+                product_isbn,
+                product_description,
+                product_cover_image
+            FROM products
+            WHERE product_id = ?
+            AND product_type = ?
+            LIMIT 1
+        ");
+
         $insertItem = $pdo->prepare("
             INSERT INTO payment_draft_items (
                 payment_draft_item_draft_id,
                 payment_draft_item_cart_item_id,
                 payment_draft_item_product_id,
                 payment_draft_item_product_title,
+                payment_draft_item_product_series,
+                payment_draft_item_product_volume_number,
+                payment_draft_item_product_author,
+                payment_draft_item_product_publisher,
+                payment_draft_item_product_isbn,
+                payment_draft_item_product_description,
+                payment_draft_item_product_cover_image,
                 payment_draft_item_quantity,
                 payment_draft_item_unit_price,
                 payment_draft_item_type
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?
+            )
         ");
 
         foreach ($items as $item) {
@@ -1038,14 +1103,6 @@ function createPaymentDraft(
                 ] ?? 0
             );
 
-            $title = trim(
-                (string) (
-                    $item[
-                        'product_title'
-                    ] ?? ''
-                )
-            );
-
             $unitPrice = round(
                 (float) (
                     $item[
@@ -1065,7 +1122,6 @@ function createPaymentDraft(
                 $cartItemId < 1 ||
                 $productId < 1 ||
                 $quantity < 1 ||
-                $title === '' ||
                 $unitPrice < 0 ||
                 !in_array(
                     $type,
@@ -1081,11 +1137,62 @@ function createPaymentDraft(
                 );
             }
 
+            $productSnapshotStatement->execute([
+                $productId,
+                $type,
+            ]);
+
+            $productSnapshot =
+                $productSnapshotStatement->fetch(
+                    PDO::FETCH_ASSOC
+                );
+
+            if (!$productSnapshot) {
+                throw new PaymentDraftException(
+                    'One or more products are no longer available.'
+                );
+            }
+
+            $productTitle = trim(
+                (string) (
+                    $productSnapshot[
+                        'product_title'
+                    ] ?? ''
+                )
+            );
+
+            if ($productTitle === '') {
+                throw new RuntimeException(
+                    'The payment draft contains an invalid product snapshot.'
+                );
+            }
+
             $insertItem->execute([
                 $draftId,
                 $cartItemId,
                 $productId,
-                $title,
+                $productTitle,
+                $productSnapshot[
+                    'product_series'
+                ],
+                $productSnapshot[
+                    'product_volume_number'
+                ],
+                $productSnapshot[
+                    'product_author'
+                ],
+                $productSnapshot[
+                    'product_publisher'
+                ],
+                $productSnapshot[
+                    'product_isbn'
+                ],
+                $productSnapshot[
+                    'product_description'
+                ],
+                $productSnapshot[
+                    'product_cover_image'
+                ],
                 $quantity,
                 $unitPrice,
                 $type,

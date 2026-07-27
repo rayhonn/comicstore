@@ -528,6 +528,13 @@ function finalizePaidPaymentDraft(
                 payment_draft_item_cart_item_id,
                 payment_draft_item_product_id,
                 payment_draft_item_product_title,
+                payment_draft_item_product_series,
+                payment_draft_item_product_volume_number,
+                payment_draft_item_product_author,
+                payment_draft_item_product_publisher,
+                payment_draft_item_product_isbn,
+                payment_draft_item_product_description,
+                payment_draft_item_product_cover_image,
                 payment_draft_item_quantity,
                 payment_draft_item_unit_price,
                 payment_draft_item_type
@@ -647,7 +654,6 @@ function finalizePaidPaymentDraft(
             }
         }
 
-
         $confirmToken = bin2hex(
             random_bytes(32)
         );
@@ -742,11 +748,21 @@ function finalizePaidPaymentDraft(
                 order_item_order_id,
                 order_item_product_id,
                 order_item_product_title,
+                order_item_product_series,
+                order_item_product_volume_number,
+                order_item_product_author,
+                order_item_product_publisher,
+                order_item_product_isbn,
+                order_item_product_description,
+                order_item_product_cover_image,
                 order_item_quantity,
                 order_item_price,
                 order_item_type
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?
+            )
         ");
 
         $reduceStock = $pdo->prepare("
@@ -776,9 +792,18 @@ function finalizePaidPaymentDraft(
                 'payment_draft_item_type'
             ];
 
+            $productTitle = trim(
+                (string) (
+                    $item[
+                        'payment_draft_item_product_title'
+                    ] ?? ''
+                )
+            );
+
             if (
                 $productId < 1 ||
                 $quantity < 1 ||
+                $productTitle === '' ||
                 !in_array(
                     $itemType,
                     [
@@ -796,8 +821,27 @@ function finalizePaidPaymentDraft(
             $itemInsert->execute([
                 $orderId,
                 $productId,
+                $productTitle,
                 $item[
-                    'payment_draft_item_product_title'
+                    'payment_draft_item_product_series'
+                ],
+                $item[
+                    'payment_draft_item_product_volume_number'
+                ],
+                $item[
+                    'payment_draft_item_product_author'
+                ],
+                $item[
+                    'payment_draft_item_product_publisher'
+                ],
+                $item[
+                    'payment_draft_item_product_isbn'
+                ],
+                $item[
+                    'payment_draft_item_product_description'
+                ],
+                $item[
+                    'payment_draft_item_product_cover_image'
                 ],
                 $quantity,
                 $item[
