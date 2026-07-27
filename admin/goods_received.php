@@ -4,6 +4,7 @@ require_admin();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/money_helper.php';
 
 $po_id = filter_var(
     $_GET['po_id'] ?? null,
@@ -490,11 +491,17 @@ if (
             ");
             $payable_total_stmt->execute([$po_id]);
 
-            $payable_total =
-                (float) (
-                    $payable_total_stmt->fetchColumn()
-                    ?: 0
+            $payable_total_sen =
+                moneyDecimalToSen(
+                    (string) (
+                        $payable_total_stmt->fetchColumn()
+                        ?: '0.00'
+                    )
                 );
+
+            $payable_total = moneySenToDecimal(
+                $payable_total_sen
+            );
 
             $complete_po = $pdo->prepare("
                 UPDATE purchase_orders
