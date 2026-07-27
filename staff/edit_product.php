@@ -50,8 +50,31 @@ $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
+        $existing_type = (string) (
+            $product['product_type'] ?? ''
+        );
+
+        if (
+            !in_array(
+                $existing_type,
+                [
+                    'physical',
+                    'ebook',
+                ],
+                true
+            )
+        ) {
+            throw new ProductInputValidationException(
+                'Stored product type is invalid.'
+            );
+        }
+
+        $validation_input = $_POST;
+        $validation_input['product_type'] =
+            $existing_type;
+
         $validated = validateProductFormInput(
-            $_POST,
+            $validation_input,
             $categories,
             $genres
         );
@@ -521,15 +544,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Product Type & Details
                         </h3>
 
-                        <div class="flex gap-2 mb-6 bg-gray-50 p-1 rounded-xl w-fit">
-                            <button type="button" id="tab-physical" onclick="switchType('physical')"
-                                    class="tab-btn px-5 py-2 rounded-lg text-sm font-semibold <?= $product['product_type'] === 'physical' ? 'active' : 'text-gray-500' ?>">
-                                📦 Physical
-                            </button>
-                            <button type="button" id="tab-ebook" onclick="switchType('ebook')"
-                                    class="tab-btn px-5 py-2 rounded-lg text-sm font-semibold <?= $product['product_type'] === 'ebook' ? 'active' : 'text-gray-500' ?>">
-                                📱 E-Book
-                            </button>
+                        <div class="mb-6">
+                            <span
+                                class="inline-block bg-red-600 text-white px-5 py-2 rounded-lg text-sm font-semibold"
+                            >
+                                <?= $product['product_type'] === 'ebook'
+                                    ? '📱 E-Book'
+                                    : '📦 Physical' ?>
+                            </span>
+
+                            <p class="text-xs text-gray-400 mt-2">
+                                Product type cannot be changed after creation.
+                            </p>
                         </div>
 
                         <!-- Physical -->
@@ -648,15 +674,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </style>
 
     <script>
-    function switchType(type) {
-        document.getElementById('product_type').value = type;
-        document.getElementById('fields-physical').classList.toggle('hidden', type !== 'physical');
-        document.getElementById('fields-ebook').classList.toggle('hidden', type !== 'ebook');
-        document.getElementById('tab-physical').classList.toggle('active', type === 'physical');
-        document.getElementById('tab-ebook').classList.toggle('active', type === 'ebook');
-        document.getElementById('tab-physical').classList.toggle('text-gray-500', type !== 'physical');
-        document.getElementById('tab-ebook').classList.toggle('text-gray-500', type !== 'ebook');
-    }
 
     function previewCover(input) {
         if (input.files && input.files[0]) {

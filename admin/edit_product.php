@@ -50,8 +50,31 @@ $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
+        $existing_type = (string) (
+            $product['product_type'] ?? ''
+        );
+
+        if (
+            !in_array(
+                $existing_type,
+                [
+                    'physical',
+                    'ebook',
+                ],
+                true
+            )
+        ) {
+            throw new ProductInputValidationException(
+                'Stored product type is invalid.'
+            );
+        }
+
+        $validation_input = $_POST;
+        $validation_input['product_type'] =
+            $existing_type;
+
         $validated = validateProductFormInput(
-            $_POST,
+            $validation_input,
             $categories,
             $genres
         );
@@ -459,10 +482,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <tr>
                 <td><b>Product Type</b></td>
                 <td>
-                    <select name="product_type" id="product_type" onchange="toggleType(this.value)">
-                        <option value="physical" <?= $product['product_type'] === 'physical' ? 'selected' : '' ?>>Physical</option>
-                        <option value="ebook" <?= $product['product_type'] === 'ebook' ? 'selected' : '' ?>>E-Book</option>
-                    </select>
+                    <input
+                        type="hidden"
+                        name="product_type"
+                        value="<?= htmlspecialchars(
+                            (string) $product['product_type']
+                        ) ?>"
+                    >
+                    <strong>
+                        <?= $product['product_type'] === 'ebook'
+                            ? 'E-Book'
+                            : 'Physical' ?>
+                    </strong>
+                    <br>
+                    <small>
+                        Product type cannot be changed after creation.
+                    </small>
                 </td>
             </tr>
 
@@ -527,14 +562,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </tr>
         </table>
     </form>
-
-    <script>
-    function toggleType(type) {
-        const physical = ['row_stock', 'row_threshold', 'row_weight', 'row_dimensions'];
-        const ebook = ['row_ebook_file', 'row_ebook_format', 'row_download_limit'];
-        physical.forEach(id => document.getElementById(id).style.display = type === 'physical' ? '' : 'none');
-        ebook.forEach(id => document.getElementById(id).style.display = type === 'ebook' ? '' : 'none');
-    }
-    </script>
 </body>
 </html>
