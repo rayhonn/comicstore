@@ -10,8 +10,7 @@
 @media (min-width: 1024px) {
     .product-detail-cover-column {
         align-items: stretch !important;
-        padding-top: 0 !important;
-        padding-bottom: 0 !important;
+        padding: 0 !important;
     }
 
     .product-detail-cover-frame {
@@ -20,23 +19,24 @@
         height: 100% !important;
         min-height: 100% !important;
         border-radius: 0 !important;
+        background: #f5f0eb !important;
         box-shadow: none !important;
     }
 
     .product-detail-cover-frame
     > img.relative {
-        width: min(100%, 350px) !important;
-        max-width: 350px !important;
+        width: 100% !important;
+        max-width: none !important;
         height: 100% !important;
-        margin-right: auto;
-        margin-left: auto;
-        padding: 26px !important;
-        object-fit: contain !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        object-fit: cover !important;
+        object-position: center !important;
     }
 
     .product-detail-cover-frame
     > img.absolute {
-        opacity: 0.18 !important;
+        display: none !important;
     }
 }
 
@@ -54,9 +54,8 @@
 }
 
 /*
- * Related-volume covers use a consistent portrait frame.
- * object-fit: contain prevents landscape or unusual covers
- * from being cropped.
+ * Related-volume cards use full-bleed covers and remain aligned
+ * to the left of the series section.
  */
 .related-volumes-section {
     padding: 28px !important;
@@ -78,8 +77,9 @@
 }
 
 .related-volume-card {
-    width: 154px !important;
-    flex: 0 0 154px !important;
+    position: relative;
+    width: 170px !important;
+    flex: 0 0 170px !important;
     overflow: hidden;
     border: 1px solid #f1f5f9;
     border-radius: 17px;
@@ -102,13 +102,44 @@
 }
 
 .related-volume-cover {
-    width: 136px !important;
-    height: 198px !important;
+    width: 100% !important;
+    height: 224px !important;
     margin-bottom: 10px !important;
-    border-radius: 12px !important;
+    border-radius: 13px !important;
     background: #f5f0eb !important;
-    padding: 7px;
-    object-fit: contain !important;
+    padding: 0 !important;
+    object-fit: cover !important;
+    object-position: center !important;
+}
+
+.related-volume-format-badge {
+    position: absolute;
+    top: 18px;
+    left: 18px;
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 999px;
+    padding: 6px 9px;
+    color: #ffffff;
+    font-size: 8px;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    line-height: 1;
+    text-transform: uppercase;
+    box-shadow:
+        0 8px 20px rgba(15, 23, 42, 0.2);
+    backdrop-filter: blur(10px);
+}
+
+.related-volume-format-badge.is-physical {
+    background: rgba(21, 128, 61, 0.9);
+}
+
+.related-volume-format-badge.is-ebook {
+    background: rgba(37, 99, 235, 0.92);
 }
 
 .related-volume-card p {
@@ -119,7 +150,7 @@
 @media (min-width: 768px) {
     .related-volumes-track {
         flex-wrap: wrap;
-        justify-content: center;
+        justify-content: flex-start;
         overflow: visible !important;
     }
 }
