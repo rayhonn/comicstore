@@ -501,7 +501,11 @@ $genre_visuals = [
                 transition-duration: 0.01ms !important;
             }
         }
-    </style>
+    </style>
+    <link
+        rel="stylesheet"
+        href="assets/css/index_motion.css"
+    >
 </head>
 
 <body class="text-gray-900 antialiased">
@@ -518,11 +522,6 @@ $genre_visuals = [
                 class="group flex items-center gap-3"
                 aria-label="MangaVault home"
             >
-                <span
-                    class="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-950 text-sm font-black text-white shadow-lg shadow-gray-300 transition-transform group-hover:-rotate-3"
-                >
-                    MV
-                </span>
 
                 <span
                     class="text-xl font-black tracking-[0.08em] text-gray-950"
@@ -2547,6 +2546,7 @@ $genre_visuals = [
             );
         });
     </script>
-
+
+    <script src="assets/js/index_motion.js"></script>
 </body>
 </html>
