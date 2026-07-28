@@ -555,16 +555,78 @@ foreach ($products as $product) {
         }
 
         .catalog-stat-number {
+            position: relative;
             display: inline-flex;
-            min-width: 2ch;
-            font-variant-numeric: tabular-nums;
+            min-width: 3.15ch;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            padding: 0.3rem 0.52rem;
+            border: 1px solid rgba(255, 255, 255, 0.13);
+            border-radius: 0.65rem;
+            background:
+                repeating-linear-gradient(
+                    0deg,
+                    rgba(255, 255, 255, 0.018) 0,
+                    rgba(255, 255, 255, 0.018) 1px,
+                    transparent 1px,
+                    transparent 4px
+                ),
+                rgba(2, 6, 23, 0.84);
+            box-shadow:
+                inset 0 0 17px rgba(0, 0, 0, 0.7),
+                0 0 18px rgba(255, 255, 255, 0.04);
+            font-family:
+                "Courier New",
+                "Lucida Console",
+                monospace;
+            font-variant-numeric:
+                tabular-nums
+                slashed-zero;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            line-height: 1;
             transform-origin: center;
         }
 
+        .catalog-stat-number::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.28;
+            background:
+                linear-gradient(
+                    180deg,
+                    rgba(255, 255, 255, 0.09),
+                    transparent 34%,
+                    rgba(0, 0, 0, 0.16) 70%,
+                    rgba(255, 255, 255, 0.03)
+                );
+        }
+
         .catalog-stat-number.is-counting {
-            text-shadow:
-                0 0 24px rgba(255, 255, 255, 0.28);
-            transform: translateY(-1px);
+            animation:
+                catalogDigitalPulse
+                0.34s
+                ease-in-out
+                infinite alternate;
+        }
+
+        @keyframes catalogDigitalPulse {
+            from {
+                filter: brightness(0.84);
+                transform:
+                    translateY(1px)
+                    scale(0.985);
+            }
+
+            to {
+                filter: brightness(1.18);
+                transform:
+                    translateY(-1px)
+                    scale(1.02);
+            }
         }
 
         @keyframes catalogStatShine {
@@ -1533,80 +1595,42 @@ foreach ($products as $product) {
         <?php endif; ?>
     </main>
 
-    <footer class="bg-[#0d1424] text-white">
-        <div class="mx-auto max-w-7xl px-6 py-14">
-            <div
-                class="grid gap-10 border-b border-white/10 pb-12 sm:grid-cols-2 lg:grid-cols-[1.2fr_0.8fr_0.8fr_1fr]"
-            >
-                <div>
-                    <a
-                        href="../index.php"
-                        class="text-xl font-black tracking-[0.08em]"
-                    >
-                        MANGA<span class="text-red-500">VAULT</span>
-                    </a>
-                    <p
-                        class="mt-5 max-w-sm text-sm leading-6 text-white/45"
-                    >
-                        Physical manga, instant e-books, secure checkout and
-                        reader rewards in one MangaVault collection.
-                    </p>
+    <!-- Footer -->
+    <footer class="bg-[#F5F0EB] text-gray-800 py-12 border-t border-gray-200">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
+                <div class="col-span-2 md:col-span-1">
+                    <h3 class="text-lg font-black mb-4">MANGA<span class="text-red-600">VAULT</span></h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">Malaysia's ultimate destination for manga and comic book lovers.</p>
                 </div>
-
                 <div>
-                    <h3
-                        class="text-xs font-black uppercase tracking-[0.2em] text-white/35"
-                    >
-                        Shop
-                    </h3>
-                    <ul class="mt-5 space-y-3 text-sm text-white/60">
-                        <li><a href="home.php" class="transition hover:text-white">All titles</a></li>
-                        <li><a href="home.php?type=physical" class="transition hover:text-white">Physical books</a></li>
-                        <li><a href="home.php?type=ebook" class="transition hover:text-white">E-books</a></li>
+                    <h4 class="font-bold mb-4 text-sm uppercase tracking-wide text-gray-800">Shop</h4>
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li><a href="home.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">All Manga</a></li>
+                        <li><a href="home.php?type=physical" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">Physical Books</a></li>
+                        <li><a href="home.php?type=ebook" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">E-Books</a></li>
                     </ul>
                 </div>
-
                 <div>
-                    <h3
-                        class="text-xs font-black uppercase tracking-[0.2em] text-white/35"
-                    >
-                        Account
-                    </h3>
-                    <ul class="mt-5 space-y-3 text-sm text-white/60">
-                        <li><a href="orders.php" class="transition hover:text-white">My orders</a></li>
-                        <li><a href="wishlist.php" class="transition hover:text-white">Wishlist</a></li>
-                        <li><a href="profile.php" class="transition hover:text-white">My account</a></li>
+                    <h4 class="font-bold mb-4 text-sm uppercase tracking-wide text-gray-800">Help</h4>
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li><a href="orders.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">My Orders</a></li>
+                        <li><a href="profile.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">My Account</a></li>
+                        <li><a href="faq.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">FAQ</a></li>
+                        <li><a href="about.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">About Us</a></li>
                     </ul>
                 </div>
-
                 <div>
-                    <h3
-                        class="text-xs font-black uppercase tracking-[0.2em] text-white/35"
-                    >
-                        Support
-                    </h3>
-                    <div
-                        class="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4"
-                    >
-                        <p class="text-sm font-black text-white">
-                            Need help choosing?
-                        </p>
-                        <p class="mt-1 text-xs leading-5 text-white/40">
-                            Visit FAQ or ask MangaBot while signed in.
-                        </p>
-                        <div class="mt-4 flex gap-3 text-xs font-bold">
-                            <a href="faq.php" class="text-red-300 hover:text-white">FAQ</a>
-                            <a href="about.php" class="text-red-300 hover:text-white">About Us</a>
-                        </div>
+                    <h4 class="font-bold mb-4 text-sm uppercase tracking-wide text-gray-800">Follow Us</h4>
+                    <div class="flex gap-3">
+                        <a href="#" class="w-9 h-9 bg-gray-200 hover:bg-red-600 hover:text-white rounded-full flex items-center justify-center transition-all text-sm font-bold text-gray-600" aria-label="Facebook">f</a>
+                        <a href="#" class="w-9 h-9 bg-gray-200 hover:bg-red-600 hover:text-white rounded-full flex items-center justify-center transition-all text-sm font-bold text-gray-600" aria-label="Twitter">t</a>
+                        <a href="#" class="w-9 h-9 bg-gray-200 hover:bg-red-600 hover:text-white rounded-full flex items-center justify-center transition-all text-sm font-bold text-gray-600" aria-label="LinkedIn">in</a>
                     </div>
                 </div>
             </div>
-
-            <div
-                class="flex flex-col gap-3 pt-7 text-xs text-white/35 sm:flex-row sm:items-center sm:justify-between"
-            >
-                <p>© 2026 MangaVault. All rights reserved.</p>
-                <p>Physical manga · E-books · Membership rewards</p>
+            <div class="border-t border-gray-300 pt-6 text-center text-xs text-gray-500">
+                © 2026 MangaVault. All rights reserved.
             </div>
         </div>
     </footer>
