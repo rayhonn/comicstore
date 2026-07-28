@@ -309,6 +309,135 @@ foreach ($products as $product) {
                 0 24px 60px rgba(15, 23, 42, 0.14);
         }
 
+        .catalog-stat-card {
+            position: relative;
+            overflow: hidden;
+            isolation: isolate;
+            transition:
+                transform 0.3s
+                    cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 0.3s ease,
+                background-color 0.3s ease;
+        }
+
+        .catalog-stat-card::before {
+            content: '';
+            position: absolute;
+            inset: -120% -55%;
+            z-index: -1;
+            opacity: 0;
+            background:
+                linear-gradient(
+                    115deg,
+                    transparent 38%,
+                    rgba(255, 255, 255, 0.16) 50%,
+                    transparent 62%
+                );
+            transform: translateX(-45%);
+        }
+
+        .catalog-stat-card:hover {
+            border-color: rgba(255, 255, 255, 0.22);
+            background-color: rgba(255, 255, 255, 0.09);
+            transform: translateY(-5px);
+        }
+
+        .catalog-stat-card:hover::before {
+            opacity: 1;
+            animation: catalogStatShine 0.9s ease;
+        }
+
+        .catalog-stat-number {
+            display: inline-flex;
+            min-width: 2ch;
+            font-variant-numeric: tabular-nums;
+            transform-origin: center;
+        }
+
+        .catalog-stat-number.is-rolling {
+            animation:
+                catalogCounterRoll
+                0.11s
+                ease-in-out
+                infinite alternate;
+        }
+
+        @keyframes catalogCounterRoll {
+            from {
+                opacity: 0.55;
+                filter: blur(0.7px);
+                transform:
+                    translateY(-2px)
+                    scale(0.96);
+            }
+
+            to {
+                opacity: 1;
+                filter: blur(0);
+                transform:
+                    translateY(2px)
+                    scale(1.04);
+            }
+        }
+
+        @keyframes catalogStatShine {
+            to {
+                transform: translateX(45%);
+            }
+        }
+
+        @keyframes catalogCardReveal {
+            from {
+                opacity: 0;
+                transform:
+                    translateY(28px)
+                    scale(0.975);
+            }
+
+            to {
+                opacity: 1;
+                transform:
+                    translateY(0)
+                    scale(1);
+            }
+        }
+
+        .catalog-card-reveal {
+            animation:
+                catalogCardReveal
+                0.58s
+                cubic-bezier(0.22, 1, 0.36, 1)
+                both;
+        }
+
+        .catalog-load-more-button {
+            position: relative;
+            isolation: isolate;
+            overflow: hidden;
+        }
+
+        .catalog-load-more-button::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            background:
+                linear-gradient(
+                    115deg,
+                    transparent 30%,
+                    rgba(255, 255, 255, 0.18) 50%,
+                    transparent 70%
+                );
+            transform: translateX(-120%);
+            transition:
+                transform 0.75s
+                cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .catalog-load-more-button:hover::before {
+            transform: translateX(120%);
+        }
+
         .catalog-line-clamp-2 {
             display: -webkit-box;
             overflow: hidden;
@@ -392,9 +521,14 @@ foreach ($products as $product) {
                     aria-label="Catalog summary"
                 >
                     <div
-                        class="rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl sm:p-5"
+                        class="catalog-stat-card rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl sm:p-5"
                     >
-                        <p class="text-2xl font-black sm:text-3xl">
+                        <p
+                            class="catalog-stat-number text-2xl font-black sm:text-3xl"
+                            data-catalog-counter="<?= count($products) ?>"
+                            data-catalog-counter-delay="0"
+                            aria-label="<?= count($products) ?> titles"
+                        >
                             <?= count($products) ?>
                         </p>
                         <p
@@ -405,9 +539,14 @@ foreach ($products as $product) {
                     </div>
 
                     <div
-                        class="rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl sm:p-5"
+                        class="catalog-stat-card rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl sm:p-5"
                     >
-                        <p class="text-2xl font-black text-red-300 sm:text-3xl">
+                        <p
+                            class="catalog-stat-number text-2xl font-black text-red-300 sm:text-3xl"
+                            data-catalog-counter="<?= $totalPhysicalFormats ?>"
+                            data-catalog-counter-delay="140"
+                            aria-label="<?= $totalPhysicalFormats ?> physical formats"
+                        >
                             <?= $totalPhysicalFormats ?>
                         </p>
                         <p
@@ -418,9 +557,14 @@ foreach ($products as $product) {
                     </div>
 
                     <div
-                        class="rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl sm:p-5"
+                        class="catalog-stat-card rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl sm:p-5"
                     >
-                        <p class="text-2xl font-black text-blue-300 sm:text-3xl">
+                        <p
+                            class="catalog-stat-number text-2xl font-black text-blue-300 sm:text-3xl"
+                            data-catalog-counter="<?= $totalEbookFormats ?>"
+                            data-catalog-counter-delay="280"
+                            aria-label="<?= $totalEbookFormats ?> e-book formats"
+                        >
                             <?= $totalEbookFormats ?>
                         </p>
                         <p
@@ -668,9 +812,10 @@ foreach ($products as $product) {
                     </div>
                 <?php else: ?>
                     <div
-                        class="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4 xl:grid-cols-5"
+                        id="catalogProductGrid"
+                        class="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4"
                     >
-                        <?php foreach ($products as $product): ?>
+                        <?php foreach ($products as $productIndex => $product): ?>
                             <?php
                             $detailId = (int) (
                                 $product['physical_id'] ??
@@ -732,6 +877,8 @@ foreach ($products as $product) {
 
                             <article
                                 class="catalog-product-card group flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white transition duration-300 hover:-translate-y-2"
+                                data-catalog-item
+                                data-catalog-index="<?= (int) $productIndex ?>"
                             >
                                 <a
                                     href="product_detail.php?id=<?= $detailId ?>"
@@ -924,6 +1071,67 @@ foreach ($products as $product) {
                             </article>
                         <?php endforeach; ?>
                     </div>
+
+                    <div
+                        id="catalogLoadMorePanel"
+                        class="<?= count($products) > 12
+                            ? 'flex'
+                            : 'hidden' ?> mt-12 flex-col items-center justify-center text-center"
+                    >
+                        <p
+                            id="catalogVisibleStatus"
+                            class="text-xs font-bold uppercase tracking-[0.16em] text-gray-400"
+                            aria-live="polite"
+                        >
+                            Showing
+                            <span id="catalogVisibleCount">
+                                <?= min(12, count($products)) ?>
+                            </span>
+                            of
+                            <span>
+                                <?= count($products) ?>
+                            </span>
+                            titles
+                        </p>
+
+                        <button
+                            id="catalogLoadMoreButton"
+                            type="button"
+                            class="catalog-load-more-button mt-4 inline-flex min-w-[220px] items-center justify-center gap-3 rounded-2xl bg-gray-950 px-7 py-4 text-sm font-black uppercase tracking-[0.12em] text-white shadow-[0_18px_45px_rgba(15,23,42,0.2)] transition hover:-translate-y-1 hover:bg-red-600"
+                            data-batch-size="12"
+                            aria-controls="catalogProductGrid"
+                        >
+                            Browse More Titles
+                            <span
+                                id="catalogRemainingCount"
+                                class="rounded-full bg-white/15 px-2.5 py-1 text-[10px]"
+                            >
+                                +<?= max(
+                                    0,
+                                    min(
+                                        12,
+                                        count($products) - 12
+                                    )
+                                ) ?>
+                            </span>
+                        </button>
+
+                        <p
+                            id="catalogAllLoadedMessage"
+                            class="mt-4 hidden text-sm font-semibold text-green-700"
+                            role="status"
+                        >
+                            All available titles are now displayed.
+                        </p>
+                    </div>
+
+                    <noscript>
+                        <style>
+                            #catalogLoadMorePanel {
+                                display: none !important;
+                            }
+                        </style>
+                    </noscript>
                 <?php endif; ?>
             </div>
         </section>
@@ -964,10 +1172,10 @@ foreach ($products as $product) {
 
                     <div
                         id="recommendations-grid"
-                        class="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-5"
+                        class="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4"
                         aria-live="polite"
                     >
-                        <?php for ($skeleton = 0; $skeleton < 5; $skeleton++): ?>
+                        <?php for ($skeleton = 0; $skeleton < 4; $skeleton++): ?>
                             <div
                                 class="overflow-hidden rounded-2xl border border-gray-100 bg-white"
                             >
@@ -1187,6 +1395,333 @@ foreach ($products as $product) {
     </div>
 
     <script>
+        const reduceCatalogMotion = window.matchMedia(
+            '(prefers-reduced-motion: reduce)'
+        ).matches;
+
+        function animateCatalogCounters() {
+            const counters = Array.from(
+                document.querySelectorAll(
+                    '[data-catalog-counter]'
+                )
+            );
+
+            if (counters.length === 0) {
+                return;
+            }
+
+            let hasAnimated = false;
+
+            function startCounters() {
+                if (hasAnimated) {
+                    return;
+                }
+
+                hasAnimated = true;
+
+                counters.forEach(counter => {
+                    const target = Math.max(
+                        0,
+                        Number(
+                            counter.dataset.catalogCounter
+                        ) || 0
+                    );
+                    const delay = Math.max(
+                        0,
+                        Number(
+                            counter.dataset.catalogCounterDelay
+                        ) || 0
+                    );
+
+                    if (reduceCatalogMotion) {
+                        counter.textContent = String(target);
+                        return;
+                    }
+
+                    window.setTimeout(() => {
+                        const duration = 1050;
+                        const interval = 48;
+                        const randomMaximum = Math.max(
+                            24,
+                            target * 3,
+                            99
+                        );
+                        const startedAt = performance.now();
+
+                        counter.classList.add(
+                            'is-rolling'
+                        );
+
+                        const timer = window.setInterval(
+                            () => {
+                                const elapsed =
+                                    performance.now() -
+                                    startedAt;
+
+                                if (elapsed >= duration) {
+                                    window.clearInterval(
+                                        timer
+                                    );
+                                    counter.textContent =
+                                        String(target);
+                                    counter.classList.remove(
+                                        'is-rolling'
+                                    );
+                                    return;
+                                }
+
+                                const progress =
+                                    elapsed / duration;
+
+                                if (progress < 0.72) {
+                                    counter.textContent =
+                                        String(
+                                            Math.floor(
+                                                Math.random() *
+                                                (
+                                                    randomMaximum +
+                                                    1
+                                                )
+                                            )
+                                        );
+                                    return;
+                                }
+
+                                const settleProgress =
+                                    (
+                                        progress -
+                                        0.72
+                                    ) /
+                                    0.28;
+
+                                const eased =
+                                    1 -
+                                    Math.pow(
+                                        1 -
+                                        settleProgress,
+                                        3
+                                    );
+
+                                counter.textContent =
+                                    String(
+                                        Math.round(
+                                            randomMaximum *
+                                            (
+                                                1 -
+                                                eased
+                                            ) +
+                                            target *
+                                            eased
+                                        )
+                                    );
+                            },
+                            interval
+                        );
+                    }, delay);
+                });
+            }
+
+            const summary = document.querySelector(
+                '[aria-label="Catalog summary"]'
+            );
+
+            if (
+                !summary ||
+                !('IntersectionObserver' in window)
+            ) {
+                startCounters();
+                return;
+            }
+
+            const observer = new IntersectionObserver(
+                entries => {
+                    if (
+                        !entries.some(
+                            entry =>
+                                entry.isIntersecting
+                        )
+                    ) {
+                        return;
+                    }
+
+                    startCounters();
+                    observer.disconnect();
+                },
+                {
+                    threshold: 0.45,
+                }
+            );
+
+            observer.observe(summary);
+        }
+
+        function setupCatalogPagination() {
+            const items = Array.from(
+                document.querySelectorAll(
+                    '[data-catalog-item]'
+                )
+            );
+            const panel = document.getElementById(
+                'catalogLoadMorePanel'
+            );
+            const button = document.getElementById(
+                'catalogLoadMoreButton'
+            );
+            const visibleCountElement =
+                document.getElementById(
+                    'catalogVisibleCount'
+                );
+            const remainingCountElement =
+                document.getElementById(
+                    'catalogRemainingCount'
+                );
+            const allLoadedMessage =
+                document.getElementById(
+                    'catalogAllLoadedMessage'
+                );
+
+            if (
+                items.length === 0 ||
+                !panel ||
+                !button
+            ) {
+                return;
+            }
+
+            const batchSize = Math.max(
+                1,
+                Number(
+                    button.dataset.batchSize
+                ) || 12
+            );
+            let visibleCount = Math.min(
+                batchSize,
+                items.length
+            );
+
+            function updateCatalogVisibility(
+                animateFrom = null
+            ) {
+                items.forEach((item, index) => {
+                    const visible =
+                        index < visibleCount;
+
+                    item.hidden = !visible;
+
+                    if (
+                        visible &&
+                        animateFrom !== null &&
+                        index >= animateFrom
+                    ) {
+                        item.classList.remove(
+                            'catalog-card-reveal'
+                        );
+
+                        item.style.animationDelay =
+                            `${
+                                (
+                                    index -
+                                    animateFrom
+                                ) *
+                                65
+                            }ms`;
+
+                        void item.offsetWidth;
+
+                        item.classList.add(
+                            'catalog-card-reveal'
+                        );
+                    }
+                });
+
+                if (visibleCountElement) {
+                    visibleCountElement.textContent =
+                        String(visibleCount);
+                }
+
+                const remaining =
+                    Math.max(
+                        0,
+                        items.length -
+                        visibleCount
+                    );
+
+                if (remainingCountElement) {
+                    remainingCountElement.textContent =
+                        `+${
+                            Math.min(
+                                batchSize,
+                                remaining
+                            )
+                        }`;
+                }
+
+                const complete =
+                    remaining === 0;
+
+                button.classList.toggle(
+                    'hidden',
+                    complete
+                );
+
+                if (allLoadedMessage) {
+                    allLoadedMessage.classList.toggle(
+                        'hidden',
+                        !complete
+                    );
+                }
+
+                panel.classList.toggle(
+                    'hidden',
+                    items.length <= batchSize
+                );
+                panel.classList.toggle(
+                    'flex',
+                    items.length > batchSize
+                );
+            }
+
+            updateCatalogVisibility();
+
+            button.addEventListener(
+                'click',
+                () => {
+                    const previousVisibleCount =
+                        visibleCount;
+
+                    visibleCount = Math.min(
+                        items.length,
+                        visibleCount +
+                        batchSize
+                    );
+
+                    updateCatalogVisibility(
+                        previousVisibleCount
+                    );
+
+                    const firstNewItem =
+                        items[
+                            previousVisibleCount
+                        ];
+
+                    if (firstNewItem) {
+                        window.setTimeout(() => {
+                            firstNewItem.scrollIntoView({
+                                behavior:
+                                    reduceCatalogMotion
+                                        ? 'auto'
+                                        : 'smooth',
+                                block: 'center',
+                            });
+                        }, 120);
+                    }
+                }
+            );
+        }
+
+        animateCatalogCounters();
+        setupCatalogPagination();
+
         const productModal = document.getElementById(
             'productModal'
         );
@@ -1415,7 +1950,7 @@ foreach ($products as $product) {
             }
 
             grid.innerHTML = data.products
-                .slice(0, 5)
+                .slice(0, 4)
                 .map(product => {
                     const productId = Number(
                         product.product_id
