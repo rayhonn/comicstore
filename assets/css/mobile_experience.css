@@ -1,0 +1,1410 @@
+/*
+ * MangaVault mobile experience layer.
+ * Applies only below 768px and leaves the desktop design unchanged.
+ */
+
+.mobile-bottom-nav,
+.mobile-filter-toggle,
+.mobile-filter-overlay,
+.mobile-filter-drawer,
+.mobile-footer-toggle,
+.mobile-swipe-hint {
+    display: none;
+}
+
+@media (max-width: 767px) {
+    :root {
+        --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+        --mobile-dock-height: 70px;
+        --mobile-page-gutter: 16px;
+    }
+
+    html {
+        scroll-padding-top: 76px;
+    }
+
+    body.mobile-index-page,
+    body.mobile-catalog-page {
+        overflow-x: hidden;
+        padding-bottom:
+            calc(
+                var(--mobile-dock-height) +
+                var(--mobile-safe-bottom) +
+                24px
+            );
+    }
+
+    body.mobile-menu-open,
+    body.mobile-filter-open {
+        overflow: hidden !important;
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Shared bottom application navigation                         */
+    /* ------------------------------------------------------------ */
+
+    .mobile-bottom-nav {
+        position: fixed;
+        right: 12px;
+        bottom:
+            calc(
+                10px +
+                var(--mobile-safe-bottom)
+            );
+        left: 12px;
+        z-index: 90;
+        display: grid;
+        grid-template-columns:
+            repeat(
+                var(--mobile-nav-count, 4),
+                minmax(0, 1fr)
+            );
+        min-height: var(--mobile-dock-height);
+        overflow: hidden;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow:
+            0 22px 60px rgba(15, 23, 42, 0.2),
+            inset 0 1px rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(22px);
+        -webkit-backdrop-filter: blur(22px);
+    }
+
+    .mobile-bottom-nav a {
+        position: relative;
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 9px 4px;
+        color: #64748b;
+        text-decoration: none;
+        transition:
+            background-color 0.2s ease,
+            color 0.2s ease,
+            transform 0.2s ease;
+    }
+
+    .mobile-bottom-nav a:active {
+        transform: scale(0.94);
+    }
+
+    .mobile-bottom-nav a.is-active {
+        color: #dc2626;
+        background:
+            linear-gradient(
+                180deg,
+                rgba(254, 226, 226, 0.72),
+                rgba(255, 255, 255, 0)
+            );
+    }
+
+    .mobile-bottom-nav a.is-active::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 50%;
+        width: 28px;
+        height: 3px;
+        border-radius: 0 0 999px 999px;
+        background: #dc2626;
+        transform: translateX(-50%);
+        box-shadow:
+            0 0 14px rgba(220, 38, 38, 0.5);
+    }
+
+    .mobile-bottom-nav-icon {
+        position: relative;
+        display: flex;
+        width: 23px;
+        height: 23px;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .mobile-bottom-nav-icon svg {
+        width: 21px;
+        height: 21px;
+    }
+
+    .mobile-bottom-nav-label {
+        overflow: hidden;
+        max-width: 100%;
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: 0.05em;
+        text-overflow: ellipsis;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    .mobile-bottom-nav-badge {
+        position: absolute;
+        top: -7px;
+        right: -9px;
+        display: flex;
+        min-width: 17px;
+        height: 17px;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid white;
+        border-radius: 999px;
+        background: #dc2626;
+        padding: 0 3px;
+        color: white;
+        font-size: 8px;
+        font-weight: 900;
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Public index navigation                                      */
+    /* ------------------------------------------------------------ */
+
+    body.mobile-index-page > nav {
+        z-index: 72;
+    }
+
+    body.mobile-index-page > nav > div:first-child {
+        min-height: 64px;
+        padding: 11px 16px;
+    }
+
+    body.mobile-index-page > nav
+    a[aria-label="MangaVault home"]
+    span:last-child {
+        font-size: 16px;
+        letter-spacing: 0.055em;
+    }
+
+    body.mobile-index-page > nav
+    a[aria-label="Notifications"],
+    body.mobile-index-page > nav
+    a[aria-label="Shopping cart"],
+    body.mobile-index-page #menuBtn {
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
+    }
+
+    body.mobile-index-page #mobileMenu {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 74;
+        width: min(86vw, 350px);
+        max-height: none !important;
+        overflow-y: auto;
+        border-top: 0;
+        border-left: 1px solid rgba(15, 23, 42, 0.08);
+        background:
+            linear-gradient(
+                180deg,
+                #ffffff,
+                #fffaf7
+            );
+        padding-top: 76px;
+        box-shadow:
+            -26px 0 70px rgba(15, 23, 42, 0.2);
+        transform: translateX(105%);
+        transition:
+            transform 0.35s
+            cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    body.mobile-index-page #mobileMenu.open {
+        transform: translateX(0);
+    }
+
+    body.mobile-index-page #mobileMenu > div {
+        padding: 10px 16px 28px;
+    }
+
+    body.mobile-index-page #mobileMenu a {
+        margin-bottom: 6px;
+        border: 1px solid transparent;
+        border-radius: 14px;
+        padding: 13px 14px;
+    }
+
+    body.mobile-index-page #mobileMenu a:hover,
+    body.mobile-index-page #mobileMenu a:active {
+        border-color: #fee2e2;
+        background: #fff1f2;
+    }
+
+    body.mobile-index-page #mobileOverlay {
+        z-index: 71;
+        background: rgba(2, 6, 23, 0.54);
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Public index hero                                            */
+    /* ------------------------------------------------------------ */
+
+    body.mobile-index-page
+    section[aria-label="Featured MangaVault highlights"] {
+        min-height:
+            calc(
+                100svh -
+                64px
+            );
+    }
+
+    body.mobile-index-page #heroSlider,
+    body.mobile-index-page #heroSlider > article {
+        min-height:
+            calc(
+                100svh -
+                64px
+            );
+    }
+
+    body.mobile-index-page #heroSlider > article
+    > .relative.mx-auto.grid {
+        display: flex;
+        min-height:
+            calc(
+                100svh -
+                64px
+            );
+        flex-direction: column;
+        justify-content: center;
+        gap: 24px;
+        padding:
+            60px
+            18px
+            104px;
+    }
+
+    body.mobile-index-page #heroSlider
+    .index-hero-copy,
+    body.mobile-index-page #heroSlider
+    .max-w-lg,
+    body.mobile-index-page #heroSlider
+    .max-w-2xl {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    body.mobile-index-page #heroSlider h1,
+    body.mobile-index-page #heroSlider h2 {
+        max-width: 100%;
+        font-size:
+            clamp(
+                2.65rem,
+                12vw,
+                3.35rem
+            );
+        line-height: 0.95;
+        letter-spacing: -0.052em;
+    }
+
+    body.mobile-index-page #heroSlider p {
+        max-width: 100%;
+    }
+
+    body.mobile-index-page #heroSlider
+    .mt-9.flex,
+    body.mobile-index-page #heroSlider
+    .mt-8.flex {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    body.mobile-index-page #heroSlider
+    .mt-9.flex a,
+    body.mobile-index-page #heroSlider
+    .mt-8.flex a {
+        width: 100%;
+        min-height: 52px;
+        padding: 14px 18px;
+        text-align: center;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:first-child
+    .mt-10.flex {
+        display: flex;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        gap: 18px;
+        padding-bottom: 4px;
+        scrollbar-width: none;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:first-child
+    .mt-10.flex::-webkit-scrollbar {
+        display: none;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:nth-child(2)
+    > .relative.mx-auto.grid
+    > .grid.grid-cols-3 {
+        width: 100%;
+        max-width: 370px;
+        align-self: center;
+        gap: 8px;
+        margin-top: 2px;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:nth-child(2)
+    > .relative.mx-auto.grid
+    > .grid.grid-cols-3
+    > a {
+        transform: none !important;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:nth-child(2)
+    .cover-stage {
+        border-radius: 12px;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:nth-child(2)
+    .mt-4.text-center {
+        margin-top: 8px;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:nth-child(2)
+    .mt-4.text-center p:first-child {
+        display: none;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:nth-child(3)
+    .mt-8.flex.flex-wrap {
+        display: flex;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        gap: 8px;
+        padding-bottom: 4px;
+        scrollbar-width: none;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:nth-child(3)
+    .mt-8.flex.flex-wrap::-webkit-scrollbar {
+        display: none;
+    }
+
+    body.mobile-index-page #heroSlider
+    article:nth-child(3)
+    .mt-8.flex.flex-wrap span {
+        flex: 0 0 auto;
+    }
+
+    body.mobile-index-page
+    section[aria-label="Featured MangaVault highlights"]
+    [role="tablist"] {
+        bottom:
+            calc(
+                var(--mobile-dock-height) +
+                var(--mobile-safe-bottom) +
+                24px
+            );
+    }
+
+    body.mobile-index-page #previousSlide,
+    body.mobile-index-page #nextSlide {
+        display: none !important;
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Mobile horizontal content rails                              */
+    /* ------------------------------------------------------------ */
+
+    .mobile-swipe-hint {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: #9ca3af;
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    body.mobile-index-page
+    section[aria-label="MangaVault services"]
+    > div {
+        display: grid;
+        grid-auto-columns:
+            clamp(
+                250px,
+                79vw,
+                310px
+            );
+        grid-auto-flow: column;
+        grid-template-columns: none;
+        overflow-x: auto;
+        gap: 12px;
+        padding: 14px 16px 18px;
+        scroll-padding-inline: 16px;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+    }
+
+    body.mobile-index-page
+    section[aria-label="MangaVault services"]
+    > div::-webkit-scrollbar {
+        display: none;
+    }
+
+    body.mobile-index-page
+    section[aria-label="MangaVault services"]
+    > div > div {
+        min-height: 104px;
+        border: 1px solid #f1f5f9;
+        border-radius: 18px;
+        background: white;
+        padding: 18px;
+        scroll-snap-align: start;
+        box-shadow:
+            0 12px 30px rgba(15, 23, 42, 0.07);
+    }
+
+    body.mobile-index-page #rankings,
+    body.mobile-index-page #genres,
+    body.mobile-index-page #new-releases,
+    body.mobile-index-page
+    section:has(a[href="tier.php"]) {
+        padding-top: 56px;
+        padding-bottom: 56px;
+    }
+
+    body.mobile-index-page #rankings
+    > div,
+    body.mobile-index-page #genres
+    > div,
+    body.mobile-index-page #new-releases
+    > div,
+    body.mobile-index-page
+    section:has(a[href="tier.php"])
+    > div {
+        padding-right: 16px;
+        padding-left: 16px;
+    }
+
+    body.mobile-index-page #rankings
+    .mb-10,
+    body.mobile-index-page #new-releases
+    .mb-10 {
+        margin-bottom: 24px;
+    }
+
+    body.mobile-index-page #rankings h2,
+    body.mobile-index-page #genres h2,
+    body.mobile-index-page #new-releases h2,
+    body.mobile-index-page
+    section:has(a[href="tier.php"]) h2 {
+        font-size: 2rem;
+        line-height: 1.02;
+    }
+
+    body.mobile-index-page #rankings
+    .grid.grid-cols-2,
+    body.mobile-index-page #new-releases
+    .grid.grid-cols-2 {
+        display: grid;
+        grid-auto-columns:
+            clamp(
+                248px,
+                77vw,
+                310px
+            );
+        grid-auto-flow: column;
+        grid-template-columns: none;
+        overflow-x: auto;
+        gap: 14px;
+        margin-right: -16px;
+        padding-right: 16px;
+        padding-bottom: 18px;
+        scroll-padding-inline: 1px;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+    }
+
+    body.mobile-index-page #rankings
+    .grid.grid-cols-2::-webkit-scrollbar,
+    body.mobile-index-page #new-releases
+    .grid.grid-cols-2::-webkit-scrollbar {
+        display: none;
+    }
+
+    body.mobile-index-page #rankings
+    .grid.grid-cols-2 > *,
+    body.mobile-index-page #new-releases
+    .grid.grid-cols-2 > * {
+        scroll-snap-align: start;
+    }
+
+    body.mobile-index-page #rankings
+    .product-card,
+    body.mobile-index-page #new-releases
+    .product-card {
+        border-radius: 20px;
+    }
+
+    body.mobile-index-page #rankings
+    .product-card:hover,
+    body.mobile-index-page #new-releases
+    .product-card:hover {
+        transform: none;
+    }
+
+    body.mobile-index-page #rankings
+    .product-card:active,
+    body.mobile-index-page #new-releases
+    .product-card:active {
+        transform: scale(0.985);
+    }
+
+    body.mobile-index-page #genres
+    .grid.grid-cols-1 {
+        grid-template-columns:
+            repeat(
+                2,
+                minmax(0, 1fr)
+            );
+        gap: 12px;
+    }
+
+    body.mobile-index-page #genres
+    .genre-card {
+        min-height: 190px;
+        border-radius: 20px;
+        padding: 18px;
+    }
+
+    body.mobile-index-page #genres
+    .genre-card h3 {
+        font-size: 1.25rem;
+    }
+
+    body.mobile-index-page
+    section:has(a[href="tier.php"])
+    > div {
+        gap: 28px;
+    }
+
+    body.mobile-index-page
+    section:has(a[href="tier.php"])
+    .grid.gap-4 {
+        display: grid;
+        grid-auto-columns:
+            clamp(
+                245px,
+                78vw,
+                310px
+            );
+        grid-auto-flow: column;
+        grid-template-columns: none;
+        overflow-x: auto;
+        gap: 12px;
+        margin-right: -16px;
+        padding-right: 16px;
+        padding-bottom: 8px;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+    }
+
+    body.mobile-index-page
+    section:has(a[href="tier.php"])
+    .grid.gap-4::-webkit-scrollbar {
+        display: none;
+    }
+
+    body.mobile-index-page
+    section:has(a[href="tier.php"])
+    .grid.gap-4 > div {
+        scroll-snap-align: start;
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Customer catalog shared navbar                               */
+    /* ------------------------------------------------------------ */
+
+    body.mobile-catalog-page > nav {
+        z-index: 72;
+    }
+
+    body.mobile-catalog-page > nav
+    > div:first-child {
+        min-height: 64px;
+        padding: 11px 16px;
+    }
+
+    body.mobile-catalog-page > nav
+    > div:first-child
+    > a:first-child {
+        font-size: 16px;
+        letter-spacing: 0.045em;
+    }
+
+    body.mobile-catalog-page > nav
+    > div:first-child
+    > div:last-child {
+        gap: 10px;
+    }
+
+    body.mobile-catalog-page #navMobileMenu {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 74;
+        width: min(86vw, 350px);
+        max-height: none !important;
+        overflow-y: auto !important;
+        border-top: 0;
+        border-left: 1px solid rgba(15, 23, 42, 0.08);
+        background:
+            linear-gradient(
+                180deg,
+                #ffffff,
+                #fffaf7
+            );
+        padding-top: 76px;
+        box-shadow:
+            -26px 0 70px rgba(15, 23, 42, 0.2);
+        transform: translateX(105%);
+        transition:
+            transform 0.35s
+            cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    body.mobile-catalog-page
+    #navMobileMenu.mobile-drawer-open {
+        transform: translateX(0);
+    }
+
+    body.mobile-catalog-page #navMobileMenu > div {
+        padding: 10px 16px 28px;
+    }
+
+    body.mobile-catalog-page #navMobileMenu a {
+        margin-bottom: 6px;
+        border: 1px solid transparent;
+        border-radius: 14px;
+        padding: 13px 14px;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    body.mobile-catalog-page #navOverlay {
+        z-index: 71;
+        background: rgba(2, 6, 23, 0.54);
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Customer catalog hero                                        */
+    /* ------------------------------------------------------------ */
+
+    body.mobile-catalog-page .catalog-hero
+    > .relative.mx-auto.grid {
+        gap: 24px;
+        padding:
+            44px
+            16px
+            40px;
+    }
+
+    body.mobile-catalog-page .catalog-hero h1 {
+        font-size:
+            clamp(
+                2.35rem,
+                11vw,
+                3rem
+            );
+        line-height: 0.98;
+    }
+
+    body.mobile-catalog-page
+    .catalog-hero-copy p:last-child {
+        margin-top: 18px;
+        line-height: 1.65;
+    }
+
+    body.mobile-catalog-page
+    .catalog-hero-ring-large {
+        right: -180px;
+        width: 300px;
+        height: 300px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-hero-ring-small {
+        right: -90px;
+        width: 210px;
+        height: 210px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-summary-grid {
+        gap: 7px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-stat-card {
+        min-width: 0;
+        border-radius: 15px;
+        padding: 11px 8px;
+        text-align: center;
+    }
+
+    body.mobile-catalog-page
+    .catalog-stat-number {
+        min-width: 2.75ch;
+        padding: 5px 7px;
+        font-size: 1.35rem;
+        letter-spacing: 0.03em;
+    }
+
+    body.mobile-catalog-page
+    .catalog-stat-card p:last-child {
+        font-size: 8px;
+        letter-spacing: 0.08em;
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Mobile catalog search and filter bottom sheet                */
+    /* ------------------------------------------------------------ */
+
+    body.mobile-catalog-page
+    main > section:nth-of-type(2) {
+        margin-top: -14px;
+        padding-bottom: 52px;
+    }
+
+    body.mobile-catalog-page
+    main > section:nth-of-type(2)
+    > div {
+        padding-right: 12px;
+        padding-left: 12px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-filter-panel {
+        border-radius: 22px;
+        padding: 12px;
+    }
+
+    .mobile-catalog-primary {
+        display: grid;
+        grid-template-columns:
+            minmax(0, 1fr)
+            auto;
+        gap: 9px;
+    }
+
+    .mobile-catalog-primary
+    label {
+        min-width: 0;
+    }
+
+    .mobile-catalog-primary
+    input {
+        height: 48px;
+        padding-right: 12px;
+        font-size: 13px;
+    }
+
+    .mobile-catalog-primary
+    > button[type="submit"] {
+        width: 48px;
+        height: 48px;
+        overflow: hidden;
+        border-radius: 14px;
+        padding: 0;
+        font-size: 0;
+    }
+
+    .mobile-catalog-primary
+    > button[type="submit"] span {
+        font-size: 17px;
+    }
+
+    .mobile-filter-toggle {
+        display: flex;
+        width: 100%;
+        height: 46px;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 9px;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        background: #f8fafc;
+        padding: 0 14px;
+        color: #374151;
+        font-size: 12px;
+        font-weight: 900;
+    }
+
+    .mobile-filter-toggle-left {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+    }
+
+    .mobile-filter-count {
+        display: inline-flex;
+        min-width: 21px;
+        height: 21px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background: #dc2626;
+        padding: 0 6px;
+        color: white;
+        font-size: 9px;
+    }
+
+    .mobile-filter-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 92;
+        display: block;
+        visibility: hidden;
+        background: rgba(2, 6, 23, 0.58);
+        opacity: 0;
+        backdrop-filter: blur(5px);
+        transition:
+            visibility 0.3s ease,
+            opacity 0.3s ease;
+    }
+
+    .mobile-filter-drawer {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 93;
+        display: block;
+        max-height: min(78dvh, 680px);
+        overflow-y: auto;
+        border-radius: 26px 26px 0 0;
+        background: white;
+        padding:
+            18px
+            16px
+            calc(
+                20px +
+                var(--mobile-safe-bottom)
+            );
+        box-shadow:
+            0 -28px 80px rgba(15, 23, 42, 0.25);
+        transform: translateY(105%);
+        transition:
+            transform 0.38s
+            cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    body.mobile-filter-open
+    .mobile-filter-overlay {
+        visibility: visible;
+        opacity: 1;
+    }
+
+    body.mobile-filter-open
+    .mobile-filter-drawer {
+        transform: translateY(0);
+    }
+
+    .mobile-filter-handle {
+        width: 42px;
+        height: 4px;
+        margin: 0 auto 16px;
+        border-radius: 999px;
+        background: #d1d5db;
+    }
+
+    .mobile-filter-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 18px;
+    }
+
+    .mobile-filter-header h3 {
+        color: #111827;
+        font-size: 20px;
+        font-weight: 900;
+        letter-spacing: -0.03em;
+    }
+
+    .mobile-filter-close {
+        display: flex;
+        width: 38px;
+        height: 38px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        color: #6b7280;
+        font-size: 16px;
+    }
+
+    .mobile-filter-fields {
+        display: grid;
+        gap: 12px;
+    }
+
+    .mobile-filter-fields select {
+        height: 52px;
+        border-radius: 14px;
+        background: #f8fafc;
+    }
+
+    .mobile-filter-actions {
+        display: grid;
+        grid-template-columns:
+            0.7fr
+            1.3fr;
+        gap: 10px;
+        margin-top: 20px;
+    }
+
+    .mobile-filter-clear,
+    .mobile-filter-apply {
+        display: inline-flex;
+        min-height: 50px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 14px;
+        font-size: 12px;
+        font-weight: 900;
+    }
+
+    .mobile-filter-clear {
+        border: 1px solid #e5e7eb;
+        color: #4b5563;
+        background: white;
+    }
+
+    .mobile-filter-apply {
+        border: 0;
+        color: white;
+        background: #dc2626;
+        box-shadow:
+            0 14px 30px rgba(220, 38, 38, 0.22);
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Mobile catalog cards                                         */
+    /* ------------------------------------------------------------ */
+
+    body.mobile-catalog-page
+    main > section:nth-of-type(2)
+    .mb-6.mt-10 {
+        align-items: flex-end;
+        margin-top: 34px;
+        margin-bottom: 18px;
+    }
+
+    body.mobile-catalog-page
+    main > section:nth-of-type(2)
+    .mb-6.mt-10 h2 {
+        font-size: 1.7rem;
+        line-height: 1;
+    }
+
+    body.mobile-catalog-page
+    #catalogProductGrid {
+        gap: 10px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-product-card {
+        border-radius: 16px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-product-card:hover {
+        transform: none;
+    }
+
+    body.mobile-catalog-page
+    .catalog-product-card:active {
+        transform: scale(0.985);
+    }
+
+    body.mobile-catalog-page
+    .catalog-cover-stage {
+        aspect-ratio: 4 / 5;
+    }
+
+    body.mobile-catalog-page
+    .catalog-cover-stage
+    > span {
+        padding: 5px 8px;
+        font-size: 8px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-cover-stage
+    > div.absolute {
+        right: 8px;
+        bottom: 8px;
+        left: 8px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-card-body {
+        min-height: 186px;
+        padding: 11px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-card-body
+    > p:first-child {
+        font-size: 8px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-card-body
+    > a:nth-of-type(1) {
+        min-height: 2.35rem;
+        margin-top: 6px;
+        font-size: 12px;
+        line-height: 1.15rem;
+    }
+
+    body.mobile-catalog-page
+    .catalog-card-body
+    > p:nth-of-type(2) {
+        display: none;
+    }
+
+    body.mobile-catalog-page
+    .catalog-card-body
+    .mt-4.space-y-1\.5 {
+        margin-top: 11px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-card-body
+    .mt-4.space-y-1\.5 span {
+        font-size: 9px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-card-body
+    .mt-auto.grid {
+        gap: 6px;
+        padding-top: 13px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-card-body
+    .mt-auto.grid > a {
+        height: 36px;
+        border-radius: 10px;
+        padding: 0 7px;
+        font-size: 9px;
+    }
+
+    body.mobile-catalog-page
+    .catalog-card-body
+    .mt-auto.grid > button {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+    }
+
+    body.mobile-catalog-page
+    #catalogLoadMorePanel {
+        margin-top: 34px;
+    }
+
+    body.mobile-catalog-page
+    #catalogLoadMoreButton {
+        min-width: 0;
+        width: 100%;
+        max-width: 360px;
+        min-height: 50px;
+        border-radius: 15px;
+        padding: 12px 18px;
+        font-size: 11px;
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Mobile recommendation editorial rail                         */
+    /* ------------------------------------------------------------ */
+
+    body.mobile-catalog-page
+    #recommendations-section {
+        padding-top: 62px;
+        padding-bottom: 62px;
+    }
+
+    body.mobile-catalog-page
+    #recommendations-section
+    > div {
+        padding-right: 16px;
+        padding-left: 16px;
+    }
+
+    body.mobile-catalog-page
+    .recommendation-heading h2 {
+        font-size: 2rem;
+        line-height: 1.03;
+    }
+
+    body.mobile-catalog-page
+    #recommendations-grid {
+        margin-top: 34px;
+    }
+
+    body.mobile-catalog-page
+    .recommendation-feature {
+        min-height: 0;
+        border-radius: 22px;
+    }
+
+    body.mobile-catalog-page
+    .recommendation-feature
+    > div:first-child {
+        min-height: 290px;
+    }
+
+    body.mobile-catalog-page
+    .recommendation-feature
+    > div:last-child {
+        padding: 24px;
+    }
+
+    body.mobile-catalog-page
+    #recommendations-grid
+    > div:last-child {
+        display: grid;
+        grid-auto-columns:
+            clamp(
+                250px,
+                80vw,
+                310px
+            );
+        grid-auto-flow: column;
+        overflow-x: auto;
+        gap: 12px;
+        margin-right: -16px;
+        padding-top: 14px;
+        padding-right: 16px;
+        padding-bottom: 10px;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+    }
+
+    body.mobile-catalog-page
+    #recommendations-grid
+    > div:last-child::-webkit-scrollbar {
+        display: none;
+    }
+
+    body.mobile-catalog-page
+    .recommendation-side-card {
+        min-height: 130px;
+        scroll-snap-align: start;
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Quick View becomes a native-feeling bottom sheet             */
+    /* ------------------------------------------------------------ */
+
+    body.mobile-catalog-page
+    #productModal
+    > div.absolute.inset-0.flex {
+        align-items: flex-end;
+        padding: 0;
+    }
+
+    body.mobile-catalog-page
+    #productModalBox {
+        width: 100%;
+        max-width: none;
+        max-height: 91dvh;
+        border-radius: 26px 26px 0 0;
+    }
+
+    body.mobile-catalog-page
+    #productModalBox
+    > div:first-child {
+        display: flex;
+        min-height: 180px;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+    }
+
+    body.mobile-catalog-page
+    #productModalBox
+    > div:first-child
+    > div:first-child {
+        width: 118px;
+        max-width: 118px;
+        border-radius: 14px;
+    }
+
+    body.mobile-catalog-page
+    #productModalBox
+    > div:last-child {
+        max-height: calc(91dvh - 180px);
+        padding: 22px 18px
+            calc(
+                22px +
+                var(--mobile-safe-bottom)
+            );
+    }
+
+    body.mobile-catalog-page
+    #productModalBox h2 {
+        font-size: 1.65rem;
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Chatbot and footer                                            */
+    /* ------------------------------------------------------------ */
+
+    body.mobile-catalog-page
+    #chatbot-container {
+        right: 14px !important;
+        bottom:
+            calc(
+                var(--mobile-dock-height) +
+                var(--mobile-safe-bottom) +
+                23px
+            ) !important;
+    }
+
+    body.mobile-catalog-page
+    #chat-window {
+        position: fixed !important;
+        right: 10px !important;
+        bottom:
+            calc(
+                var(--mobile-dock-height) +
+                var(--mobile-safe-bottom) +
+                76px
+            ) !important;
+        left: 10px !important;
+        width: auto !important;
+        height: min(66dvh, 540px) !important;
+    }
+
+    body.mobile-index-page footer,
+    body.mobile-catalog-page footer {
+        padding-bottom:
+            calc(
+                32px +
+                var(--mobile-dock-height) +
+                var(--mobile-safe-bottom)
+            );
+    }
+
+    body.mobile-index-page footer
+    > div,
+    body.mobile-catalog-page footer
+    > div {
+        padding-right: 18px;
+        padding-left: 18px;
+    }
+
+    body.mobile-index-page footer
+    .grid,
+    body.mobile-catalog-page footer
+    .grid {
+        display: block;
+    }
+
+    body.mobile-index-page footer
+    .grid > div,
+    body.mobile-catalog-page footer
+    .grid > div {
+        margin: 0;
+    }
+
+    body.mobile-index-page footer
+    .grid > div:first-child,
+    body.mobile-catalog-page footer
+    .grid > div:first-child {
+        padding-bottom: 28px;
+    }
+
+    .mobile-footer-section {
+        border-top: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .mobile-footer-toggle {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        border: 0;
+        background: transparent;
+        padding: 18px 0;
+        color: inherit;
+        text-align: left;
+    }
+
+    .mobile-footer-toggle-title {
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.17em;
+        text-transform: uppercase;
+    }
+
+    .mobile-footer-chevron {
+        transition: transform 0.25s ease;
+    }
+
+    .mobile-footer-section.is-open
+    .mobile-footer-chevron {
+        transform: rotate(180deg);
+    }
+
+    .mobile-footer-content {
+        display: grid;
+        grid-template-rows: 0fr;
+        opacity: 0;
+        transition:
+            grid-template-rows 0.3s ease,
+            opacity 0.25s ease;
+    }
+
+    .mobile-footer-content > div {
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .mobile-footer-section.is-open
+    .mobile-footer-content {
+        grid-template-rows: 1fr;
+        opacity: 1;
+    }
+
+    .mobile-footer-content-inner {
+        padding-bottom: 20px;
+    }
+
+    /* ------------------------------------------------------------ */
+    /* Reduced motion                                                */
+    /* ------------------------------------------------------------ */
+
+    @media (prefers-reduced-motion: reduce) {
+        .mobile-bottom-nav,
+        .mobile-filter-drawer,
+        body.mobile-index-page #mobileMenu,
+        body.mobile-catalog-page #navMobileMenu {
+            transition: none !important;
+        }
+    }
+}

@@ -501,14 +501,19 @@ $genre_visuals = [
                 transition-duration: 0.01ms !important;
             }
         }
-    </style>
+    </style>
     <link
         rel="stylesheet"
         href="assets/css/index_motion.css"
     >
+    <link
+        rel="stylesheet"
+        href="assets/css/mobile_experience.css?v=1"
+    >
+
 </head>
 
-<body class="text-gray-900 antialiased">
+<body class="mobile-index-page text-gray-900 antialiased">
 
     <!-- Navbar -->
     <nav
@@ -2546,7 +2551,12 @@ $genre_visuals = [
             );
         });
     </script>
-
+
     <script src="assets/js/index_motion.js"></script>
+    <script
+        src="assets/js/mobile_experience.js?v=1"
+        defer
+    ></script>
+
 </body>
 </html>
