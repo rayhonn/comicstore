@@ -586,18 +586,14 @@ $my_reviews =
 
                                     <button
                                         type="button"
-                                        onclick="openReviewModal(
-                                            <?= (int) $item['product_id'] ?>,
-                                            <?= (int) $item['order_id'] ?>,
-                                            <?= json_encode(
-                                                (string) $item['product_title'],
-                                                JSON_HEX_TAG |
-                                                JSON_HEX_AMP |
-                                                JSON_HEX_APOS |
-                                                JSON_HEX_QUOT
-                                            ) ?>
-                                        )"
-                                        class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition-colors flex-shrink-0"
+                                        class="write-review-button bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition-colors flex-shrink-0"
+                                        data-product-id="<?= (int) $item['product_id'] ?>"
+                                        data-order-id="<?= (int) $item['order_id'] ?>"
+                                        data-product-title="<?= htmlspecialchars(
+                                            (string) $item['product_title'],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
                                     >
                                         ✍️ Write Review
                                     </button>
@@ -894,6 +890,8 @@ $my_reviews =
         document.getElementById('modalRatingInput');
     const modalReviewComment =
         document.getElementById('modalReviewComment');
+    const writeReviewButtons =
+        document.querySelectorAll('.write-review-button');
 
     function switchTab(tab) {
         const showPending = tab === 'pending';
@@ -984,6 +982,36 @@ $my_reviews =
             () => updateModalStars(modalRating)
         );
     }
+
+    writeReviewButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const productId = Number.parseInt(
+                button.dataset.productId ?? '',
+                10
+            );
+            const orderId = Number.parseInt(
+                button.dataset.orderId ?? '',
+                10
+            );
+            const productTitle =
+                button.dataset.productTitle ?? '';
+
+            if (
+                !Number.isInteger(productId) ||
+                productId < 1 ||
+                !Number.isInteger(orderId) ||
+                orderId < 1
+            ) {
+                return;
+            }
+
+            openReviewModal(
+                productId,
+                orderId,
+                productTitle
+            );
+        });
+    });
 
     reviewModal.addEventListener(
         'click',
