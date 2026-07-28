@@ -145,6 +145,18 @@ $review_success = '';
 $review_error = '';
 
 if (
+    isset($_SESSION['product_review_success']) &&
+    is_string($_SESSION['product_review_success'])
+) {
+    $review_success =
+        $_SESSION['product_review_success'];
+
+    unset(
+        $_SESSION['product_review_success']
+    );
+}
+
+if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['submit_review'])
 ) {
@@ -203,14 +215,15 @@ if (
                 $comment,
             ]);
 
-            $review_success =
+            $_SESSION['product_review_success'] =
                 'Review submitted successfully!';
-            $can_review = false;
-            $existing_review = [
-                'review_status' => 'approved',
-                'review_rating' => (int) $rating,
-                'review_comment' => $comment,
-            ];
+
+            header(
+                'Location: product_detail.php?id=' .
+                $id .
+                '#customer-reviews'
+            );
+            exit;
         }
     }
 }
@@ -246,10 +259,11 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         @keyframes fadeIn { to { opacity: 1; } }
         .star-btn { transition: transform 0.1s ease; cursor: pointer; }
         .star-btn:hover { transform: scale(1.2); }
-    </style>
+    </style>
+
     <link
         rel="stylesheet"
-        href="../assets/css/product_detail_refinement.css?v=1"
+        href="../assets/css/product_detail_refinement.css?v=2"
     >
 </head>
 <body class="bg-[#F5F0EB] min-h-screen">
@@ -482,8 +496,20 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             <h3 class="font-bold text-gray-800 mb-4">More from "<?= htmlspecialchars($product['product_series']) ?>"</h3>
             <div class="related-volumes-track flex gap-4 overflow-x-auto pb-2">
                 <?php foreach ($related as $r): ?>
-                <a href="product_detail.php?id=<?= (int) $r['product_id'] ?>"
-                   class="related-volume-card flex-shrink-0 w-28 transition-all duration-200 group">
+                <a
+                    href="product_detail.php?id=<?= (int) $r['product_id'] ?>"
+                    class="related-volume-card group w-28 flex-shrink-0 transition-all duration-200"
+                >
+                    <span
+                        class="related-volume-format-badge <?= $r['product_type'] === 'ebook'
+                            ? 'is-ebook'
+                            : 'is-physical' ?>"
+                    >
+                        <?= $r['product_type'] === 'ebook'
+                            ? 'E-Book'
+                            : 'Physical' ?>
+                    </span>
+
                     <?php if ($r['product_cover_image']): ?>
                         <img src="../assets/images/<?= htmlspecialchars($r['product_cover_image']) ?>"
                              class="related-volume-cover w-28 h-40 object-cover rounded-xl mb-2 shadow-sm group-hover:shadow-md transition-shadow">
@@ -501,7 +527,10 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         <?php endif; ?>
 
         <!-- Reviews Section -->
-        <div class="bg-white rounded-2xl shadow-sm p-6 mb-8">
+        <div
+            id="customer-reviews"
+            class="bg-white rounded-2xl shadow-sm p-6 mb-8 scroll-mt-28"
+        >
             <div class="flex items-center justify-between mb-6">
                 <div>
                     <h3 class="font-bold text-gray-800 text-lg">Customer Reviews</h3>
@@ -565,18 +594,38 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                     </button>
                 </form>
             </div>
-            <?php elseif ($existing_review): ?>
-            <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6">
-                <p class="text-sm font-semibold text-blue-700 mb-1">
-                    <?= $existing_review['review_status'] === 'pending' ? '⏳ Your review is pending approval.' : '✅ Your review has been published.' ?>
-                </p>
-                <div class="flex gap-0.5 mb-1">
-                    <?php for ($s = 1; $s <= 5; $s++): ?>
-                    <span class="<?= $s <= $existing_review['review_rating'] ? 'text-yellow-400' : 'text-gray-300' ?>">★</span>
-                    <?php endfor; ?>
+            <?php elseif (
+                $existing_review &&
+                $existing_review['review_status'] === 'pending'
+            ): ?>
+                <div
+                    class="mb-6 rounded-xl border border-blue-100 bg-blue-50 p-4"
+                >
+                    <p
+                        class="mb-1 text-sm font-semibold text-blue-700"
+                    >
+                        ⏳ Your review is pending approval.
+                    </p>
+
+                    <div class="mb-1 flex gap-0.5">
+                        <?php for ($s = 1; $s <= 5; $s++): ?>
+                            <span
+                                class="<?= $s <=
+                                    $existing_review['review_rating']
+                                        ? 'text-yellow-400'
+                                        : 'text-gray-300' ?>"
+                            >
+                                ★
+                            </span>
+                        <?php endfor; ?>
+                    </div>
+
+                    <p class="text-sm text-gray-600">
+                        <?= htmlspecialchars(
+                            $existing_review['review_comment']
+                        ) ?>
+                    </p>
                 </div>
-                <p class="text-sm text-gray-600"><?= htmlspecialchars($existing_review['review_comment']) ?></p>
-            </div>
             <?php endif; ?>
 
             <!-- Reviews List -->
@@ -630,6 +679,153 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         </div>
 
     </div>
+
+    <!-- Footer -->
+    <footer
+        class="border-t border-gray-200 bg-[#F5F0EB] py-12 text-gray-800"
+    >
+        <div class="mx-auto max-w-7xl px-6">
+            <div
+                class="mb-10 grid grid-cols-2 gap-8 md:grid-cols-4"
+            >
+                <div class="col-span-2 md:col-span-1">
+                    <h3 class="mb-4 text-lg font-black">
+                        MANGA<span class="text-red-600">VAULT</span>
+                    </h3>
+
+                    <p
+                        class="text-sm leading-relaxed text-gray-600"
+                    >
+                        Malaysia's ultimate destination for manga
+                        and comic book lovers.
+                    </p>
+                </div>
+
+                <div>
+                    <h4
+                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
+                    >
+                        Shop
+                    </h4>
+
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li>
+                            <a
+                                href="home.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                All Manga
+                            </a>
+                        </li>
+
+                        <li>
+                            <a
+                                href="home.php?type=physical"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                Physical Books
+                            </a>
+                        </li>
+
+                        <li>
+                            <a
+                                href="home.php?type=ebook"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                E-Books
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4
+                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
+                    >
+                        Help
+                    </h4>
+
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li>
+                            <a
+                                href="orders.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                My Orders
+                            </a>
+                        </li>
+
+                        <li>
+                            <a
+                                href="profile.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                My Account
+                            </a>
+                        </li>
+
+                        <li>
+                            <a
+                                href="faq.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                FAQ
+                            </a>
+                        </li>
+
+                        <li>
+                            <a
+                                href="about.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                About Us
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4
+                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
+                    >
+                        Follow Us
+                    </h4>
+
+                    <div class="flex gap-3">
+                        <a
+                            href="#"
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
+                            aria-label="Facebook"
+                        >
+                            f
+                        </a>
+
+                        <a
+                            href="#"
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
+                            aria-label="Twitter"
+                        >
+                            t
+                        </a>
+
+                        <a
+                            href="#"
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
+                            aria-label="LinkedIn"
+                        >
+                            in
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div
+                class="border-t border-gray-300 pt-6 text-center text-xs text-gray-500"
+            >
+                © 2026 MangaVault. All rights reserved.
+            </div>
+        </div>
+    </footer>
 
     <script>
     let currentRating = 0;
@@ -738,7 +934,8 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
     .catch(() => {
         document.getElementById('also-like-section').style.display = 'none';
     });
-    </script>
+    </script>
+
     <script
         src="../assets/js/product_detail_quantity.js?v=1"
         defer
