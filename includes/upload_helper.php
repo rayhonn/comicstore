@@ -34,6 +34,33 @@ function getUploadedMimeType(string $tmpPath): string
     return $finfo->file($tmpPath);
 }
 
+function getUploadedImageDimensions(
+    string $tmpPath,
+    string $label
+): array {
+    $imageInfo = @getimagesize($tmpPath);
+
+    if (
+        $imageInfo === false ||
+        !isset($imageInfo[0], $imageInfo[1])
+    ) {
+        throw new Exception(
+            $label . ' is not a valid image.'
+        );
+    }
+
+    $width = (int) $imageInfo[0];
+    $height = (int) $imageInfo[1];
+
+    if ($width < 1 || $height < 1) {
+        throw new Exception(
+            $label . ' has invalid dimensions.'
+        );
+    }
+
+    return [$width, $height];
+}
+
 function uploadProductImage(array $file, string $uploadDir): string
 {
     validateUploadError($file, 'Product image');
@@ -65,6 +92,25 @@ function uploadProductImage(array $file, string $uploadDir): string
         throw new Exception('Invalid product image file type.');
     }
 
+    [$imageWidth, $imageHeight] =
+        getUploadedImageDimensions(
+            $file['tmp_name'],
+            'Product image'
+        );
+
+    $aspectRatio =
+        $imageWidth / $imageHeight;
+
+    if (
+        $imageHeight <= $imageWidth ||
+        $aspectRatio < 0.60 ||
+        $aspectRatio > 0.75
+    ) {
+        throw new Exception(
+            'Product image must use a portrait cover with an aspect ratio close to 2:3.'
+        );
+    }
+
     ensureUploadDirectory($uploadDir);
 
     $newFileName = 'product_' . date('Ymd_His') . '_' . bin2hex(random_bytes(8)) . '.' . $extension;
@@ -72,6 +118,129 @@ function uploadProductImage(array $file, string $uploadDir): string
 
     if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
         throw new Exception('Failed to save product image.');
+    }
+
+    return $newFileName;
+}
+
+function uploadHomepageHeroImage(
+    array $file,
+    string $uploadDir
+): string {
+    validateUploadError(
+        $file,
+        'Homepage hero image'
+    );
+
+    if (
+        $file['error'] === UPLOAD_ERR_NO_FILE ||
+        empty($file['name'])
+    ) {
+        return '';
+    }
+
+    if ($file['size'] > 5 * 1024 * 1024) {
+        throw new Exception(
+            'Homepage hero image must not exceed 5MB.'
+        );
+    }
+
+    $allowedExtensions = [
+        'jpg',
+        'jpeg',
+        'png',
+        'webp',
+        'avif',
+    ];
+
+    $allowedMimeTypes = [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/avif',
+    ];
+
+    $extension = strtolower(
+        pathinfo(
+            $file['name'],
+            PATHINFO_EXTENSION
+        )
+    );
+
+    $mimeType = getUploadedMimeType(
+        $file['tmp_name']
+    );
+
+    if (!in_array(
+        $extension,
+        $allowedExtensions,
+        true
+    )) {
+        throw new Exception(
+            'Homepage hero image must be JPG, JPEG, PNG, WEBP, or AVIF.'
+        );
+    }
+
+    if (!in_array(
+        $mimeType,
+        $allowedMimeTypes,
+        true
+    )) {
+        throw new Exception(
+            'Invalid homepage hero image file type.'
+        );
+    }
+
+    [$imageWidth, $imageHeight] =
+        getUploadedImageDimensions(
+            $file['tmp_name'],
+            'Homepage hero image'
+        );
+
+    $aspectRatio =
+        $imageWidth / $imageHeight;
+
+    if (
+        $imageWidth < 1200 ||
+        $imageHeight < 600
+    ) {
+        throw new Exception(
+            'Homepage hero image must be at least 1200 × 600 pixels.'
+        );
+    }
+
+    if (
+        $imageWidth <= $imageHeight ||
+        $aspectRatio < 1.50 ||
+        $aspectRatio > 2.50
+    ) {
+        throw new Exception(
+            'Homepage hero image must use a landscape aspect ratio between 3:2 and 5:2.'
+        );
+    }
+
+    ensureUploadDirectory($uploadDir);
+
+    $newFileName =
+        'hero_' .
+        date('Ymd_His') .
+        '_' .
+        bin2hex(random_bytes(8)) .
+        '.' .
+        $extension;
+
+    $targetPath =
+        rtrim($uploadDir, '/\\') .
+        DIRECTORY_SEPARATOR .
+        $newFileName;
+
+    if (!move_uploaded_file(
+        $file['tmp_name'],
+        $targetPath
+    )) {
+        throw new Exception(
+            'Failed to save homepage hero image.'
+        );
     }
 
     return $newFileName;

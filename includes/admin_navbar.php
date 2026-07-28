@@ -119,6 +119,7 @@ $management_pages = [
     'vouchers.php',
     'tiers.php',
     'staff.php',
+    'homepage.php',
     'faq.php',
     'about.php',
 ];
@@ -550,6 +551,15 @@ $admin_display_name =
                     ) ?> block px-3 py-2 rounded-lg text-xs transition-colors"
                 >
                     Staff Accounts
+                </a>
+
+                <a
+                    href="homepage.php"
+                    class="<?= adminSidebarSubLinkClass(
+                        $admin_current === 'homepage.php'
+                    ) ?> block px-3 py-2 rounded-lg text-xs transition-colors"
+                >
+                    Homepage Content
                 </a>
 
                 <a

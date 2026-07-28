@@ -5,6 +5,48 @@ require_once __DIR__ . '/includes/session.php';
 start_secure_session();
 
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/logger.php';
+
+$hero_backgrounds = [
+    'main' => null,
+    'rankings' => null,
+    'ebook' => null,
+];
+
+try {
+    $hero_background_stmt = $pdo->query("
+        SELECT
+            hero_slide_key,
+            hero_slide_background
+        FROM homepage_hero_slides
+    ");
+
+    foreach (
+        $hero_background_stmt->fetchAll(
+            PDO::FETCH_ASSOC
+        ) as $hero_background
+    ) {
+        $slide_key =
+            (string) $hero_background[
+                'hero_slide_key'
+            ];
+
+        if (array_key_exists(
+            $slide_key,
+            $hero_backgrounds
+        )) {
+            $hero_backgrounds[$slide_key] =
+                $hero_background[
+                    'hero_slide_background'
+                ];
+        }
+    }
+} catch (Throwable $e) {
+    app_error_log(
+        'Homepage hero backgrounds could not be loaded: ' .
+        $e->getMessage()
+    );
+}
 
 $rankings = $pdo->query("
     SELECT
@@ -109,6 +151,37 @@ function coverImageUrl(?string $filename): string
         'assets/images/' .
         rawurlencode(basename($filename));
 }
+
+function homepageHeroImageUrl(?string $filename): string
+{
+    if ($filename === null || $filename === '') {
+        return '';
+    }
+
+    return
+        'assets/images/homepage/' .
+        rawurlencode(basename($filename));
+}
+
+$main_hero_background =
+    homepageHeroImageUrl(
+        $hero_backgrounds['main']
+    );
+
+if ($main_hero_background === '') {
+    $main_hero_background =
+        'assets/images/manga cover.avif';
+}
+
+$rankings_hero_background =
+    homepageHeroImageUrl(
+        $hero_backgrounds['rankings']
+    );
+
+$ebook_hero_background =
+    homepageHeroImageUrl(
+        $hero_backgrounds['ebook']
+    );
 
 $genre_visuals = [
     'action' => [
@@ -356,8 +429,9 @@ $genre_visuals = [
             z-index: 2;
             width: 100%;
             height: 100%;
-            object-fit: contain;
-            padding: 14px;
+            object-fit: cover;
+            object-position: center;
+            padding: 0;
             transition: transform 0.45s ease;
         }
 
@@ -718,7 +792,11 @@ $genre_visuals = [
             >
                 <div
                     class="absolute inset-0 bg-cover bg-center"
-                    style="background-image: url('assets/images/manga cover.avif');"
+                    style="background-image: url('<?= htmlspecialchars(
+                        $main_hero_background,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>');"
                 ></div>
 
                 <div
@@ -893,6 +971,23 @@ $genre_visuals = [
                 class="relative h-full min-h-[680px] flex-shrink-0 overflow-hidden bg-[#130e09] lg:h-[720px]"
                 style="width: 33.333333%;"
             >
+                <?php if (
+                    $rankings_hero_background !== ''
+                ): ?>
+                    <div
+                        class="absolute inset-0 bg-cover bg-center opacity-45"
+                        style="background-image: url('<?= htmlspecialchars(
+                            $rankings_hero_background,
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>');"
+                    ></div>
+
+                    <div
+                        class="absolute inset-0 bg-[#130e09]/80"
+                    ></div>
+                <?php endif; ?>
+
                 <div
                     class="absolute inset-0 bg-[radial-gradient(circle_at_70%_45%,rgba(245,158,11,0.22),transparent_34%),radial-gradient(circle_at_20%_80%,rgba(220,38,38,0.13),transparent_30%)]"
                 ></div>
@@ -1059,6 +1154,23 @@ $genre_visuals = [
                 class="relative h-full min-h-[680px] flex-shrink-0 overflow-hidden bg-[#101332] lg:h-[720px]"
                 style="width: 33.333333%;"
             >
+                <?php if (
+                    $ebook_hero_background !== ''
+                ): ?>
+                    <div
+                        class="absolute inset-0 bg-cover bg-center opacity-40"
+                        style="background-image: url('<?= htmlspecialchars(
+                            $ebook_hero_background,
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>');"
+                    ></div>
+
+                    <div
+                        class="absolute inset-0 bg-[#101332]/82"
+                    ></div>
+                <?php endif; ?>
+
                 <div
                     class="absolute inset-0 bg-[radial-gradient(circle_at_72%_45%,rgba(99,102,241,0.35),transparent_32%),radial-gradient(circle_at_15%_85%,rgba(168,85,247,0.18),transparent_32%)]"
                 ></div>
