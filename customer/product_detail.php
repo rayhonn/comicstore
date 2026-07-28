@@ -306,33 +306,93 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                 ease;
         }
 
+        .product-actions-row {
+            position: relative;
+        }
+
         .product-wishlist-toast {
-            position: fixed;
-            right: 24px;
-            bottom: 24px;
-            z-index: 100;
-            max-width: 320px;
-            border-radius: 12px;
-            background: #111827;
-            padding: 12px 16px;
-            color: #ffffff;
-            font-size: 13px;
+            position: absolute;
+            right: 0;
+            bottom: calc(100% + 12px);
+            z-index: 30;
+            display: flex;
+            width: max-content;
+            max-width: min(
+                280px,
+                calc(100vw - 48px)
+            );
+            align-items: center;
+            gap: 8px;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background: #ffffff;
+            padding: 10px 12px;
+            color: #374151;
+            font-size: 12px;
             font-weight: 700;
+            line-height: 1.4;
+            box-shadow:
+                0 12px 30px
+                rgba(15, 23, 42, 0.14);
             opacity: 0;
             pointer-events: none;
-            transform: translateY(12px);
+            transform:
+                translateY(6px)
+                scale(0.98);
+            transform-origin: right bottom;
             transition:
-                opacity 0.2s ease,
-                transform 0.2s ease;
+                opacity 0.18s ease,
+                transform 0.18s ease;
+        }
+
+        .product-wishlist-toast::before {
+            content: '✓';
+            display: flex;
+            width: 20px;
+            height: 20px;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            border-radius: 50%;
+            background: #dcfce7;
+            color: #15803d;
+            font-size: 11px;
+            font-weight: 900;
+        }
+
+        .product-wishlist-toast::after {
+            content: '';
+            position: absolute;
+            right: 20px;
+            bottom: -6px;
+            width: 11px;
+            height: 11px;
+            border-right: 1px solid #e5e7eb;
+            border-bottom: 1px solid #e5e7eb;
+            background: #ffffff;
+            transform: rotate(45deg);
         }
 
         .product-wishlist-toast.is-visible {
             opacity: 1;
-            transform: translateY(0);
+            transform:
+                translateY(0)
+                scale(1);
         }
 
         .product-wishlist-toast.is-error {
-            background: #b91c1c;
+            border-color: #fecaca;
+            color: #991b1b;
+        }
+
+        .product-wishlist-toast.is-error::before {
+            content: '!';
+            background: #fee2e2;
+            color: #b91c1c;
+        }
+
+        .product-wishlist-toast.is-error::after {
+            border-color: #fecaca;
         }
 
         @keyframes wishlistButtonPulse {
@@ -501,7 +561,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                     <?php endif; ?>
 
                     <!-- Actions -->
-                    <div class="flex gap-3 flex-wrap">
+                    <div class="product-actions-row flex gap-3 flex-wrap">
                         <?php if ($product['product_type'] === 'physical' && $product['physical_stock_quantity'] <= 0): ?>
                             <button disabled class="flex-1 bg-gray-200 text-gray-400 font-bold py-3 px-6 rounded-xl cursor-not-allowed">
                                 Out of Stock
