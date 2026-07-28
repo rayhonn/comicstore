@@ -1,79 +1,76 @@
 <?php
 
 require_once __DIR__ . '/../includes/auth.php';
-require_customer();
-
 require_once __DIR__ . '/../includes/db.php';
 
-$search_raw = $_GET['search'] ?? '';
+require_customer();
 
-if (!is_string($search_raw)) {
-    $search_raw = '';
-}
-
-$search = trim($search_raw);
-$search_length = function_exists('mb_strlen')
-    ? mb_strlen($search, 'UTF-8')
-    : strlen($search);
-
-if ($search_length > 100) {
-    $search = '';
-}
-
-function optionalPositiveFilterId(
-    mixed $value
-): ?int {
+function catalogPositiveId(mixed $value): ?int
+{
     if ($value === null || $value === '') {
         return null;
     }
 
-    $validated = filter_var(
+    $id = filter_var(
         $value,
         FILTER_VALIDATE_INT,
         ['options' => ['min_range' => 1]]
     );
 
-    return
-        $validated === false ||
-        $validated === null
-            ? null
-            : (int) $validated;
+    return $id === false ? null : (int) $id;
 }
 
-$category_id = optionalPositiveFilterId(
+function catalogCoverUrl(?string $filename): string
+{
+    if ($filename === null || trim($filename) === '') {
+        return '';
+    }
+
+    return
+        '../assets/images/' .
+        rawurlencode(basename($filename));
+}
+
+$search = isset($_GET['search']) && is_string($_GET['search'])
+    ? trim($_GET['search'])
+    : '';
+
+if (function_exists('mb_substr')) {
+    $search = mb_substr($search, 0, 100, 'UTF-8');
+} else {
+    $search = substr($search, 0, 100);
+}
+
+$categoryId = catalogPositiveId(
     $_GET['category_id'] ?? null
 );
-$genre_id = optionalPositiveFilterId(
+$genreId = catalogPositiveId(
     $_GET['genre_id'] ?? null
 );
+$type = isset($_GET['type']) && is_string($_GET['type'])
+    ? trim($_GET['type'])
+    : '';
 
-$type_raw = $_GET['type'] ?? '';
-$type =
-    is_string($type_raw) &&
-    in_array(
-        $type_raw,
-        ['', 'physical', 'ebook'],
-        true
-    )
-        ? $type_raw
-        : '';
+if (!in_array($type, ['', 'physical', 'ebook'], true)) {
+    $type = '';
+}
 
 $sql = "
     SELECT DISTINCT
         p.*,
         c.category_name,
         pp.physical_stock_quantity,
+        pp.physical_low_stock_threshold,
         pe.ebook_download_limit
     FROM products p
     LEFT JOIN categories c
-        ON p.product_category_id = c.category_id
+        ON c.category_id = p.product_category_id
     LEFT JOIN product_physical pp
-        ON p.product_id = pp.physical_product_id
+        ON pp.physical_product_id = p.product_id
     LEFT JOIN product_ebook pe
-        ON p.product_id = pe.ebook_product_id
+        ON pe.ebook_product_id = p.product_id
     LEFT JOIN product_genres pg
-        ON p.product_id =
-            pg.product_genres_product_id
+        ON pg.product_genres_product_id = p.product_id
     WHERE p.product_is_available = 1
 ";
 
@@ -85,21 +82,28 @@ if ($search !== '') {
             p.product_title LIKE ?
             OR p.product_series LIKE ?
             OR p.product_author LIKE ?
+            OR p.product_publisher LIKE ?
         )
     ";
-    $params = array_fill(0, 3, '%' . $search . '%');
+
+    $searchTerm = '%' . $search . '%';
+    array_push(
+        $params,
+        $searchTerm,
+        $searchTerm,
+        $searchTerm,
+        $searchTerm
+    );
 }
 
-if ($category_id !== null) {
+if ($categoryId !== null) {
     $sql .= " AND p.product_category_id = ?";
-    $params[] = $category_id;
+    $params[] = $categoryId;
 }
 
-if ($genre_id !== null) {
-    $sql .= "
-        AND pg.product_genres_genre_id = ?
-    ";
-    $params[] = $genre_id;
+if ($genreId !== null) {
+    $sql .= " AND pg.product_genres_genre_id = ?";
+    $params[] = $genreId;
 }
 
 if ($type !== '') {
@@ -107,448 +111,1400 @@ if ($type !== '') {
     $params[] = $type;
 }
 
-$sql .= " ORDER BY p.product_created_at DESC";
+$sql .= "
+    ORDER BY
+        p.product_created_at DESC,
+        p.product_id DESC
+";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
-$raw_products =
-    $stmt->fetchAll(PDO::FETCH_ASSOC);
+$rawProducts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$grouped = [];
+$groupedProducts = [];
 
-foreach ($raw_products as $product) {
-    $key =
-        $product['product_series']
-            ? $product['product_series'] .
-                '||' .
-                ($product['product_volume_number'] ?? '0')
-            : 'solo_' . (int) $product['product_id'];
+foreach ($rawProducts as $product) {
+    $series = trim((string) ($product['product_series'] ?? ''));
+    $volume = (string) ($product['product_volume_number'] ?? '0');
 
-    if (!isset($grouped[$key])) {
-        $grouped[$key] = [
+    $normalizedSeries = function_exists('mb_strtolower')
+        ? mb_strtolower($series, 'UTF-8')
+        : strtolower($series);
+
+    $key = $series !== ''
+        ? $normalizedSeries . '||' . $volume
+        : 'solo_' . (int) $product['product_id'];
+
+    if (!isset($groupedProducts[$key])) {
+        $groupedProducts[$key] = [
             'physical' => null,
             'ebook' => null,
         ];
     }
 
-    if (
-        in_array(
-            $product['product_type'],
-            ['physical', 'ebook'],
-            true
-        )
-    ) {
-        $grouped[$key][$product['product_type']] =
-            $product;
+    $productType = (string) $product['product_type'];
+
+    if (array_key_exists($productType, $groupedProducts[$key])) {
+        $groupedProducts[$key][$productType] = $product;
     }
 }
 
 $products = [];
 
-foreach ($grouped as $entry) {
-    $main =
-        $entry['physical'] ??
-        $entry['ebook'];
+foreach ($groupedProducts as $entry) {
+    $main = $entry['physical'] ?? $entry['ebook'];
 
     if (!$main) {
         continue;
     }
 
-    $main['has_physical'] =
-        $entry['physical'] !== null;
-    $main['has_ebook'] =
-        $entry['ebook'] !== null;
-    $main['physical_id'] =
-        isset($entry['physical']['product_id'])
-            ? (int) $entry['physical']['product_id']
-            : null;
-    $main['ebook_id'] =
-        isset($entry['ebook']['product_id'])
-            ? (int) $entry['ebook']['product_id']
-            : null;
-    $main['ebook_price'] =
-        $entry['ebook']['product_price'] ?? null;
+    $main['has_physical'] = $entry['physical'] !== null;
+    $main['has_ebook'] = $entry['ebook'] !== null;
+    $main['physical_id'] = $entry['physical']['product_id'] ?? null;
+    $main['ebook_id'] = $entry['ebook']['product_id'] ?? null;
+    $main['physical_price'] = $entry['physical']['product_price'] ?? null;
+    $main['ebook_price'] = $entry['ebook']['product_price'] ?? null;
+    $main['physical_stock_quantity'] =
+        $entry['physical']['physical_stock_quantity'] ?? null;
+    $main['physical_low_stock_threshold'] =
+        $entry['physical']['physical_low_stock_threshold'] ?? null;
 
     $products[] = $main;
 }
 
 $categories = $pdo->query("
-    SELECT category_id, category_name
+    SELECT
+        category_id,
+        category_name
     FROM categories
-    ORDER BY category_name
+    ORDER BY category_name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $genres = $pdo->query("
-    SELECT genre_id, genre_name
+    SELECT
+        genre_id,
+        genre_name
     FROM genres
-    ORDER BY genre_name
+    ORDER BY genre_name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+$selectedCategoryName = '';
+foreach ($categories as $category) {
+    if ((int) $category['category_id'] === $categoryId) {
+        $selectedCategoryName = (string) $category['category_name'];
+        break;
+    }
+}
+
+$selectedGenreName = '';
+foreach ($genres as $genre) {
+    if ((int) $genre['genre_id'] === $genreId) {
+        $selectedGenreName = (string) $genre['genre_name'];
+        break;
+    }
+}
+
+$hasFilters =
+    $search !== '' ||
+    $categoryId !== null ||
+    $genreId !== null ||
+    $type !== '';
+
+$totalPhysicalFormats = 0;
+$totalEbookFormats = 0;
+
+foreach ($products as $product) {
+    if ($product['has_physical']) {
+        $totalPhysicalFormats++;
+    }
+
+    if ($product['has_ebook']) {
+        $totalEbookFormats++;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <meta
+        name="description"
+        content="Browse physical manga and e-books in the MangaVault catalog."
+    >
+
     <title>Catalog - MangaVault</title>
+
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        :root {
+            --catalog-ink: #111827;
+            --catalog-red: #dc2626;
+            --catalog-paper: #fffdf9;
+            --catalog-cream: #f4eee7;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            opacity: 0;
+            animation: catalogFadeIn 0.4s ease forwards;
+        }
+
+        @keyframes catalogFadeIn {
+            to {
+                opacity: 1;
+            }
+        }
+
+        .catalog-grid-pattern {
+            background-image:
+                linear-gradient(
+                    rgba(255, 255, 255, 0.055) 1px,
+                    transparent 1px
+                ),
+                linear-gradient(
+                    90deg,
+                    rgba(255, 255, 255, 0.055) 1px,
+                    transparent 1px
+                );
+            background-size: 42px 42px;
+        }
+
+        .catalog-cover-stage {
+            position: relative;
+            aspect-ratio: 2 / 3;
+            overflow: hidden;
+            background: #ebe4dc;
+            isolation: isolate;
+        }
+
+        .catalog-cover-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center;
+            transition: transform 0.5s ease;
+        }
+
+        .catalog-product-card:hover .catalog-cover-image {
+            transform: scale(1.045);
+        }
+
+        .catalog-product-card {
+            box-shadow:
+                0 1px 2px rgba(15, 23, 42, 0.03),
+                0 14px 40px rgba(15, 23, 42, 0.07);
+        }
+
+        .catalog-product-card:hover {
+            box-shadow:
+                0 2px 4px rgba(15, 23, 42, 0.04),
+                0 24px 60px rgba(15, 23, 42, 0.14);
+        }
+
+        .catalog-line-clamp-2 {
+            display: -webkit-box;
+            overflow: hidden;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+        }
+
+        .catalog-modal-scrollbar::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .catalog-modal-scrollbar::-webkit-scrollbar-thumb {
+            border-radius: 999px;
+            background: #d1d5db;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
 </head>
-<body class="bg-[#F5F0EB] min-h-screen">
+<body class="min-h-screen bg-[#f5f0eb] text-gray-900 antialiased">
 
-    <!-- Navbar -->
-    <?php include '../includes/customer_navbar.php'; ?>
+    <?php include __DIR__ . '/../includes/customer_navbar.php'; ?>
 
-    <div class="max-w-7xl mx-auto px-6 py-8">
+    <main>
+        <section
+            class="relative overflow-hidden bg-[#111827] text-white"
+            aria-labelledby="catalog-title"
+        >
+            <div
+                class="absolute inset-0 bg-[radial-gradient(circle_at_78%_30%,rgba(220,38,38,0.28),transparent_34%),radial-gradient(circle_at_15%_85%,rgba(59,130,246,0.15),transparent_32%)]"
+            ></div>
+            <div class="catalog-grid-pattern absolute inset-0 opacity-40"></div>
+            <div
+                class="absolute -right-28 top-1/2 h-96 w-96 -translate-y-1/2 rounded-full border border-white/10"
+            ></div>
+            <div
+                class="absolute -right-8 top-1/2 h-64 w-64 -translate-y-1/2 rounded-full border border-white/10"
+            ></div>
 
-        <!-- Search & Filter -->
-        <div class="bg-white rounded-xl shadow-sm p-4 mb-6">
-            <form method="GET" class="flex flex-wrap gap-3 items-center">
-                <input type="text" name="search" maxlength="100" placeholder="Search title, series, author..."
-                       value="<?= htmlspecialchars($search) ?>"
-                       class="flex-1 min-w-48 px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500">
-                <select name="category_id" class="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500">
-                    <option value="">All Categories</option>
-                    <?php foreach ($categories as $cat): ?>
-                        <option value="<?= (int) $cat['category_id'] ?>" <?= $category_id === (int) $cat['category_id'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($cat['category_name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-                <select name="genre_id" class="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500">
-                    <option value="">All Genres</option>
-                    <?php foreach ($genres as $genre): ?>
-                        <option value="<?= (int) $genre['genre_id'] ?>" <?= $genre_id === (int) $genre['genre_id'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($genre['genre_name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-                <select name="type" class="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500">
-                    <option value="">All Types</option>
-                    <option value="physical" <?= $type === 'physical' ? 'selected' : '' ?>>Physical</option>
-                    <option value="ebook" <?= $type === 'ebook' ? 'selected' : '' ?>>E-Book</option>
-                </select>
-                <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition">Search</button>
-                <?php if ($search || $category_id || $genre_id || $type): ?>
-                    <a href="home.php" class="text-sm text-gray-500 hover:text-red-600">Clear</a>
-                <?php endif; ?>
-            </form>
-        </div>
+            <div
+                class="relative mx-auto grid max-w-7xl items-center gap-10 px-6 py-16 lg:grid-cols-[1fr_0.8fr] lg:py-20"
+            >
+                <div class="max-w-3xl">
+                    <p
+                        class="text-xs font-black uppercase tracking-[0.24em] text-red-400"
+                    >
+                        MangaVault Catalog
+                    </p>
 
-        <!-- Results count -->
-        <p class="text-sm text-gray-500 mb-4">Showing <?= count($products) ?> product<?= count($products) !== 1 ? 's' : '' ?></p>
+                    <h1
+                        id="catalog-title"
+                        class="mt-4 text-4xl font-black leading-[0.96] tracking-[-0.05em] sm:text-5xl lg:text-6xl"
+                    >
+                        Find the story that
+                        <span
+                            class="block bg-gradient-to-r from-red-400 via-orange-300 to-amber-200 bg-clip-text text-transparent"
+                        >
+                            belongs on your shelf.
+                        </span>
+                    </h1>
 
-        <!-- Product Grid -->
-        <?php if (count($products) === 0): ?>
-            <div class="text-center py-16">
-                <div class="text-gray-300 text-6xl mb-4">📚</div>
-                <p class="text-gray-500">No products found.</p>
-                <a href="home.php" class="text-red-600 text-sm hover:underline mt-2 inline-block">Browse all products</a>
+                    <p
+                        class="mt-6 max-w-2xl text-sm leading-7 text-white/55 sm:text-base"
+                    >
+                        Browse physical editions and instant e-books, compare
+                        available formats and open each title for full details.
+                    </p>
+                </div>
+
+                <div
+                    class="grid grid-cols-3 gap-3 sm:gap-4"
+                    aria-label="Catalog summary"
+                >
+                    <div
+                        class="rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl sm:p-5"
+                    >
+                        <p class="text-2xl font-black sm:text-3xl">
+                            <?= count($products) ?>
+                        </p>
+                        <p
+                            class="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/40"
+                        >
+                            Titles
+                        </p>
+                    </div>
+
+                    <div
+                        class="rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl sm:p-5"
+                    >
+                        <p class="text-2xl font-black text-red-300 sm:text-3xl">
+                            <?= $totalPhysicalFormats ?>
+                        </p>
+                        <p
+                            class="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/40"
+                        >
+                            Physical
+                        </p>
+                    </div>
+
+                    <div
+                        class="rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl sm:p-5"
+                    >
+                        <p class="text-2xl font-black text-blue-300 sm:text-3xl">
+                            <?= $totalEbookFormats ?>
+                        </p>
+                        <p
+                            class="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/40"
+                        >
+                            E-Books
+                        </p>
+                    </div>
+                </div>
             </div>
-        <?php else: ?>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
-                <?php foreach ($products as $p):
-                    $detail_id = $p['physical_id'] ?? $p['ebook_id'];
-                ?>
-                <div class="bg-white rounded-xl shadow-sm overflow-hidden hover:-translate-y-1 hover:shadow-md transition-all duration-200 flex flex-col">
-                    <!-- Cover -->
-                    <?php
-                    $is_new = strtotime($p['product_created_at']) >= strtotime('-7 days');
-                    ?>
-                    <a href="#" onclick="event.preventDefault();" class="relative block">
-                        <?php if ($p['product_cover_image']): ?>
-                            <img src="../assets/images/<?= htmlspecialchars($p['product_cover_image']) ?>"
-                                class="w-full h-48 object-cover">
-                        <?php else: ?>
-                            <div class="w-full h-48 bg-gray-100 flex items-center justify-center text-gray-400 text-3xl font-bold">
-                                <?= strtoupper(substr($p['product_title'], 0, 2)) ?>
-                            </div>
-                        <?php endif; ?>
-                        <?php if ($is_new): ?>
-                        <div class="absolute top-2 left-2">
-                            <span class="bg-red-600 text-white text-xs px-2 py-0.5 font-black tracking-wider uppercase rounded-sm">NEW</span>
-                        </div>
-                        <?php endif; ?>
-                    </a>
+        </section>
 
-                    <!-- Info -->
-                    <div class="p-3 flex flex-col flex-1">
-                        <h3 class="text-sm font-semibold text-gray-800 leading-tight mb-1 line-clamp-2">
-                            <?= htmlspecialchars($p['product_title']) ?>
+        <section class="relative z-10 -mt-5 pb-20">
+            <div class="mx-auto max-w-7xl px-6">
+                <div
+                    class="rounded-3xl border border-gray-100 bg-white p-4 shadow-[0_22px_70px_rgba(15,23,42,0.12)] sm:p-6"
+                >
+                    <form
+                        method="GET"
+                        class="grid gap-3 lg:grid-cols-[minmax(260px,1.45fr)_repeat(3,minmax(150px,0.75fr))_auto]"
+                    >
+                        <label class="relative block">
+                            <span class="sr-only">Search catalog</span>
+                            <svg
+                                class="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="m21 21-4.35-4.35m1.35-5.65a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"
+                                ></path>
+                            </svg>
+
+                            <input
+                                type="search"
+                                name="search"
+                                maxlength="100"
+                                value="<?= htmlspecialchars(
+                                    $search,
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>"
+                                placeholder="Search title, series, author or publisher"
+                                class="h-12 w-full rounded-xl border-2 border-gray-100 bg-gray-50 pl-12 pr-4 text-sm outline-none transition focus:border-red-400 focus:bg-white"
+                            >
+                        </label>
+
+                        <label>
+                            <span class="sr-only">Category</span>
+                            <select
+                                name="category_id"
+                                class="h-12 w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 text-sm text-gray-600 outline-none transition focus:border-red-400 focus:bg-white"
+                            >
+                                <option value="">All Categories</option>
+                                <?php foreach ($categories as $category): ?>
+                                    <option
+                                        value="<?= (int) $category['category_id'] ?>"
+                                        <?= $categoryId === (int) $category['category_id']
+                                            ? 'selected'
+                                            : '' ?>
+                                    >
+                                        <?= htmlspecialchars(
+                                            (string) $category['category_name'],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+
+                        <label>
+                            <span class="sr-only">Genre</span>
+                            <select
+                                name="genre_id"
+                                class="h-12 w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 text-sm text-gray-600 outline-none transition focus:border-red-400 focus:bg-white"
+                            >
+                                <option value="">All Genres</option>
+                                <?php foreach ($genres as $genre): ?>
+                                    <option
+                                        value="<?= (int) $genre['genre_id'] ?>"
+                                        <?= $genreId === (int) $genre['genre_id']
+                                            ? 'selected'
+                                            : '' ?>
+                                    >
+                                        <?= htmlspecialchars(
+                                            (string) $genre['genre_name'],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+
+                        <label>
+                            <span class="sr-only">Format</span>
+                            <select
+                                name="type"
+                                class="h-12 w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 text-sm text-gray-600 outline-none transition focus:border-red-400 focus:bg-white"
+                            >
+                                <option value="">All Formats</option>
+                                <option
+                                    value="physical"
+                                    <?= $type === 'physical' ? 'selected' : '' ?>
+                                >
+                                    Physical
+                                </option>
+                                <option
+                                    value="ebook"
+                                    <?= $type === 'ebook' ? 'selected' : '' ?>
+                                >
+                                    E-Book
+                                </option>
+                            </select>
+                        </label>
+
+                        <button
+                            type="submit"
+                            class="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-red-600 px-6 text-sm font-black text-white shadow-lg shadow-red-100 transition hover:-translate-y-0.5 hover:bg-red-700"
+                        >
+                            Search
+                            <span aria-hidden="true">→</span>
+                        </button>
+                    </form>
+
+                    <?php if ($hasFilters): ?>
+                        <div
+                            class="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4"
+                        >
+                            <span
+                                class="mr-1 text-[10px] font-black uppercase tracking-[0.16em] text-gray-400"
+                            >
+                                Active filters
+                            </span>
+
+                            <?php if ($search !== ''): ?>
+                                <span
+                                    class="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-600"
+                                >
+                                    Search: <?= htmlspecialchars(
+                                        $search,
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </span>
+                            <?php endif; ?>
+
+                            <?php if ($selectedCategoryName !== ''): ?>
+                                <span
+                                    class="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700"
+                                >
+                                    <?= htmlspecialchars(
+                                        $selectedCategoryName,
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </span>
+                            <?php endif; ?>
+
+                            <?php if ($selectedGenreName !== ''): ?>
+                                <span
+                                    class="rounded-full bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700"
+                                >
+                                    <?= htmlspecialchars(
+                                        $selectedGenreName,
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </span>
+                            <?php endif; ?>
+
+                            <?php if ($type !== ''): ?>
+                                <span
+                                    class="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700"
+                                >
+                                    <?= $type === 'ebook'
+                                        ? 'E-Book'
+                                        : 'Physical' ?>
+                                </span>
+                            <?php endif; ?>
+
+                            <a
+                                href="home.php"
+                                class="ml-auto text-xs font-black text-red-600 transition hover:text-red-700"
+                            >
+                                Clear all
+                            </a>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+                <div
+                    class="mb-6 mt-10 flex flex-col justify-between gap-3 sm:flex-row sm:items-end"
+                >
+                    <div>
+                        <p
+                            class="text-xs font-black uppercase tracking-[0.18em] text-red-600"
+                        >
+                            Browse the vault
+                        </p>
+                        <h2
+                            class="mt-2 text-3xl font-black tracking-[-0.04em] text-gray-950"
+                        >
+                            <?= $hasFilters
+                                ? 'Search Results'
+                                : 'All Available Titles' ?>
+                        </h2>
+                    </div>
+
+                    <p class="text-sm font-semibold text-gray-400">
+                        <?= count($products) ?> title<?= count($products) === 1
+                            ? ''
+                            : 's' ?> found
+                    </p>
+                </div>
+
+                <?php if (!$products): ?>
+                    <div
+                        class="rounded-3xl border border-dashed border-gray-300 bg-white px-6 py-20 text-center"
+                    >
+                        <div
+                            class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100 text-3xl"
+                        >
+                            📚
+                        </div>
+                        <h3 class="mt-5 text-lg font-black text-gray-900">
+                            No matching titles found
                         </h3>
-                        <p class="text-xs text-gray-400 mb-2">
-                            <?= htmlspecialchars($p['product_series'] ?? '') ?>
-                            <?= $p['product_volume_number'] ? ' · Vol.' . $p['product_volume_number'] : '' ?>
+                        <p class="mt-2 text-sm text-gray-400">
+                            Try changing the search text or removing a filter.
                         </p>
+                        <a
+                            href="home.php"
+                            class="mt-6 inline-flex items-center gap-2 rounded-xl bg-gray-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-red-600"
+                        >
+                            Browse all titles
+                            <span aria-hidden="true">→</span>
+                        </a>
+                    </div>
+                <?php else: ?>
+                    <div
+                        class="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4 xl:grid-cols-5"
+                    >
+                        <?php foreach ($products as $product): ?>
+                            <?php
+                            $detailId = (int) (
+                                $product['physical_id'] ??
+                                $product['ebook_id']
+                            );
+                            $coverUrl = catalogCoverUrl(
+                                $product['product_cover_image'] ?? null
+                            );
+                            $isNew = strtotime(
+                                (string) $product['product_created_at']
+                            ) >= strtotime('-7 days');
+                            $stockQuantity = (int) (
+                                $product['physical_stock_quantity'] ?? 0
+                            );
+                            $stockThreshold = (int) (
+                                $product['physical_low_stock_threshold'] ?? 5
+                            );
 
-                        <!-- Stock (physical only) -->
-                        <?php if ($p['has_physical']): ?>
-                        <p class="text-xs <?= ($p['physical_stock_quantity'] ?? 0) <= 0 ? 'text-red-500' : (($p['physical_stock_quantity'] ?? 0) <= 5 ? 'text-orange-500' : 'text-green-600') ?> mb-2">
-                            <?= ($p['physical_stock_quantity'] ?? 0) <= 0 ? 'Out of Stock' : (($p['physical_stock_quantity'] ?? 0) <= 5 ? 'Low Stock' : 'In Stock') ?>
+                            if (!$product['has_physical']) {
+                                $stockLabel = 'Digital access';
+                                $stockClass = 'text-blue-600 bg-blue-50';
+                            } elseif ($stockQuantity <= 0) {
+                                $stockLabel = 'Out of stock';
+                                $stockClass = 'text-red-600 bg-red-50';
+                            } elseif ($stockQuantity <= $stockThreshold) {
+                                $stockLabel = 'Low stock';
+                                $stockClass = 'text-amber-700 bg-amber-50';
+                            } else {
+                                $stockLabel = 'In stock';
+                                $stockClass = 'text-green-700 bg-green-50';
+                            }
+
+                            $modalData = [
+                                'title' => (string) $product['product_title'],
+                                'series' => (string) ($product['product_series'] ?? ''),
+                                'volume' => (string) ($product['product_volume_number'] ?? ''),
+                                'author' => (string) ($product['product_author'] ?? ''),
+                                'publisher' => (string) ($product['product_publisher'] ?? ''),
+                                'description' => (string) ($product['product_description'] ?? ''),
+                                'cover' => (string) ($product['product_cover_image'] ?? ''),
+                                'category' => (string) ($product['category_name'] ?? ''),
+                                'hasPhysical' => (bool) $product['has_physical'],
+                                'hasEbook' => (bool) $product['has_ebook'],
+                                'physicalId' => $product['physical_id'] !== null
+                                    ? (int) $product['physical_id']
+                                    : null,
+                                'ebookId' => $product['ebook_id'] !== null
+                                    ? (int) $product['ebook_id']
+                                    : null,
+                                'physicalPrice' => $product['physical_price'] !== null
+                                    ? (float) $product['physical_price']
+                                    : null,
+                                'ebookPrice' => $product['ebook_price'] !== null
+                                    ? (float) $product['ebook_price']
+                                    : null,
+                                'stock' => $stockQuantity,
+                            ];
+                            ?>
+
+                            <article
+                                class="catalog-product-card group flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white transition duration-300 hover:-translate-y-2"
+                            >
+                                <a
+                                    href="product_detail.php?id=<?= $detailId ?>"
+                                    class="catalog-cover-stage block"
+                                    aria-label="View <?= htmlspecialchars(
+                                        (string) $product['product_title'],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>"
+                                >
+                                    <?php if ($coverUrl !== ''): ?>
+                                        <img
+                                            src="<?= htmlspecialchars(
+                                                $coverUrl,
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>"
+                                            alt="<?= htmlspecialchars(
+                                                (string) $product['product_title'],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?> cover"
+                                            class="catalog-cover-image"
+                                            loading="lazy"
+                                        >
+                                    <?php else: ?>
+                                        <div
+                                            class="flex h-full items-center justify-center bg-gray-100 text-4xl font-black text-gray-300"
+                                        >
+                                            <?= htmlspecialchars(
+                                                strtoupper(
+                                                    substr(
+                                                        (string) $product['product_title'],
+                                                        0,
+                                                        2
+                                                    )
+                                                ),
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>
+                                        </div>
+                                    <?php endif; ?>
+
+                                    <?php if ($isNew): ?>
+                                        <span
+                                            class="absolute left-3 top-3 rounded-full bg-red-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-white shadow-xl"
+                                        >
+                                            New
+                                        </span>
+                                    <?php endif; ?>
+
+                                    <div
+                                        class="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2"
+                                    >
+                                        <span
+                                            class="rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] backdrop-blur <?= $stockClass ?>"
+                                        >
+                                            <?= $stockLabel ?>
+                                        </span>
+
+                                        <div class="flex gap-1.5">
+                                            <?php if ($product['has_physical']): ?>
+                                                <span
+                                                    class="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-gray-950/80 text-xs text-white shadow-lg backdrop-blur"
+                                                    title="Physical edition"
+                                                >
+                                                    📦
+                                                </span>
+                                            <?php endif; ?>
+
+                                            <?php if ($product['has_ebook']): ?>
+                                                <span
+                                                    class="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-blue-600/90 text-xs text-white shadow-lg backdrop-blur"
+                                                    title="E-book edition"
+                                                >
+                                                    📱
+                                                </span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                </a>
+
+                                <div class="flex flex-1 flex-col p-4">
+                                    <p
+                                        class="text-[10px] font-black uppercase tracking-[0.15em] text-gray-400"
+                                    >
+                                        <?= htmlspecialchars(
+                                            (string) (
+                                                $product['category_name'] ??
+                                                'MangaVault title'
+                                            ),
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </p>
+
+                                    <a
+                                        href="product_detail.php?id=<?= $detailId ?>"
+                                        class="catalog-line-clamp-2 mt-2 min-h-[2.5rem] text-sm font-black leading-5 text-gray-900 transition group-hover:text-red-600"
+                                    >
+                                        <?= htmlspecialchars(
+                                            (string) $product['product_title'],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </a>
+
+                                    <p
+                                        class="mt-1 truncate text-xs text-gray-400"
+                                    >
+                                        <?= htmlspecialchars(
+                                            (string) (
+                                                $product['product_author'] ??
+                                                'MangaVault selection'
+                                            ),
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </p>
+
+                                    <div class="mt-4 space-y-1.5">
+                                        <?php if ($product['has_physical']): ?>
+                                            <div
+                                                class="flex items-center justify-between gap-2"
+                                            >
+                                                <span
+                                                    class="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400"
+                                                >
+                                                    Physical
+                                                </span>
+                                                <span
+                                                    class="text-sm font-black text-red-600"
+                                                >
+                                                    RM <?= number_format(
+                                                        (float) $product['physical_price'],
+                                                        2
+                                                    ) ?>
+                                                </span>
+                                            </div>
+                                        <?php endif; ?>
+
+                                        <?php if ($product['has_ebook']): ?>
+                                            <div
+                                                class="flex items-center justify-between gap-2"
+                                            >
+                                                <span
+                                                    class="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400"
+                                                >
+                                                    E-Book
+                                                </span>
+                                                <span
+                                                    class="text-sm font-black text-blue-600"
+                                                >
+                                                    RM <?= number_format(
+                                                        (float) $product['ebook_price'],
+                                                        2
+                                                    ) ?>
+                                                </span>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+
+                                    <div
+                                        class="mt-auto grid grid-cols-[1fr_auto] gap-2 pt-5"
+                                    >
+                                        <a
+                                            href="product_detail.php?id=<?= $detailId ?>"
+                                            class="inline-flex h-10 items-center justify-center rounded-xl bg-gray-950 px-3 text-xs font-black text-white transition hover:bg-red-600"
+                                        >
+                                            View Product
+                                        </a>
+
+                                        <button
+                                            type="button"
+                                            onclick='openProductModal(<?= json_encode(
+                                                $modalData,
+                                                JSON_HEX_TAG |
+                                                JSON_HEX_AMP |
+                                                JSON_HEX_APOS |
+                                                JSON_HEX_QUOT
+                                            ) ?>)'
+                                            class="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-sm text-gray-500 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+                                            aria-label="Quick view"
+                                            title="Quick view"
+                                        >
+                                            ⤢
+                                        </button>
+                                    </div>
+                                </div>
+                            </article>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </section>
+
+        <?php if (!$hasFilters): ?>
+            <section
+                id="recommendations-section"
+                class="border-y border-gray-200 bg-[#fffdf9] py-20"
+            >
+                <div class="mx-auto max-w-7xl px-6">
+                    <div
+                        class="mb-9 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"
+                    >
+                        <div>
+                            <p
+                                class="text-xs font-black uppercase tracking-[0.18em] text-red-600"
+                            >
+                                Selected for you
+                            </p>
+                            <h2
+                                class="mt-2 text-3xl font-black tracking-[-0.04em] text-gray-950"
+                            >
+                                You Might Also Like
+                            </h2>
+                            <p
+                                class="mt-2 text-sm leading-6 text-gray-500"
+                            >
+                                Personalized picks based on your MangaVault activity.
+                            </p>
+                        </div>
+
+                        <span
+                            class="rounded-full border border-gray-200 bg-white px-4 py-2 text-xs font-bold text-gray-500"
+                        >
+                            Recommendations refresh automatically
+                        </span>
+                    </div>
+
+                    <div
+                        id="recommendations-grid"
+                        class="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-5"
+                        aria-live="polite"
+                    >
+                        <?php for ($skeleton = 0; $skeleton < 5; $skeleton++): ?>
+                            <div
+                                class="overflow-hidden rounded-2xl border border-gray-100 bg-white"
+                            >
+                                <div
+                                    class="aspect-[2/3] animate-pulse bg-gray-200"
+                                ></div>
+                                <div class="space-y-3 p-4">
+                                    <div
+                                        class="h-3 w-4/5 animate-pulse rounded bg-gray-200"
+                                    ></div>
+                                    <div
+                                        class="h-3 w-2/5 animate-pulse rounded bg-gray-100"
+                                    ></div>
+                                    <div
+                                        class="h-4 w-1/3 animate-pulse rounded bg-red-100"
+                                    ></div>
+                                </div>
+                            </div>
+                        <?php endfor; ?>
+                    </div>
+                </div>
+            </section>
+        <?php endif; ?>
+    </main>
+
+    <footer class="bg-[#0d1424] text-white">
+        <div class="mx-auto max-w-7xl px-6 py-14">
+            <div
+                class="grid gap-10 border-b border-white/10 pb-12 sm:grid-cols-2 lg:grid-cols-[1.2fr_0.8fr_0.8fr_1fr]"
+            >
+                <div>
+                    <a
+                        href="../index.php"
+                        class="text-xl font-black tracking-[0.08em]"
+                    >
+                        MANGA<span class="text-red-500">VAULT</span>
+                    </a>
+                    <p
+                        class="mt-5 max-w-sm text-sm leading-6 text-white/45"
+                    >
+                        Physical manga, instant e-books, secure checkout and
+                        reader rewards in one MangaVault collection.
+                    </p>
+                </div>
+
+                <div>
+                    <h3
+                        class="text-xs font-black uppercase tracking-[0.2em] text-white/35"
+                    >
+                        Shop
+                    </h3>
+                    <ul class="mt-5 space-y-3 text-sm text-white/60">
+                        <li><a href="home.php" class="transition hover:text-white">All titles</a></li>
+                        <li><a href="home.php?type=physical" class="transition hover:text-white">Physical books</a></li>
+                        <li><a href="home.php?type=ebook" class="transition hover:text-white">E-books</a></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3
+                        class="text-xs font-black uppercase tracking-[0.2em] text-white/35"
+                    >
+                        Account
+                    </h3>
+                    <ul class="mt-5 space-y-3 text-sm text-white/60">
+                        <li><a href="orders.php" class="transition hover:text-white">My orders</a></li>
+                        <li><a href="wishlist.php" class="transition hover:text-white">Wishlist</a></li>
+                        <li><a href="profile.php" class="transition hover:text-white">My account</a></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3
+                        class="text-xs font-black uppercase tracking-[0.2em] text-white/35"
+                    >
+                        Support
+                    </h3>
+                    <div
+                        class="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4"
+                    >
+                        <p class="text-sm font-black text-white">
+                            Need help choosing?
                         </p>
-                        <?php endif; ?>
-
-                        <!-- Price -->
-                        <div class="mt-auto">
-                            <div class="mb-3">
-                                <?php if ($p['has_physical']): ?>
-                                <p class="text-red-600 font-bold text-sm">RM <?= number_format($p['product_price'], 2) ?>
-                                    <span class="text-gray-400 font-normal text-xs">physical</span>
-                                </p>
-                                <?php endif; ?>
-                                <?php if ($p['has_ebook'] && $p['ebook_price']): ?>
-                                <p class="text-blue-600 font-bold text-sm">RM <?= number_format($p['ebook_price'], 2) ?>
-                                    <span class="text-gray-400 font-normal">e-book</span>
-                                </p>
-                                <?php endif; ?>
-                            </div>
-                            <!-- Buttons -->
-                            <button onclick='openModal(<?= json_encode([
-                                "title"       => $p["product_title"],
-                                "series"      => $p["product_series"] ?? "",
-                                "volume"      => $p["product_volume_number"] ?? "",
-                                "author"      => $p["product_author"] ?? "",
-                                "publisher"   => $p["product_publisher"] ?? "",
-                                "description" => $p["product_description"] ?? "",
-                                "cover"       => $p["product_cover_image"] ?? "",
-                                "category"    => $p["category_name"] ?? "",
-                                "has_physical"=> $p["has_physical"],
-                                "has_ebook"   => $p["has_ebook"],
-                                "physical_id" => $p["physical_id"],
-                                "ebook_id"    => $p["ebook_id"],
-                                "price"       => $p["product_price"],
-                                "ebook_price" => $p["ebook_price"],
-                                "stock"       => $p["physical_stock_quantity"] ?? 0,
-                            ]) ?>)'
-                                class="block w-full text-center border border-gray-200 hover:border-red-400 hover:text-red-600 text-gray-600 text-xs font-medium py-2 rounded-lg transition mb-2">
-                                View Details
-                            </button>
-                            <div class="flex gap-2">
-                                <?php if ($p['has_physical']): ?>
-                                <a href="product_detail.php?id=<?= $p['physical_id'] ?>"
-                                    class="flex-1 text-center bg-gray-800 hover:bg-gray-900 text-white text-xs font-semibold py-2 rounded-lg transition">
-                                    📦 Physical
-                                </a>
-                                <?php endif; ?>
-                                <?php if ($p['has_ebook']): ?>
-                                <a href="product_detail.php?id=<?= $p['ebook_id'] ?>"
-                                    class="flex-1 text-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 rounded-lg transition">
-                                    📱 E-Book
-                                </a>
-                                <?php endif; ?>
-                            </div>
+                        <p class="mt-1 text-xs leading-5 text-white/40">
+                            Visit FAQ or ask MangaBot while signed in.
+                        </p>
+                        <div class="mt-4 flex gap-3 text-xs font-bold">
+                            <a href="faq.php" class="text-red-300 hover:text-white">FAQ</a>
+                            <a href="about.php" class="text-red-300 hover:text-white">About Us</a>
                         </div>
                     </div>
                 </div>
-                <?php endforeach; ?>
             </div>
-        <?php endif; ?>
 
-        <!-- AI Recommendations Section -->
-        <?php if (!$search && !$category_id && !$genre_id && !$type): ?>
-        <div class="mt-12 mb-6" id="recommendations-section">
-            <div class="text-center mb-6">
-                <h2 class="text-xl font-black text-gray-800">✨ Recommended For You</h2>
-                <p class="text-xs text-gray-400 mt-0.5">Powered by Claude AI</p>
-            </div>
-            <div id="recommendations-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                <?php for ($i = 0; $i < 5; $i++): ?>
-                <div class="animate-pulse">
-                    <div class="bg-gray-200 rounded-xl h-48 mb-2"></div>
-                    <div class="bg-gray-200 rounded h-3 mb-1"></div>
-                    <div class="bg-gray-200 rounded h-3 w-2/3"></div>
-                </div>
-                <?php endfor; ?>
-            </div>
-        </div>
-        <?php endif; ?>
-    </div>
-
-    <!-- Footer -->
-    <footer class="bg-[#F5F0EB] text-gray-800 py-12 border-t border-gray-200">
-        <div class="max-w-7xl mx-auto px-6">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
-                <div class="col-span-2 md:col-span-1">
-                    <h3 class="text-lg font-black mb-4">MANGA<span class="text-red-600">VAULT</span></h3>
-                    <p class="text-gray-600 text-sm leading-relaxed">Malaysia's ultimate destination for manga and comic book lovers.</p>
-                </div>
-                <div>
-                    <h4 class="font-bold mb-4 text-sm uppercase tracking-wide text-gray-800">Shop</h4>
-                    <ul class="space-y-2 text-sm text-gray-600">
-                        <li><a href="home.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">All Manga</a></li>
-                        <li><a href="home.php?type=physical" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">Physical Books</a></li>
-                        <li><a href="home.php?type=ebook" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">E-Books</a></li>
-                    </ul>
-                </div>
-                <div>
-                    <h4 class="font-bold mb-4 text-sm uppercase tracking-wide text-gray-800">Help</h4>
-                    <ul class="space-y-2 text-sm text-gray-600">
-                        <li><a href="orders.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">My Orders</a></li>
-                        <li><a href="profile.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">My Account</a></li>
-                        <li><a href="faq.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">FAQ</a></li>
-                        <li><a href="about.php" class="hover:text-red-600 hover:translate-x-1 transition-all inline-block">About Us</a></li>
-                    </ul>
-                </div>
-                <div>
-                    <h4 class="font-bold mb-4 text-sm uppercase tracking-wide text-gray-800">Follow Us</h4>
-                    <div class="flex gap-3">
-                        <a href="#" class="w-9 h-9 bg-gray-200 hover:bg-red-600 hover:text-white rounded-full flex items-center justify-center transition-all text-sm font-bold text-gray-600">f</a>
-                        <a href="#" class="w-9 h-9 bg-gray-200 hover:bg-red-600 hover:text-white rounded-full flex items-center justify-center transition-all text-sm font-bold text-gray-600">t</a>
-                        <a href="#" class="w-9 h-9 bg-gray-200 hover:bg-red-600 hover:text-white rounded-full flex items-center justify-center transition-all text-sm font-bold text-gray-600">in</a>
-                    </div>
-                </div>
-            </div>
-            <div class="border-t border-gray-300 pt-6 text-center text-xs text-gray-500">
-                © 2026 MangaVault. All rights reserved.
+            <div
+                class="flex flex-col gap-3 pt-7 text-xs text-white/35 sm:flex-row sm:items-center sm:justify-between"
+            >
+                <p>© 2026 MangaVault. All rights reserved.</p>
+                <p>Physical manga · E-books · Membership rewards</p>
             </div>
         </div>
     </footer>
 
-    <!-- Product Modal -->
-    <div id="productModal" class="fixed inset-0 z-50 hidden">
-        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeModal()"></div>
-        <div class="absolute inset-0 flex items-center justify-center p-4 pointer-events-none">
-            <div id="modalBox" class="bg-white rounded-2xl shadow-2xl w-full max-w-sm pointer-events-auto transform scale-95 opacity-0 transition-all duration-300 overflow-hidden">
+    <div
+        id="productModal"
+        class="fixed inset-0 z-[70] hidden"
+        aria-hidden="true"
+    >
+        <div
+            class="absolute inset-0 bg-black/65 backdrop-blur-sm"
+            onclick="closeProductModal()"
+        ></div>
 
-                <!-- Cover Image (top) -->
-                <div class="relative bg-gray-100 flex items-center justify-center" style="height:220px;">
-                    <img id="modalCover" src="" alt="" class="h-full w-full object-cover hidden">
-                    <div id="modalCoverPlaceholder" class="text-gray-400 font-black text-4xl hidden"></div>
-                    <!-- Close button -->
-                    <button onclick="closeModal()" class="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 flex items-center justify-center text-white transition-colors">
-                        ✕
-                    </button>
-                    <!-- Badges -->
-                    <div id="modalBadges" class="absolute bottom-3 left-3 flex gap-1.5"></div>
+        <div
+            class="absolute inset-0 flex items-center justify-center p-4 sm:p-6"
+        >
+            <div
+                id="productModalBox"
+                class="pointer-events-auto grid max-h-[92vh] w-full max-w-4xl scale-95 overflow-hidden rounded-3xl bg-white opacity-0 shadow-[0_40px_120px_rgba(0,0,0,0.4)] transition duration-300 lg:grid-cols-[340px_1fr]"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="modalTitle"
+            >
+                <div class="relative bg-[#eee8e1] p-5 sm:p-7">
+                    <div
+                        class="relative mx-auto aspect-[2/3] w-full max-w-[300px] overflow-hidden rounded-2xl bg-white shadow-2xl"
+                    >
+                        <img
+                            id="modalCover"
+                            src=""
+                            alt=""
+                            class="hidden h-full w-full object-cover object-center"
+                        >
+                        <div
+                            id="modalCoverPlaceholder"
+                            class="hidden h-full w-full items-center justify-center bg-gray-100 text-5xl font-black text-gray-300"
+                        ></div>
+                    </div>
+
+                    <div
+                        id="modalBadges"
+                        class="mt-4 flex flex-wrap justify-center gap-2"
+                    ></div>
                 </div>
 
-                <!-- Content -->
-                <div class="p-5">
-                    <h2 id="modalTitle" class="font-black text-gray-900 text-lg leading-tight mb-0.5"></h2>
-                    <p id="modalSeries" class="text-sm text-gray-400 mb-4"></p>
+                <div
+                    class="catalog-modal-scrollbar relative overflow-y-auto p-6 sm:p-8"
+                >
+                    <button
+                        type="button"
+                        onclick="closeProductModal()"
+                        class="absolute right-5 top-5 flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                        aria-label="Close quick view"
+                    >
+                        ✕
+                    </button>
 
-                    <div class="space-y-2.5 text-sm mb-4">
-                        <div class="flex gap-3">
-                            <span class="text-gray-400 w-20 flex-shrink-0">Author</span>
-                            <span id="modalAuthor" class="font-medium text-gray-700"></span>
+                    <p
+                        id="modalCategory"
+                        class="pr-14 text-xs font-black uppercase tracking-[0.17em] text-red-600"
+                    ></p>
+                    <h2
+                        id="modalTitle"
+                        class="mt-3 pr-14 text-3xl font-black tracking-[-0.04em] text-gray-950"
+                    ></h2>
+                    <p
+                        id="modalSeries"
+                        class="mt-2 text-sm text-gray-400"
+                    ></p>
+
+                    <div
+                        class="mt-7 grid gap-4 rounded-2xl border border-gray-100 bg-gray-50 p-5 sm:grid-cols-2"
+                    >
+                        <div>
+                            <p
+                                class="text-[10px] font-black uppercase tracking-[0.15em] text-gray-400"
+                            >
+                                Author
+                            </p>
+                            <p
+                                id="modalAuthor"
+                                class="mt-1 text-sm font-bold text-gray-800"
+                            ></p>
                         </div>
-                        <div class="flex gap-3">
-                            <span class="text-gray-400 w-20 flex-shrink-0">Publisher</span>
-                            <span id="modalPublisher" class="font-medium text-gray-700"></span>
-                        </div>
-                        <div class="flex gap-3">
-                            <span class="text-gray-400 w-20 flex-shrink-0">Category</span>
-                            <span id="modalCategory" class="font-medium text-gray-700"></span>
+                        <div>
+                            <p
+                                class="text-[10px] font-black uppercase tracking-[0.15em] text-gray-400"
+                            >
+                                Publisher
+                            </p>
+                            <p
+                                id="modalPublisher"
+                                class="mt-1 text-sm font-bold text-gray-800"
+                            ></p>
                         </div>
                     </div>
 
-                    <div class="border-t border-gray-100 pt-4">
-                        <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">Synopsis</p>
-                        <p id="modalDesc" class="text-sm text-gray-600 leading-relaxed"></p>
+                    <div class="mt-7">
+                        <p
+                            class="text-[10px] font-black uppercase tracking-[0.16em] text-gray-400"
+                        >
+                            Synopsis
+                        </p>
+                        <p
+                            id="modalDescription"
+                            class="mt-3 text-sm leading-7 text-gray-600"
+                        ></p>
                     </div>
+
+                    <div
+                        id="modalFormatActions"
+                        class="mt-8 grid gap-3 sm:grid-cols-2"
+                    ></div>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-    function openModal(data) {
-        document.getElementById('modalTitle').textContent = data.title;
-        document.getElementById('modalSeries').textContent = data.series
-            ? data.series + (data.volume ? ' · Vol.' + data.volume : '')
-            : '';
-        document.getElementById('modalAuthor').textContent    = data.author    || '—';
-        document.getElementById('modalPublisher').textContent = data.publisher  || '—';
-        document.getElementById('modalCategory').textContent  = data.category   || '—';
-        document.getElementById('modalDesc').textContent      = data.description || 'No description available.';
+        const productModal = document.getElementById(
+            'productModal'
+        );
+        const productModalBox = document.getElementById(
+            'productModalBox'
+        );
 
-        const cover = document.getElementById('modalCover');
-        const placeholder = document.getElementById('modalCoverPlaceholder');
-        if (data.cover) {
-            cover.src = '../assets/images/' + data.cover;
-            cover.classList.remove('hidden');
-            placeholder.classList.add('hidden');
-        } else {
-            cover.classList.add('hidden');
-            placeholder.textContent = data.title.substring(0, 2).toUpperCase();
-            placeholder.classList.remove('hidden');
+        function productImageUrl(filename) {
+            return '../assets/images/' +
+                encodeURIComponent(filename);
         }
 
-        let badgesHtml = '';
-        if (data.has_physical) badgesHtml += `<span class="bg-gray-900/80 text-white text-xs px-2 py-0.5 rounded-full font-semibold backdrop-blur-sm">📦 Physical</span>`;
-        if (data.has_ebook)    badgesHtml += `<span class="bg-blue-600/80 text-white text-xs px-2 py-0.5 rounded-full font-semibold backdrop-blur-sm">📱 E-Book</span>`;
-        document.getElementById('modalBadges').innerHTML = badgesHtml;
+        function openProductModal(data) {
+            document.getElementById(
+                'modalTitle'
+            ).textContent = data.title;
 
-        const modal = document.getElementById('productModal');
-        const box = document.getElementById('modalBox');
-        modal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
-        setTimeout(() => {
-            box.classList.remove('scale-95', 'opacity-0');
-            box.classList.add('scale-100', 'opacity-100');
-        }, 10);
-    }
+            document.getElementById(
+                'modalSeries'
+            ).textContent = data.series
+                ? data.series +
+                    (data.volume
+                        ? ' · Vol.' + data.volume
+                        : '')
+                : '';
 
-    function closeModal() {
-        const box = document.getElementById('modalBox');
-        box.classList.remove('scale-100', 'opacity-100');
-        box.classList.add('scale-95', 'opacity-0');
-        setTimeout(() => {
-            document.getElementById('productModal').classList.add('hidden');
-            document.body.style.overflow = '';
-        }, 300);
-    }
+            document.getElementById(
+                'modalAuthor'
+            ).textContent = data.author || '—';
 
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') closeModal();
-    });
+            document.getElementById(
+                'modalPublisher'
+            ).textContent = data.publisher || '—';
 
-    // Load AI Recommendations
-    <?php if (!$search && !$category_id && !$genre_id && !$type): ?>
-    fetch('/comicstore/customer/get_recommendations.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'type=home'
-    })
-    .then(r => r.json())
-    .then(data => {
-        const grid = document.getElementById('recommendations-grid');
-        if (!data.products || data.products.length === 0) {
-            document.getElementById('recommendations-section').style.display = 'none';
-            return;
+            document.getElementById(
+                'modalCategory'
+            ).textContent = data.category || 'MangaVault title';
+
+            document.getElementById(
+                'modalDescription'
+            ).textContent =
+                data.description ||
+                'No description is available for this title.';
+
+            const cover = document.getElementById(
+                'modalCover'
+            );
+            const placeholder = document.getElementById(
+                'modalCoverPlaceholder'
+            );
+
+            if (data.cover) {
+                cover.src = productImageUrl(data.cover);
+                cover.alt = data.title + ' cover';
+                cover.classList.remove('hidden');
+                placeholder.classList.add('hidden');
+                placeholder.classList.remove('flex');
+            } else {
+                cover.removeAttribute('src');
+                cover.classList.add('hidden');
+                placeholder.textContent = data.title
+                    .substring(0, 2)
+                    .toUpperCase();
+                placeholder.classList.remove('hidden');
+                placeholder.classList.add('flex');
+            }
+
+            const badges = [];
+
+            if (data.hasPhysical) {
+                badges.push(
+                    '<span class="rounded-full bg-gray-950 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-white">📦 Physical</span>'
+                );
+            }
+
+            if (data.hasEbook) {
+                badges.push(
+                    '<span class="rounded-full bg-blue-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-white">📱 E-Book</span>'
+                );
+            }
+
+            document.getElementById(
+                'modalBadges'
+            ).innerHTML = badges.join('');
+
+            const actions = [];
+
+            if (data.hasPhysical && data.physicalId) {
+                const physicalDisabled =
+                    Number(data.stock) <= 0;
+
+                actions.push(`
+                    <a
+                        href="product_detail.php?id=${Number(data.physicalId)}"
+                        class="rounded-2xl ${physicalDisabled
+                            ? 'pointer-events-none bg-gray-200 text-gray-400'
+                            : 'bg-red-600 text-white hover:bg-red-700'} px-5 py-4 transition"
+                    >
+                        <span class="block text-[10px] font-black uppercase tracking-[0.14em] opacity-70">
+                            Physical edition
+                        </span>
+                        <span class="mt-1 flex items-center justify-between gap-3 text-sm font-black">
+                            RM ${Number(data.physicalPrice).toFixed(2)}
+                            <span>${physicalDisabled
+                                ? 'Out of stock'
+                                : 'View →'}</span>
+                        </span>
+                    </a>
+                `);
+            }
+
+            if (data.hasEbook && data.ebookId) {
+                actions.push(`
+                    <a
+                        href="product_detail.php?id=${Number(data.ebookId)}"
+                        class="rounded-2xl bg-blue-600 px-5 py-4 text-white transition hover:bg-blue-700"
+                    >
+                        <span class="block text-[10px] font-black uppercase tracking-[0.14em] opacity-70">
+                            E-book edition
+                        </span>
+                        <span class="mt-1 flex items-center justify-between gap-3 text-sm font-black">
+                            RM ${Number(data.ebookPrice).toFixed(2)}
+                            <span>View →</span>
+                        </span>
+                    </a>
+                `);
+            }
+
+            document.getElementById(
+                'modalFormatActions'
+            ).innerHTML = actions.join('');
+
+            productModal.classList.remove('hidden');
+            productModal.setAttribute('aria-hidden', 'false');
+            document.body.style.overflow = 'hidden';
+
+            window.setTimeout(() => {
+                productModalBox.classList.remove(
+                    'scale-95',
+                    'opacity-0'
+                );
+                productModalBox.classList.add(
+                    'scale-100',
+                    'opacity-100'
+                );
+            }, 10);
         }
-        grid.innerHTML = data.products.map(p => {
-            const inStock = p.physical_stock_quantity > 0 || p.ebook_product_id;
-            const stockBadge = p.product_type === 'physical' 
-                ? (p.physical_stock_quantity > 0 
-                    ? '<span class="text-xs text-green-600 font-semibold">In Stock</span>'
-                    : '<span class="text-xs text-red-500 font-semibold">Out of Stock</span>')
-                : '<span class="text-xs text-blue-600 font-semibold">E-Book</span>';
-        
-            return `
-            <a href="/comicstore/customer/product_detail.php?id=${p.product_id}"
-                class="group bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col">
-                <div class="relative flex-shrink-0" style="height:200px;">
-                    ${p.product_cover_image
-                        ? `<img src="/comicstore/assets/images/${p.product_cover_image}"
-                                class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
-                        : `<div class="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">No Image</div>`
-                    }
-                </div>
-                <div class="p-3">
-                    <p class="font-bold text-xs text-gray-800 truncate mb-1">${p.product_title}</p>
-                    <p class="text-xs text-gray-400 truncate mb-1">${p.genres || ''}</p>
-                    ${stockBadge}
-                    <p class="font-black text-red-600 text-sm mt-1">RM ${parseFloat(p.product_price).toFixed(2)}</p>
-                </div>
-            </a>`;
-        }).join('');
-    })
-    .catch(() => {
-        document.getElementById('recommendations-section').style.display = 'none';
-    });
-    <?php endif; ?>
-</script>
 
-</body>
-</html>
+        function closeProductModal() {
+            if (productModal.classList.contains('hidden')) {
+                return;
+            }
+
+            productModalBox.classList.remove(
+                'scale-100',
+                'opacity-100'
+            );
+            productModalBox.classList.add(
+                'scale-95',
+                'opacity-0'
+            );
+
+            window.setTimeout(() => {
+                productModal.classList.add('hidden');
+                productModal.setAttribute(
+                    'aria-hidden',
+                    'true'
+                );
+                document.body.style.overflow = '';
+            }, 250);
+        }
+
+        document.addEventListener(
+            'keydown',
+            event => {
+                if (event.key === 'Escape') {
+                    closeProductModal();
+                }
+            }
+        );
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        <?php if (!$hasFilters): ?>
+        fetch('get_recommendations.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type':
+                    'application/x-www-form-urlencoded'
+            },
+            body: 'type=home'
+        })
+        .then(async response => {
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.error ||
+                    'Unable to load recommendations.'
+                );
+            }
+
+            return data;
+        })
+        .then(data => {
+            const section = document.getElementById(
+                'recommendations-section'
+            );
+            const grid = document.getElementById(
+                'recommendations-grid'
+            );
+
+            if (
+                !Array.isArray(data.products) ||
+                data.products.length === 0
+            ) {
+                section.hidden = true;
+                return;
+            }
+
+            grid.innerHTML = data.products
+                .slice(0, 5)
+                .map(product => {
+                    const productId = Number(
+                        product.product_id
+                    );
+                    const title = escapeHtml(
+                        product.product_title
+                    );
+                    const genres = escapeHtml(
+                        product.genres || ''
+                    );
+                    const price = Number(
+                        product.product_price
+                    ).toFixed(2);
+                    const cover = product.product_cover_image
+                        ? '../assets/images/' +
+                            encodeURIComponent(
+                                product.product_cover_image
+                            )
+                        : '';
+                    const isEbook =
+                        product.product_type === 'ebook';
+                    const stock = Number(
+                        product.physical_stock_quantity || 0
+                    );
+                    const availability = isEbook
+                        ? '<span class="text-blue-600">Instant e-book</span>'
+                        : stock > 0
+                            ? '<span class="text-green-700">In stock</span>'
+                            : '<span class="text-red-600">Out of stock</span>';
+
+                    return `
+                        <a
+                            href="product_detail.php?id=${productId}"
+                            class="catalog-product-card group flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white transition duration-300 hover:-translate-y-2"
+                        >
+                            <div class="catalog-cover-stage">
+                                ${cover
+                                    ? `<img
+                                            src="${cover}"
+                                            alt="${title} cover"
+                                            class="catalog-cover-image"
+                                            loading="lazy"
+                                       >`
+                                    : `<div
+                                            class="flex h-full items-center justify-center bg-gray-100 text-4xl font-black text-gray-300"
+                                       >
+                                            ${title.substring(0, 2).toUpperCase()}
+                                       </div>`}
+
+                                <span
+                                    class="absolute bottom-3 left-3 rounded-full border border-white/30 bg-white/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] shadow-lg backdrop-blur"
+                                >
+                                    ${availability}
+                                </span>
+                            </div>
+
+                            <div class="flex flex-1 flex-col p-4">
+                                <h3
+                                    class="catalog-line-clamp-2 min-h-[2.5rem] text-sm font-black leading-5 text-gray-900"
+                                >
+                                    ${title}
+                                </h3>
+                                <p
+                                    class="mt-1 truncate text-xs text-gray-400"
+                                >
+                                    ${genres || 'MangaVault selection'}
+                                </p>
+                                <p
+                                    class="mt-4 text-base font-black text-red-600"
+                                >
+                                    RM ${price}
+                                </p>
+                            </div>
+                        </a>
+                    `;
+                })
+                .join('');
+        })
+        .catch(() => {
+            const section = document.getElementById(
+                'recommendations-section'
+            );
+
+            if (section) {
+                section.hidden = true;
+            }
+        });
+        <?php endif; ?>
+    </script>
+
 </body>
 </html>
