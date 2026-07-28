@@ -9,19 +9,34 @@ require_once __DIR__ . '/../includes/gemini_config.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
+function sendRecommendationResponse(
+    array $payload,
+    int $status_code = 200
+): void {
+    http_response_code($status_code);
+    echo json_encode(
+        $payload,
+        JSON_UNESCAPED_UNICODE |
+        JSON_UNESCAPED_SLASHES
+    );
+    exit;
+}
+
 if (
     empty($_SESSION['user_id']) ||
     ($_SESSION['role'] ?? '') !== 'customer'
 ) {
-    http_response_code(401);
-    echo json_encode(['error' => 'Unauthorized']);
-    exit;
+    sendRecommendationResponse(
+        ['error' => 'Unauthorized'],
+        401
+    );
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['error' => 'Method not allowed']);
-    exit;
+    sendRecommendationResponse(
+        ['error' => 'Method not allowed'],
+        405
+    );
 }
 
 $user_id = (int) $_SESSION['user_id'];
@@ -31,9 +46,10 @@ if (
     !is_string($type_raw) ||
     !in_array($type_raw, ['home', 'product'], true)
 ) {
-    http_response_code(400);
-    echo json_encode(['error' => 'Invalid recommendation type']);
-    exit;
+    sendRecommendationResponse(
+        ['error' => 'Invalid recommendation type'],
+        400
+    );
 }
 
 $type = $type_raw;
@@ -43,13 +59,18 @@ if ($type === 'product') {
     $product_id = filter_var(
         $_POST['product_id'] ?? null,
         FILTER_VALIDATE_INT,
-        ['options' => ['min_range' => 1]]
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
     );
 
     if ($product_id === false || $product_id === null) {
-        http_response_code(400);
-        echo json_encode(['error' => 'Invalid product']);
-        exit;
+        sendRecommendationResponse(
+            ['error' => 'Invalid product'],
+            400
+        );
     }
 
     $product_id = (int) $product_id;
@@ -63,62 +84,92 @@ $all_products = $pdo->query("
         p.product_type,
         p.product_cover_image,
         p.product_description,
-        GROUP_CONCAT(
-            DISTINCT g.genre_name
-            SEPARATOR ', '
-        ) AS genres,
+        genre_summary.genres,
         c.category_name,
         COALESCE(
-            SUM(oi.order_item_quantity),
+            sales_summary.total_sold,
             0
         ) AS total_sold
     FROM products p
-    LEFT JOIN product_genres pg
-        ON pg.product_genres_product_id =
-            p.product_id
-    LEFT JOIN genres g
-        ON g.genre_id =
-            pg.product_genres_genre_id
     LEFT JOIN categories c
-        ON c.category_id =
-            p.product_category_id
-    LEFT JOIN order_items oi
-        ON oi.order_item_product_id =
-            p.product_id
+        ON c.category_id = p.product_category_id
+    LEFT JOIN (
+        SELECT
+            pg.product_genres_product_id AS product_id,
+            GROUP_CONCAT(
+                DISTINCT g.genre_name
+                ORDER BY g.genre_name
+                SEPARATOR ', '
+            ) AS genres
+        FROM product_genres pg
+        JOIN genres g
+            ON g.genre_id =
+                pg.product_genres_genre_id
+        GROUP BY pg.product_genres_product_id
+    ) genre_summary
+        ON genre_summary.product_id = p.product_id
+    LEFT JOIN (
+        SELECT
+            oi.order_item_product_id AS product_id,
+            SUM(
+                oi.order_item_quantity
+            ) AS total_sold
+        FROM order_items oi
+        JOIN orders o
+            ON oi.order_item_order_id = o.order_id
+        WHERE o.order_payment_status = 'confirmed'
+        AND o.order_status != 'cancelled'
+        GROUP BY oi.order_item_product_id
+    ) sales_summary
+        ON sales_summary.product_id = p.product_id
     WHERE p.product_is_available = 1
-    GROUP BY p.product_id
-    ORDER BY total_sold DESC
+    ORDER BY
+        total_sold DESC,
+        p.product_id ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $purchase_stmt = $pdo->prepare("
     SELECT
         p.product_id,
         p.product_title,
-        GROUP_CONCAT(
-            DISTINCT g.genre_name
-            SEPARATOR ', '
-        ) AS genres,
-        c.category_name
+        genre_summary.genres,
+        c.category_name,
+        MAX(o.order_created_at) AS latest_purchase_at
     FROM orders o
     JOIN order_items oi
         ON oi.order_item_order_id = o.order_id
     JOIN products p
-        ON p.product_id =
-            oi.order_item_product_id
-    LEFT JOIN product_genres pg
-        ON pg.product_genres_product_id =
-            p.product_id
-    LEFT JOIN genres g
-        ON g.genre_id =
-            pg.product_genres_genre_id
+        ON p.product_id = oi.order_item_product_id
     LEFT JOIN categories c
-        ON c.category_id =
-            p.product_category_id
+        ON c.category_id = p.product_category_id
+    LEFT JOIN (
+        SELECT
+            pg.product_genres_product_id AS product_id,
+            GROUP_CONCAT(
+                DISTINCT g.genre_name
+                ORDER BY g.genre_name
+                SEPARATOR ', '
+            ) AS genres
+        FROM product_genres pg
+        JOIN genres g
+            ON g.genre_id =
+                pg.product_genres_genre_id
+        GROUP BY pg.product_genres_product_id
+    ) genre_summary
+        ON genre_summary.product_id = p.product_id
     WHERE o.order_user_id = ?
     AND o.order_payment_status = 'confirmed'
-    GROUP BY p.product_id
+    AND o.order_status != 'cancelled'
+    GROUP BY
+        p.product_id,
+        p.product_title,
+        genre_summary.genres,
+        c.category_name
+    ORDER BY latest_purchase_at DESC
 ");
-$purchase_stmt->execute([$user_id]);
+$purchase_stmt->execute([
+    $user_id,
+]);
 $purchase_history =
     $purchase_stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -129,33 +180,41 @@ if ($type === 'product') {
         SELECT
             p.product_id,
             p.product_title,
-            GROUP_CONCAT(
-                DISTINCT g.genre_name
-                SEPARATOR ', '
-            ) AS genres,
+            genre_summary.genres,
             c.category_name
         FROM products p
-        LEFT JOIN product_genres pg
-            ON pg.product_genres_product_id =
-                p.product_id
-        LEFT JOIN genres g
-            ON g.genre_id =
-                pg.product_genres_genre_id
         LEFT JOIN categories c
-            ON c.category_id =
-                p.product_category_id
+            ON c.category_id = p.product_category_id
+        LEFT JOIN (
+            SELECT
+                pg.product_genres_product_id AS product_id,
+                GROUP_CONCAT(
+                    DISTINCT g.genre_name
+                    ORDER BY g.genre_name
+                    SEPARATOR ', '
+                ) AS genres
+            FROM product_genres pg
+            JOIN genres g
+                ON g.genre_id =
+                    pg.product_genres_genre_id
+            GROUP BY pg.product_genres_product_id
+        ) genre_summary
+            ON genre_summary.product_id = p.product_id
         WHERE p.product_id = ?
         AND p.product_is_available = 1
-        GROUP BY p.product_id
+        LIMIT 1
     ");
-    $current_stmt->execute([$product_id]);
+    $current_stmt->execute([
+        $product_id,
+    ]);
     $current_product =
         $current_stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$current_product) {
-        http_response_code(404);
-        echo json_encode(['error' => 'Product not found']);
-        exit;
+        sendRecommendationResponse(
+            ['error' => 'Product not found'],
+            404
+        );
     }
 }
 
@@ -179,7 +238,7 @@ foreach ($all_products as $product) {
 }
 
 if ($type === 'home') {
-    if (!$purchase_history) {
+    if ($purchase_history === []) {
         $prompt = "You are a manga recommendation AI for MangaVault store.
 
 The user has no purchase history yet. Recommend 5 popular manga from this list based on overall popularity.
@@ -217,12 +276,19 @@ Return ONLY a JSON array of 5 product IDs:
 
     $recommendation_limit = 5;
 } else {
+    $current_title =
+        (string) $current_product['product_title'];
+    $current_genres =
+        (string) ($current_product['genres'] ?? '');
+    $current_category =
+        (string) ($current_product['category_name'] ?? '');
+
     $prompt = "You are a manga recommendation AI for MangaVault store.
 
 Current product:
-Title: {$current_product['product_title']}
-Genres: {$current_product['genres']}
-Category: {$current_product['category_name']}
+Title: $current_title
+Genres: $current_genres
+Category: $current_category
 
 Available products:
 $products_text
@@ -273,9 +339,10 @@ if (
     $curl_error !== '' ||
     $http_code !== 200
 ) {
-    http_response_code(503);
-    echo json_encode(['error' => 'AI unavailable']);
-    exit;
+    sendRecommendationResponse(
+        ['error' => 'AI unavailable'],
+        503
+    );
 }
 
 $data = json_decode($response, true);
@@ -297,9 +364,10 @@ $recommended_raw = json_decode(
 );
 
 if (!is_array($recommended_raw)) {
-    http_response_code(502);
-    echo json_encode(['error' => 'Invalid AI response']);
-    exit;
+    sendRecommendationResponse(
+        ['error' => 'Invalid AI response'],
+        502
+    );
 }
 
 $recommended_ids = [];
@@ -308,7 +376,11 @@ foreach ($recommended_raw as $candidate) {
     $validated = filter_var(
         $candidate,
         FILTER_VALIDATE_INT,
-        ['options' => ['min_range' => 1]]
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
     );
 
     if ($validated === false || $validated === null) {
@@ -333,9 +405,10 @@ foreach ($recommended_raw as $candidate) {
 
 $recommended_ids = array_values($recommended_ids);
 
-if (!$recommended_ids) {
-    echo json_encode(['products' => []]);
-    exit;
+if ($recommended_ids === []) {
+    sendRecommendationResponse([
+        'products' => [],
+    ]);
 }
 
 $placeholders = implode(
@@ -350,28 +423,31 @@ $product_stmt = $pdo->prepare("
         p.product_price,
         p.product_type,
         p.product_cover_image,
-        GROUP_CONCAT(
-            DISTINCT g.genre_name
-            SEPARATOR ', '
-        ) AS genres,
+        genre_summary.genres,
         pp.physical_stock_quantity,
         pe.ebook_product_id
     FROM products p
-    LEFT JOIN product_genres pg
-        ON pg.product_genres_product_id =
-            p.product_id
-    LEFT JOIN genres g
-        ON g.genre_id =
-            pg.product_genres_genre_id
     LEFT JOIN product_physical pp
-        ON pp.physical_product_id =
-            p.product_id
+        ON pp.physical_product_id = p.product_id
     LEFT JOIN product_ebook pe
-        ON pe.ebook_product_id =
-            p.product_id
+        ON pe.ebook_product_id = p.product_id
+    LEFT JOIN (
+        SELECT
+            pg.product_genres_product_id AS product_id,
+            GROUP_CONCAT(
+                DISTINCT g.genre_name
+                ORDER BY g.genre_name
+                SEPARATOR ', '
+            ) AS genres
+        FROM product_genres pg
+        JOIN genres g
+            ON g.genre_id =
+                pg.product_genres_genre_id
+        GROUP BY pg.product_genres_product_id
+    ) genre_summary
+        ON genre_summary.product_id = p.product_id
     WHERE p.product_id IN ($placeholders)
     AND p.product_is_available = 1
-    GROUP BY p.product_id
 ");
 $product_stmt->execute($recommended_ids);
 $products =
@@ -393,4 +469,6 @@ foreach ($recommended_ids as $recommended_id) {
     }
 }
 
-echo json_encode(['products' => $sorted]);
+sendRecommendationResponse([
+    'products' => $sorted,
+]);
