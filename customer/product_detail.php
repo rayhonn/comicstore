@@ -246,7 +246,11 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         @keyframes fadeIn { to { opacity: 1; } }
         .star-btn { transition: transform 0.1s ease; cursor: pointer; }
         .star-btn:hover { transform: scale(1.2); }
-    </style>
+    </style>
+    <link
+        rel="stylesheet"
+        href="../assets/css/product_detail_refinement.css?v=1"
+    >
 </head>
 <body class="bg-[#F5F0EB] min-h-screen">
 
@@ -264,15 +268,15 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         </p>
 
         <!-- Product Detail -->
-        <div class="bg-white rounded-2xl shadow-sm overflow-hidden mb-8">
-            <div class="flex flex-col lg:flex-row gap-0">
+        <div class="product-detail-main-card bg-white rounded-2xl shadow-sm overflow-hidden mb-8">
+            <div class="product-detail-main-row flex flex-col lg:flex-row gap-0">
 
                 <!-- Cover Image -->
                 <div
-                    class="lg:w-[420px] flex-shrink-0 bg-[#F5F0EB] p-8 flex items-center justify-center"
+                    class="product-detail-cover-column lg:w-[420px] flex-shrink-0 bg-[#F5F0EB] p-8 flex items-center justify-center"
                 >
                     <div
-                        class="relative w-full max-w-[320px] h-[420px] lg:h-[460px] bg-white rounded-xl shadow-lg overflow-hidden flex items-center justify-center"
+                        class="product-detail-cover-frame relative w-full max-w-[320px] h-[420px] lg:h-[460px] bg-white rounded-xl shadow-lg overflow-hidden flex items-center justify-center"
                     >
                         <?php if ($product['product_cover_image']): ?>
                             <img
@@ -413,9 +417,39 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                                 <input type="hidden" name="action" value="add">
                                 <input type="hidden" name="product_id" value="<?= (int) $id ?>">
                                 <?php if ($product['product_type'] === 'physical'): ?>
-                                    <input type="number" name="quantity" value="1" min="1"
-                                           max="<?= $product['physical_stock_quantity'] ?>"
-                                           class="w-20 px-3 py-3 border-2 border-gray-100 rounded-xl text-sm text-center focus:outline-none focus:border-red-400 transition-colors bg-gray-50">
+                                                                        <div
+                                        class="product-quantity-stepper"
+                                        aria-label="Product quantity"
+                                    >
+                                        <button
+                                            type="button"
+                                            id="productQuantityDecrease"
+                                            class="product-quantity-stepper-button"
+                                            aria-label="Decrease quantity"
+                                        >
+                                            −
+                                        </button>
+
+                                        <input
+                                            type="number"
+                                            id="productQuantityInput"
+                                            name="quantity"
+                                            value="1"
+                                            min="1"
+                                            max="<?= $product['physical_stock_quantity'] ?>"
+                                            class="product-detail-quantity product-quantity-stepper-input"
+                                            aria-label="Quantity"
+                                        >
+
+                                        <button
+                                            type="button"
+                                            id="productQuantityIncrease"
+                                            class="product-quantity-stepper-button"
+                                            aria-label="Increase quantity"
+                                        >
+                                            +
+                                        </button>
+                                    </div>
                                 <?php else: ?>
                                     <input type="hidden" name="quantity" value="1">
                                 <?php endif; ?>
@@ -444,17 +478,17 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
 
         <!-- Related volumes -->
         <?php if (count($related) > 0): ?>
-        <div class="bg-white rounded-2xl shadow-sm p-6 mb-8">
+        <div class="related-volumes-section bg-white rounded-2xl shadow-sm p-6 mb-8">
             <h3 class="font-bold text-gray-800 mb-4">More from "<?= htmlspecialchars($product['product_series']) ?>"</h3>
-            <div class="flex gap-4 overflow-x-auto pb-2">
+            <div class="related-volumes-track flex gap-4 overflow-x-auto pb-2">
                 <?php foreach ($related as $r): ?>
                 <a href="product_detail.php?id=<?= (int) $r['product_id'] ?>"
-                   class="flex-shrink-0 w-28 hover:-translate-y-1 transition-all duration-200 group">
+                   class="related-volume-card flex-shrink-0 w-28 transition-all duration-200 group">
                     <?php if ($r['product_cover_image']): ?>
                         <img src="../assets/images/<?= htmlspecialchars($r['product_cover_image']) ?>"
-                             class="w-28 h-40 object-cover rounded-xl mb-2 shadow-sm group-hover:shadow-md transition-shadow">
+                             class="related-volume-cover w-28 h-40 object-cover rounded-xl mb-2 shadow-sm group-hover:shadow-md transition-shadow">
                     <?php else: ?>
-                        <div class="w-28 h-40 bg-gray-100 rounded-xl mb-2 flex items-center justify-center text-gray-400 text-xs font-bold">
+                        <div class="related-volume-cover w-28 h-40 bg-gray-100 rounded-xl mb-2 flex items-center justify-center text-gray-400 text-xs font-bold">
                             Vol.<?= $r['product_volume_number'] ?>
                         </div>
                     <?php endif; ?>
@@ -704,6 +738,10 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
     .catch(() => {
         document.getElementById('also-like-section').style.display = 'none';
     });
-    </script>
+    </script>
+    <script
+        src="../assets/js/product_detail_quantity.js?v=1"
+        defer
+    ></script>
 </body>
 </html>

@@ -1,0 +1,216 @@
+/*
+ * MangaVault product-detail refinements.
+ * Keeps the existing design and changes alignment only.
+ */
+
+.product-detail-main-row {
+    align-items: stretch;
+}
+
+@media (min-width: 1024px) {
+    .product-detail-cover-column {
+        align-items: stretch !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+
+    .product-detail-cover-frame {
+        width: 100% !important;
+        max-width: none !important;
+        height: 100% !important;
+        min-height: 100% !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+    }
+
+    .product-detail-cover-frame
+    > img.relative {
+        width: min(100%, 350px) !important;
+        max-width: 350px !important;
+        height: 100% !important;
+        margin-right: auto;
+        margin-left: auto;
+        padding: 26px !important;
+        object-fit: contain !important;
+    }
+
+    .product-detail-cover-frame
+    > img.absolute {
+        opacity: 0.18 !important;
+    }
+}
+
+/*
+ * The browser spinner remains available.
+ * Uneven padding compensates for the spinner width so the value
+ * appears in the visual centre of the complete input.
+ */
+.product-detail-quantity {
+    width: 92px !important;
+    padding-right: 12px !important;
+    padding-left: 28px !important;
+    text-align: center !important;
+    font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Related-volume covers use a consistent portrait frame.
+ * object-fit: contain prevents landscape or unusual covers
+ * from being cropped.
+ */
+.related-volumes-section {
+    padding: 28px !important;
+}
+
+.related-volumes-section > h3 {
+    margin-bottom: 22px !important;
+    font-size: 18px;
+    font-weight: 900 !important;
+    letter-spacing: -0.02em;
+}
+
+.related-volumes-track {
+    display: flex !important;
+    align-items: flex-start;
+    gap: 18px !important;
+    padding: 4px 2px 14px !important;
+    scroll-padding-inline: 2px;
+}
+
+.related-volume-card {
+    width: 154px !important;
+    flex: 0 0 154px !important;
+    overflow: hidden;
+    border: 1px solid #f1f5f9;
+    border-radius: 17px;
+    background: #ffffff;
+    padding: 9px;
+    box-shadow:
+        0 10px 28px rgba(15, 23, 42, 0.06);
+    transition:
+        transform 0.28s
+        cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 0.28s ease,
+        box-shadow 0.28s ease;
+}
+
+.related-volume-card:hover {
+    border-color: rgba(220, 38, 38, 0.22);
+    box-shadow:
+        0 20px 44px rgba(15, 23, 42, 0.12);
+    transform: translateY(-6px);
+}
+
+.related-volume-cover {
+    width: 136px !important;
+    height: 198px !important;
+    margin-bottom: 10px !important;
+    border-radius: 12px !important;
+    background: #f5f0eb !important;
+    padding: 7px;
+    object-fit: contain !important;
+}
+
+.related-volume-card p {
+    padding-right: 4px;
+    padding-left: 4px;
+}
+
+@media (min-width: 768px) {
+    .related-volumes-track {
+        flex-wrap: wrap;
+        justify-content: center;
+        overflow: visible !important;
+    }
+}
+
+/*
+ * Compact quantity stepper:
+ * minus button | centred value | plus button
+ */
+.product-quantity-stepper {
+    display: grid;
+    grid-template-columns: 44px 48px 44px;
+    width: 136px;
+    min-width: 136px;
+    height: 52px;
+    overflow: hidden;
+    border: 1px solid #dfe3ea;
+    border-radius: 12px;
+    background: #ffffff;
+}
+
+.product-quantity-stepper-button {
+    display: flex;
+    width: 44px;
+    height: 52px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    color: #64748b;
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition:
+        background-color 0.2s ease,
+        color 0.2s ease;
+}
+
+.product-quantity-stepper-button:hover:not(:disabled) {
+    background: #f8fafc;
+    color: #111827;
+}
+
+.product-quantity-stepper-button:active:not(:disabled) {
+    background: #f1f5f9;
+}
+
+.product-quantity-stepper-button:disabled {
+    color: #cbd5e1;
+    cursor: not-allowed;
+}
+
+.product-quantity-stepper-input {
+    width: 48px;
+    height: 52px;
+    border: 0;
+    border-right: 1px solid #dfe3ea;
+    border-left: 1px solid #dfe3ea;
+    border-radius: 0;
+    background: #ffffff;
+    padding: 0;
+    color: #111827;
+    font-size: 16px;
+    font-weight: 800;
+    line-height: 52px;
+    text-align: center;
+    outline: none;
+    appearance: textfield;
+    -moz-appearance: textfield;
+    font-variant-numeric: tabular-nums;
+}
+
+.product-quantity-stepper-input::-webkit-inner-spin-button,
+.product-quantity-stepper-input::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.product-quantity-stepper:focus-within {
+    border-color: #f87171;
+    box-shadow:
+        0 0 0 3px rgba(248, 113, 113, 0.13);
+}
+
+/*
+ * Disable the older optical-centering rule because the new
+ * centre cell has equal width on both sides.
+ */
+.product-detail-quantity {
+    width: 48px !important;
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+}
