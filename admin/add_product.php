@@ -8,14 +8,18 @@ require_once __DIR__ .
     '/../includes/product_validation_helper.php';
 require_once __DIR__ .
     '/../includes/notifications.php';
+require_once __DIR__ .
+    '/../includes/csrf.php';
 
-require_admin_or_staff();
+require_admin();
 
 $error = '';
 $categories = $pdo->query("SELECT * FROM categories ORDER BY category_name")->fetchAll(PDO::FETCH_ASSOC);
 $genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO::FETCH_ASSOC);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
     try {
         $validated = validateProductFormInput(
             $_POST,
@@ -136,17 +140,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO product_physical (
                     physical_product_id,
                     physical_stock_quantity,
-                    physical_low_stock_threshold,
-                    physical_weight,
-                    physical_dimensions
+                    physical_low_stock_threshold
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?)
             ")->execute([
                 $product_id,
                 $validated['stock'],
                 $validated['threshold'],
-                $validated['weight'],
-                $validated['dimensions'],
             ]);
         } else {
             $file_size = 0;
@@ -270,21 +270,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body class="bg-gray-50 min-h-screen">
 
-    <!-- Navbar -->
-    <nav class="bg-[#1e2d4a] text-white px-6 py-4 flex justify-between items-center sticky top-0 z-50 shadow">
-        <div class="font-bold text-lg">Manga<span class="text-red-400">Vault</span> <span class="text-white/50 text-sm font-normal">Admin</span></div>
-        <div class="flex gap-5 text-sm">
-            <a href="dashboard.php" class="hover:text-red-400 transition-colors">Dashboard</a>
-            <a href="products.php" class="text-red-400 font-semibold">Products</a>
-            <a href="orders.php" class="hover:text-red-400 transition-colors">Orders</a>
-            <a href="users.php" class="hover:text-red-400 transition-colors">Customers</a>
-            <?php if ($_SESSION['role'] === 'admin'): ?>
-            <a href="staff.php" class="hover:text-red-400 transition-colors">Staff</a>
-            <?php endif; ?>
-            <a href="returns.php" class="hover:text-red-400 transition-colors">Returns</a>
-            <a href="../logout.php" class="hover:text-red-400 transition-colors">Logout</a>
-        </div>
-    </nav>
+    <?php
+    include __DIR__ .
+        '/../includes/admin_navbar.php';
+    ?>
 
     <div class="max-w-5xl mx-auto px-6 py-8">
         <div class="flex items-center gap-4 mb-6">
@@ -300,6 +289,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
 
         <form method="POST" enctype="multipart/form-data" id="productForm">
+            <?php csrf_field(); ?>
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -434,21 +424,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     <input type="number" name="physical_low_stock_threshold" min="0" value="5"
                                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
                                 </div>
-                            </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Weight (kg)</label>
-                                    <input type="number" name="physical_weight" step="0.01" min="0"
-                                           placeholder="e.g. 0.25"
-                                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Dimensions</label>
-                                    <input type="text" name="physical_dimensions"
-                                           placeholder="e.g. 18x12x2cm"
-                                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
-                                </div>
-                            </div>
+                            </div>                          
                         </div>
 
                         <!-- E-Book Fields -->
@@ -495,7 +471,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 id="coverPreviewImg"
                                 src=""
                                 alt="Product cover preview"
-                                class="w-full h-full object-contain p-2 hidden"
+                                class="w-full h-full object-contain p-3 hidden"
                             >
                         </div>
                         <input type="file" name="product_cover_image" accept="image/*"
