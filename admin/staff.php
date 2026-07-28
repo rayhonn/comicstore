@@ -9,6 +9,16 @@ require_admin();
 $error = '';
 $success = '';
 
+$isAjaxAddRequest =
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    ($_POST['action'] ?? '') === 'add' &&
+    strtolower(
+        (string) (
+            $_SERVER['HTTP_X_REQUESTED_WITH']
+            ?? ''
+        )
+    ) === 'xmlhttprequest';
+
 function normalizeStaffText(
     mixed $value,
     string $label,
@@ -339,6 +349,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+if ($isAjaxAddRequest) {
+    header(
+        'Content-Type: application/json; charset=UTF-8'
+    );
+
+    if ($error !== '') {
+        http_response_code(422);
+
+        echo json_encode([
+            'success' => false,
+            'message' => $error,
+        ]);
+    } else {
+        echo json_encode([
+            'success' => true,
+            'message' =>
+                $success !== ''
+                    ? $success
+                    : 'Staff account created.',
+        ]);
+    }
+
+    exit;
+}
+
 $staff = $pdo->query(
     "SELECT *
      FROM users
@@ -467,9 +502,18 @@ $staff = $pdo->query(
                 <h3 class="font-black text-gray-800">Add Staff Account</h3>
                 <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-600">✕</button>
             </div>
-            <form method="POST" class="p-5 space-y-4">
+            <form
+                method="POST"
+                id="addStaffForm"
+                class="p-5 space-y-4"
+            >
                 <?php csrf_field(); ?>
                 <input type="hidden" name="action" value="add">
+                <div
+                    id="addStaffError"
+                    class="hidden bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl"
+                    role="alert"
+                ></div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">First Name *</label>
@@ -498,15 +542,89 @@ $staff = $pdo->query(
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Password *</label>
-                    <input type="password" name="password" minlength="8" maxlength="72" required
-                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
+                    <label
+                        for="addStaffPassword"
+                        class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide"
+                    >
+                        Password *
+                    </label>
+
+                    <div class="relative">
+                        <input
+                            type="password"
+                            id="addStaffPassword"
+                            name="password"
+                            minlength="8"
+                            maxlength="72"
+                            required
+                            autocomplete="new-password"
+                            class="w-full px-4 py-3 pr-12 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white"
+                        >
+
+                        <button
+                            type="button"
+                            onclick="togglePasswordVisibility(
+                                'addStaffPassword',
+                                this
+                            )"
+                            aria-label="Show password"
+                            class="absolute inset-y-0 right-0 flex items-center justify-center w-12 text-gray-400 hover:text-gray-700"
+                        >
+                            <svg
+                                data-eye-open
+                                class="w-5 h-5"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M2.25 12s3.5-6 9.75-6 9.75 6 9.75 6-3.5 6-9.75 6S2.25 12 2.25 12Z"
+                                ></path>
+                                <circle
+                                    cx="12"
+                                    cy="12"
+                                    r="3"
+                                    stroke-width="2"
+                                ></circle>
+                            </svg>
+
+                            <svg
+                                data-eye-closed
+                                class="hidden w-5 h-5"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                ria-hidden="true"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8M9.9 4.3A10.9 10.9 0 0112 4c6.25 0 9.75 8 9.75 8a17.3 17.3 0 01-2.1 3.3M6.2 6.2C3.7 8.1 2.25 12 2.25 12S5.75 20 12 20a9.7 9.7 0 004.1-.9"
+                                ></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <p class="text-xs text-gray-400 mt-1.5">
+                        Use 8–72 characters with uppercase, lowercase,
+                        number and symbol.
+                    </p>
                 </div>
                 <div class="flex gap-3">
                     <button type="button" onclick="closeAddModal()"
                             class="flex-1 py-3 border-2 border-gray-100 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
-                    <button type="submit"
-                            class="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">Add Staff</button>
+                    <button
+                        type="submit"
+                        id="addStaffSubmitButton"
+                        class="flex-1 py-3 bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white rounded-xl text-sm font-semibold transition-colors"
+                    >
+                        Add Staff
+                    </button>
                 </div>
             </form>
         </div>
@@ -545,8 +663,137 @@ $staff = $pdo->query(
         document.getElementById('resetModal').classList.add('active');
     }
     function closeResetModal() { document.getElementById('resetModal').classList.remove('active'); }
-    document.getElementById('addModal').addEventListener('click', function(e) { if (e.target === this) closeAddModal(); });
-    document.getElementById('resetModal').addEventListener('click', function(e) { if (e.target === this) closeResetModal(); });
+        document.getElementById('addModal').addEventListener('click', function(e) { if (e.target === this) closeAddModal(); });
+        document.getElementById('resetModal').addEventListener('click', function(e) { if (e.target === this) closeResetModal(); });
+
+    function togglePasswordVisibility(
+        inputId,
+        button
+    ) {
+        const input =
+            document.getElementById(inputId);
+
+        const showPassword =
+            input.type === 'password';
+
+        input.type =
+            showPassword
+                ? 'text'
+                : 'password';
+
+        button.setAttribute(
+            'aria-label',
+            showPassword
+                ? 'Hide password'
+                : 'Show password'
+        );
+
+        button
+            .querySelector('[data-eye-open]')
+            .classList
+            .toggle(
+                'hidden',
+                showPassword
+            );
+
+        button
+            .querySelector('[data-eye-closed]')
+            .classList
+            .toggle(
+                'hidden',
+                !showPassword
+            );
+    }
+
+    const addStaffForm =
+        document.getElementById(
+            'addStaffForm'
+        );
+
+    const addStaffError =
+        document.getElementById(
+            'addStaffError'
+        );
+
+    const addStaffSubmitButton =
+        document.getElementById(
+            'addStaffSubmitButton'
+        );
+
+    addStaffForm.addEventListener(
+        'submit',
+        async event => {
+            event.preventDefault();
+
+            if (!addStaffForm.reportValidity()) {
+                return;
+            }
+
+            addStaffError
+                .classList
+                .add('hidden');
+
+            addStaffSubmitButton.disabled = true;
+            addStaffSubmitButton.textContent =
+                'Adding...';
+
+            try {
+                const response = await fetch(
+                    'staff.php',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'X-Requested-With':
+                                'XMLHttpRequest',
+                            'Accept':
+                                'application/json'
+                        },
+                        body:
+                            new FormData(
+                                addStaffForm
+                            )
+                    }
+                );
+
+                const result =
+                    await response.json();
+
+                if (
+                    !response.ok ||
+                    !result.success
+                ) {
+                    throw new Error(
+                        result.message ||
+                        'Unable to create staff account.'
+                    );
+                }
+
+                window.location.reload();
+            } catch (error) {
+                addStaffError.textContent =
+                    '❌ ' +
+                    (
+                        error.message ||
+                        'Unable to create staff account.'
+                    );
+
+                addStaffError
+                    .classList
+                    .remove('hidden');
+
+                addStaffError.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'nearest'
+                });
+            } finally {
+                addStaffSubmitButton.disabled =
+                    false;
+
+                addStaffSubmitButton.textContent =
+                    'Add Staff';
+            }
+        }
+    );
     </script>
 </body>
 </html>

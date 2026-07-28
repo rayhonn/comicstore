@@ -486,12 +486,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <span class="w-6 h-6 bg-red-100 rounded-lg flex items-center justify-center text-red-600 text-xs font-black">4</span>
                             Cover Image
                         </h3>
-                        <div id="coverPreviewDiv" class="w-full h-48 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center mb-3 overflow-hidden">
+                        <div id="coverPreviewDiv" class="w-full h-64 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center mb-3 overflow-hidden">
                             <div id="coverPlaceholder" class="text-center">
                                 <div class="text-3xl mb-2">🖼️</div>
                                 <p class="text-xs text-gray-400">No image selected</p>
                             </div>
-                            <img id="coverPreviewImg" src="" class="w-full h-full object-cover hidden">
+                            <img
+                                id="coverPreviewImg"
+                                src=""
+                                alt="Product cover preview"
+                                class="w-full h-full object-contain p-2 hidden"
+                            >
                         </div>
                         <input type="file" name="product_cover_image" accept="image/*"
                                onchange="previewCover(this)"
