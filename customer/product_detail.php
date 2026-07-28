@@ -268,13 +268,38 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             <div class="flex flex-col lg:flex-row gap-0">
 
                 <!-- Cover Image -->
-                <div class="lg:w-80 flex-shrink-0 bg-[#F5F0EB] p-8 flex items-center justify-center">
+                <div
+                    class="lg:w-[360px] flex-shrink-0 bg-[#F5F0EB] p-8 flex items-center justify-center"
+                >
                     <?php if ($product['product_cover_image']): ?>
-                        <img src="../assets/images/<?= htmlspecialchars($product['product_cover_image']) ?>"
-                             class="w-52 rounded-xl shadow-lg">
+                        <img
+                            src="../assets/images/<?= htmlspecialchars(
+                                $product['product_cover_image'],
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>"
+                            alt="<?= htmlspecialchars(
+                                $product['product_title'],
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?> cover"
+                            class="w-full h-96 lg:h-[460px] object-contain rounded-xl shadow-lg"
+                        >
                     <?php else: ?>
-                        <div class="w-52 h-72 bg-gray-200 rounded-xl flex items-center justify-center text-gray-400 text-4xl font-black">
-                            <?= strtoupper(substr($product['product_title'], 0, 2)) ?>
+                        <div
+                            class="w-full h-96 lg:h-[460px] bg-gray-200 rounded-xl flex items-center justify-center text-gray-400 text-4xl font-black"
+                        >
+                            <?= htmlspecialchars(
+                                strtoupper(
+                                    substr(
+                                        $product['product_title'],
+                                        0,
+                                        2
+                                    )
+                                ),
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>
                         </div>
                     <?php endif; ?>
                 </div>
@@ -605,11 +630,20 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         grid.innerHTML = data.products.map(p => `
             <a href="${productDetailUrl}?id=${p.product_id}"
                 class="group bg-gray-50 rounded-xl overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col">
-                <div class="relative" style="height:180px; overflow:hidden;">
+                <div
+                    class="relative h-64 bg-white flex items-center justify-center overflow-hidden p-3"
+                >
                     ${p.product_cover_image
-                        ? `<img src="${imageBaseUrl}${p.product_cover_image}"
-                                style="width:100%; height:100%; object-fit:cover;" class="group-hover:scale-105 transition-transform duration-300">`
-                        : `<div style="width:100%; height:100%; background:#f3f4f6; display:flex; align-items:center; justify-content:center; color:#9ca3af; font-size:12px;">No Image</div>`
+                        ? `<img
+                                src="/comicstore/assets/images/${p.product_cover_image}"
+                                alt="Recommended product cover"
+                                class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                        >`
+                        : `<div
+                                class="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs rounded-lg"
+                        >
+                                No Image
+                        </div>`
                     }
                 </div>
                 <div class="p-3">
