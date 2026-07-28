@@ -259,6 +259,87 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         @keyframes fadeIn { to { opacity: 1; } }
         .star-btn { transition: transform 0.1s ease; cursor: pointer; }
         .star-btn:hover { transform: scale(1.2); }
+
+        .product-wishlist-button {
+            display: flex;
+            width: 52px;
+            height: 52px;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            background: #ffffff;
+            color: #6b7280;
+            font-size: 21px;
+            cursor: pointer;
+            transition:
+                border-color 0.2s ease,
+                background-color 0.2s ease,
+                color 0.2s ease,
+                transform 0.2s ease,
+                opacity 0.2s ease;
+        }
+
+        .product-wishlist-button:hover {
+            border-color: #fca5a5;
+            color: #dc2626;
+            transform: translateY(-2px);
+        }
+
+        .product-wishlist-button.is-active {
+            border-color: #fca5a5;
+            background: #fef2f2;
+            color: #dc2626;
+        }
+
+        .product-wishlist-button.is-loading {
+            opacity: 0.6;
+            cursor: wait;
+            transform: none;
+        }
+
+        .product-wishlist-button.is-success {
+            animation:
+                wishlistButtonPulse
+                0.35s
+                ease;
+        }
+
+        .product-wishlist-toast {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 100;
+            max-width: 320px;
+            border-radius: 12px;
+            background: #111827;
+            padding: 12px 16px;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(12px);
+            transition:
+                opacity 0.2s ease,
+                transform 0.2s ease;
+        }
+
+        .product-wishlist-toast.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .product-wishlist-toast.is-error {
+            background: #b91c1c;
+        }
+
+        @keyframes wishlistButtonPulse {
+            50% {
+                transform: scale(1.08);
+            }
+        }
     </style>
 
     <link
@@ -474,16 +555,74 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                         <?php endif; ?>
 
                         <!-- Wishlist -->
-                        <form method="POST" action="wishlist_action.php">
+                        <form
+                            id="productWishlistForm"
+                            method="POST"
+                            action="wishlist_action.php"
+                            data-ajax-url="wishlist_toggle_ajax.php"
+                        >
                             <?php csrf_field(); ?>
-                            <input type="hidden" name="product_id" value="<?= (int) $id ?>">
-                            <input type="hidden" name="action" value="<?= $in_wishlist ? 'remove' : 'add' ?>">
-                            <input type="hidden" name="redirect" value="product_detail.php?id=<?= (int) $id ?>">
-                            <button type="submit"
-                                    class="py-3 px-4 rounded-xl border-2 transition-colors <?= $in_wishlist ? 'border-red-300 bg-red-50 text-red-600' : 'border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-600' ?>">
-                                <?= $in_wishlist ? '♥' : '♡' ?>
+
+                            <input
+                                type="hidden"
+                                name="product_id"
+                                value="<?= (int) $id ?>"
+                            >
+
+                            <input
+                                type="hidden"
+                                id="productWishlistAction"
+                                name="action"
+                                value="<?= $in_wishlist
+                                    ? 'remove'
+                                    : 'add' ?>"
+                            >
+
+                            <input
+                                type="hidden"
+                                name="redirect"
+                                value="product_detail.php?id=<?= (int) $id ?>"
+                            >
+
+                            <button
+                                type="submit"
+                                id="productWishlistButton"
+                                class="product-wishlist-button <?= $in_wishlist
+                                    ? 'is-active'
+                                    : '' ?>"
+                                aria-pressed="<?= $in_wishlist
+                                    ? 'true'
+                                    : 'false' ?>"
+                                aria-label="<?= $in_wishlist
+                                    ? 'Remove from wishlist'
+                                    : 'Add to wishlist' ?>"
+                            >
+                                <span
+                                    id="productWishlistIcon"
+                                    aria-hidden="true"
+                                >
+                                    <?= $in_wishlist
+                                        ? '♥'
+                                        : '♡' ?>
+                                </span>
+
+                                <span
+                                    id="productWishlistLabel"
+                                    class="sr-only"
+                                >
+                                    <?= $in_wishlist
+                                        ? 'Remove from wishlist'
+                                        : 'Add to wishlist' ?>
+                                </span>
                             </button>
                         </form>
+
+                        <div
+                            id="productWishlistToast"
+                            class="product-wishlist-toast"
+                            role="status"
+                            aria-live="polite"
+                        ></div>
                     </div>
 
                 </div>
@@ -594,38 +733,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                     </button>
                 </form>
             </div>
-            <?php elseif (
-                $existing_review &&
-                $existing_review['review_status'] === 'pending'
-            ): ?>
-                <div
-                    class="mb-6 rounded-xl border border-blue-100 bg-blue-50 p-4"
-                >
-                    <p
-                        class="mb-1 text-sm font-semibold text-blue-700"
-                    >
-                        ⏳ Your review is pending approval.
-                    </p>
-
-                    <div class="mb-1 flex gap-0.5">
-                        <?php for ($s = 1; $s <= 5; $s++): ?>
-                            <span
-                                class="<?= $s <=
-                                    $existing_review['review_rating']
-                                        ? 'text-yellow-400'
-                                        : 'text-gray-300' ?>"
-                            >
-                                ★
-                            </span>
-                        <?php endfor; ?>
-                    </div>
-
-                    <p class="text-sm text-gray-600">
-                        <?= htmlspecialchars(
-                            $existing_review['review_comment']
-                        ) ?>
-                    </p>
-                </div>
+            
             <?php endif; ?>
 
             <!-- Reviews List -->
@@ -828,6 +936,214 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
     </footer>
 
     <script>
+    const wishlistForm =
+        document.getElementById(
+            'productWishlistForm'
+        );
+    
+    const wishlistAjaxUrl =
+        wishlistForm?.dataset.ajaxUrl ?? '';
+
+    const wishlistButton =
+        document.getElementById(
+            'productWishlistButton'
+        );
+
+    const wishlistAction =
+        document.getElementById(
+            'productWishlistAction'
+        );
+
+    const wishlistIcon =
+        document.getElementById(
+            'productWishlistIcon'
+        );
+
+    const wishlistLabel =
+        document.getElementById(
+            'productWishlistLabel'
+        );
+
+    const wishlistToast =
+        document.getElementById(
+            'productWishlistToast'
+        );
+
+    let wishlistToastTimer = null;
+
+    function showWishlistToast(
+        message,
+        isError = false
+    ) {
+        if (!wishlistToast) {
+            return;
+        }
+
+        wishlistToast.textContent =
+            message;
+
+        wishlistToast.classList.toggle(
+            'is-error',
+            isError
+        );
+
+        wishlistToast.classList.add(
+            'is-visible'
+        );
+
+        window.clearTimeout(
+            wishlistToastTimer
+        );
+
+        wishlistToastTimer =
+            window.setTimeout(
+                () => {
+                    wishlistToast.classList.remove(
+                        'is-visible'
+                    );
+                },
+                2200
+            );
+    }
+
+    if (
+        wishlistForm &&
+        wishlistAjaxUrl !== '' &&
+        wishlistButton &&
+        wishlistAction &&
+        wishlistIcon &&
+        wishlistLabel
+    ) {
+        wishlistForm.addEventListener(
+            'submit',
+            async event => {
+                event.preventDefault();
+
+                if (wishlistButton.disabled) {
+                    return;
+                }
+
+                const previousIcon =
+                    wishlistIcon.textContent;
+
+                wishlistButton.disabled = true;
+
+                wishlistButton.classList.add(
+                    'is-loading'
+                );
+
+                wishlistIcon.textContent = '…';
+
+                try {
+                    const response = await fetch(
+                        wishlistAjaxUrl,
+                        {
+                            method: 'POST',
+                            body: new FormData(
+                                wishlistForm
+                            ),
+                            headers: {
+                                Accept:
+                                    'application/json',
+                                'X-Requested-With':
+                                    'XMLHttpRequest',
+                            },
+                            credentials:
+                                'same-origin',
+                        }
+                    );
+
+                    const data =
+                        await response
+                            .json()
+                            .catch(
+                                () => null
+                            );
+
+                    if (
+                        !response.ok ||
+                        !data ||
+                        data.success !== true
+                    ) {
+                        throw new Error(
+                            data?.message ||
+                            'Unable to update your wishlist.'
+                        );
+                    }
+
+                    const isActive =
+                        data.in_wishlist === true;
+
+                    wishlistAction.value =
+                        data.next_action;
+
+                    wishlistButton.classList.toggle(
+                        'is-active',
+                        isActive
+                    );
+
+                    wishlistButton.setAttribute(
+                        'aria-pressed',
+                        isActive
+                            ? 'true'
+                            : 'false'
+                    );
+
+                    wishlistButton.setAttribute(
+                        'aria-label',
+                        isActive
+                            ? 'Remove from wishlist'
+                            : 'Add to wishlist'
+                    );
+
+                    wishlistIcon.textContent =
+                        isActive
+                            ? '♥'
+                            : '♡';
+
+                    wishlistLabel.textContent =
+                        isActive
+                            ? 'Remove from wishlist'
+                            : 'Add to wishlist';
+
+                    wishlistButton.classList.add(
+                        'is-success'
+                    );
+
+                    window.setTimeout(
+                        () => {
+                            wishlistButton.classList.remove(
+                                'is-success'
+                            );
+                        },
+                        350
+                    );
+
+                    showWishlistToast(
+                        data.message
+                    );
+                } catch (error) {
+                    wishlistIcon.textContent =
+                        previousIcon;
+
+                    showWishlistToast(
+                        error instanceof Error
+                            ? error.message
+                            : 'Unable to update your wishlist.',
+                        true
+                    );
+                } finally {
+                    wishlistButton.disabled =
+                        false;
+
+                    wishlistButton.classList.remove(
+                        'is-loading'
+                    );
+                }
+            }
+        );
+    }
+
     let currentRating = 0;
 
     function setRating(rating) {
