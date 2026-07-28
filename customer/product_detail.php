@@ -269,39 +269,54 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
 
                 <!-- Cover Image -->
                 <div
-                    class="lg:w-[360px] flex-shrink-0 bg-[#F5F0EB] p-8 flex items-center justify-center"
+                    class="lg:w-[420px] flex-shrink-0 bg-[#F5F0EB] p-8 flex items-center justify-center"
                 >
-                    <?php if ($product['product_cover_image']): ?>
-                        <img
-                            src="../assets/images/<?= htmlspecialchars(
-                                $product['product_cover_image'],
-                                ENT_QUOTES,
-                                'UTF-8'
-                            ) ?>"
-                            alt="<?= htmlspecialchars(
-                                $product['product_title'],
-                                ENT_QUOTES,
-                                'UTF-8'
-                            ) ?> cover"
-                            class="w-full h-96 lg:h-[460px] object-contain rounded-xl shadow-lg"
-                        >
-                    <?php else: ?>
-                        <div
-                            class="w-full h-96 lg:h-[460px] bg-gray-200 rounded-xl flex items-center justify-center text-gray-400 text-4xl font-black"
-                        >
-                            <?= htmlspecialchars(
-                                strtoupper(
-                                    substr(
-                                        $product['product_title'],
-                                        0,
-                                        2
-                                    )
-                                ),
-                                ENT_QUOTES,
-                                'UTF-8'
-                            ) ?>
-                        </div>
-                    <?php endif; ?>
+                    <div
+                        class="relative w-full max-w-[320px] h-[420px] lg:h-[460px] bg-white rounded-xl shadow-lg overflow-hidden flex items-center justify-center"
+                    >
+                        <?php if ($product['product_cover_image']): ?>
+                            <img
+                                src="../assets/images/<?= htmlspecialchars(
+                                    $product['product_cover_image'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>"
+                                alt=""
+                                aria-hidden="true"
+                                class="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-25"
+                            >
+
+                            <img
+                                src="../assets/images/<?= htmlspecialchars(
+                                    $product['product_cover_image'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>"
+                                alt="<?= htmlspecialchars(
+                                    $product['product_title'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?> cover"
+                                class="relative z-10 w-full h-full object-contain p-3"
+                            >
+                        <?php else: ?>
+                            <div
+                                class="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400 text-4xl font-black"
+                            >
+                                <?= htmlspecialchars(
+                                    strtoupper(
+                                        substr(
+                                            $product['product_title'],
+                                            0,
+                                            2
+                                        )
+                                    ),
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
 
                 <!-- Info -->
@@ -628,28 +643,60 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             return;
         }
         grid.innerHTML = data.products.map(p => `
-            <a href="${productDetailUrl}?id=${p.product_id}"
-                class="group bg-gray-50 rounded-xl overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col">
+            <a
+                href="${productDetailUrl}?id=${p.product_id}"
+                class="group bg-white border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col"
+            >
                 <div
-                    class="relative h-64 bg-white flex items-center justify-center overflow-hidden p-3"
+                    class="relative h-72 bg-[#F5F0EB] flex items-center justify-center overflow-hidden"
                 >
                     ${p.product_cover_image
-                        ? `<img
-                                src="/comicstore/assets/images/${p.product_cover_image}"
+                        ? `
+                            <img
+                                src="${imageBaseUrl}${p.product_cover_image}"
+                                alt=""
+                                aria-hidden="true"
+                                class="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-25"
+                            >
+
+                            <img
+                                src="${imageBaseUrl}${p.product_cover_image}"
                                 alt="Recommended product cover"
-                                class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
-                        >`
-                        : `<div
-                                class="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs rounded-lg"
-                        >
+                                class="relative z-10 w-full h-full object-contain p-4 group-hover:scale-105 transition-transform duration-300"
+                            >
+                        `
+                        : `
+                            <div
+                                class="w-full h-full flex items-center justify-center text-gray-400 text-xs"
+                            >
                                 No Image
-                        </div>`
+                            </div>
+                        `
                     }
                 </div>
-                <div class="p-3">
-                    <p class="font-bold text-xs text-gray-800 truncate mb-1">${p.product_title}</p>
-                    <p class="text-xs text-gray-400 truncate mb-1">${p.genres || ''}</p>
-                    <p class="font-black text-red-600 text-sm">RM ${parseFloat(p.product_price).toFixed(2)}</p>
+
+                <div
+                    class="p-4 border-t border-gray-100 bg-white mt-auto"
+                >
+                    <p
+                        class="font-bold text-sm text-gray-800 truncate mb-1"
+                    >
+                        ${p.product_title}
+                    </p>
+
+                    <p
+                        class="text-xs text-gray-400 truncate mb-2"
+                    >
+                        ${p.genres || ''}
+                    </p>
+
+                    <p
+                        class="font-black text-red-600 text-base"
+                    >
+                        RM ${parseFloat(
+                            p.product_price
+                        ).toFixed(2)}
+                    </p>
                 </div>
             </a>`
         ).join('');
