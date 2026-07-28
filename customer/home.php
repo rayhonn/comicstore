@@ -275,11 +275,185 @@ foreach ($products as $product) {
                     transparent 1px
                 );
             background-size: 42px 42px;
+            animation:
+                catalogGridDrift
+                24s
+                linear
+                infinite;
+        }
+
+        .catalog-hero {
+            isolation: isolate;
+        }
+
+        .catalog-hero::after {
+            content: '';
+            position: absolute;
+            left: 42%;
+            top: 18%;
+            width: 260px;
+            height: 260px;
+            border-radius: 999px;
+            pointer-events: none;
+            opacity: 0.18;
+            background: #ef4444;
+            filter: blur(90px);
+            animation:
+                catalogHeroOrb
+                8s
+                ease-in-out
+                infinite alternate;
+        }
+
+        .catalog-hero-glow {
+            animation:
+                catalogHeroGlow
+                8s
+                ease-in-out
+                infinite alternate;
+        }
+
+        .catalog-hero-copy > * {
+            opacity: 0;
+            transform: translateY(24px);
+            animation:
+                catalogHeroCopyIn
+                0.78s
+                cubic-bezier(0.22, 1, 0.36, 1)
+                forwards;
+        }
+
+        .catalog-hero-copy > *:nth-child(1) {
+            animation-delay: 0.08s;
+        }
+
+        .catalog-hero-copy > *:nth-child(2) {
+            animation-delay: 0.17s;
+        }
+
+        .catalog-hero-copy > *:nth-child(3) {
+            animation-delay: 0.27s;
+        }
+
+        .catalog-summary-grid {
+            opacity: 0;
+            transform:
+                translateX(32px)
+                scale(0.98);
+            animation:
+                catalogSummaryIn
+                0.9s
+                0.28s
+                cubic-bezier(0.22, 1, 0.36, 1)
+                forwards;
+        }
+
+        .catalog-hero-ring {
+            transform-origin: center;
+        }
+
+        .catalog-hero-ring-large {
+            animation:
+                catalogRingRotate
+                22s
+                linear
+                infinite;
+        }
+
+        .catalog-hero-ring-small {
+            animation:
+                catalogRingRotateReverse
+                17s
+                linear
+                infinite;
+        }
+
+        .catalog-filter-panel {
+            opacity: 0;
+            transform: translateY(26px);
+            animation:
+                catalogFilterIn
+                0.75s
+                0.42s
+                cubic-bezier(0.22, 1, 0.36, 1)
+                forwards;
+        }
+
+        @keyframes catalogGridDrift {
+            to {
+                background-position:
+                    42px 42px,
+                    42px 42px;
+            }
+        }
+
+        @keyframes catalogHeroOrb {
+            to {
+                opacity: 0.3;
+                transform:
+                    translate3d(
+                        70px,
+                        24px,
+                        0
+                    )
+                    scale(1.18);
+            }
+        }
+
+        @keyframes catalogHeroGlow {
+            from {
+                opacity: 0.82;
+                transform: scale(1);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1.06);
+            }
+        }
+
+        @keyframes catalogHeroCopyIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes catalogSummaryIn {
+            to {
+                opacity: 1;
+                transform:
+                    translateX(0)
+                    scale(1);
+            }
+        }
+
+        @keyframes catalogFilterIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes catalogRingRotate {
+            to {
+                transform:
+                    translateY(-50%)
+                    rotate(360deg);
+            }
+        }
+
+        @keyframes catalogRingRotateReverse {
+            to {
+                transform:
+                    translateY(-50%)
+                    rotate(-360deg);
+            }
         }
 
         .catalog-cover-stage {
             position: relative;
-            aspect-ratio: 2 / 3;
+            aspect-ratio: 4 / 5;
             overflow: hidden;
             background: #ebe4dc;
             isolation: isolate;
@@ -298,15 +472,48 @@ foreach ($products as $product) {
         }
 
         .catalog-product-card {
+            position: relative;
+            isolation: isolate;
             box-shadow:
                 0 1px 2px rgba(15, 23, 42, 0.03),
                 0 14px 40px rgba(15, 23, 42, 0.07);
+        }
+
+        .catalog-product-card::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            border-radius: inherit;
+            pointer-events: none;
+            opacity: 0;
+            background:
+                linear-gradient(
+                    120deg,
+                    transparent 25%,
+                    rgba(255, 255, 255, 0.22) 48%,
+                    transparent 70%
+                );
+            transform: translateX(-120%);
+            transition:
+                opacity 0.25s ease,
+                transform 0.7s
+                    cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .catalog-product-card:hover {
             box-shadow:
                 0 2px 4px rgba(15, 23, 42, 0.04),
                 0 24px 60px rgba(15, 23, 42, 0.14);
+        }
+
+        .catalog-product-card:hover::after {
+            opacity: 1;
+            transform: translateX(120%);
+        }
+
+        .catalog-card-body {
+            min-height: 228px;
         }
 
         .catalog-stat-card {
@@ -354,30 +561,10 @@ foreach ($products as $product) {
             transform-origin: center;
         }
 
-        .catalog-stat-number.is-rolling {
-            animation:
-                catalogCounterRoll
-                0.11s
-                ease-in-out
-                infinite alternate;
-        }
-
-        @keyframes catalogCounterRoll {
-            from {
-                opacity: 0.55;
-                filter: blur(0.7px);
-                transform:
-                    translateY(-2px)
-                    scale(0.96);
-            }
-
-            to {
-                opacity: 1;
-                filter: blur(0);
-                transform:
-                    translateY(2px)
-                    scale(1.04);
-            }
+        .catalog-stat-number.is-counting {
+            text-shadow:
+                0 0 24px rgba(255, 255, 255, 0.28);
+            transform: translateY(-1px);
         }
 
         @keyframes catalogStatShine {
@@ -438,6 +625,137 @@ foreach ($products as $product) {
             transform: translateX(120%);
         }
 
+        .recommendation-stage {
+            position: relative;
+            overflow: hidden;
+            isolation: isolate;
+        }
+
+        .recommendation-stage::before {
+            content: '';
+            position: absolute;
+            top: -180px;
+            left: 50%;
+            width: 560px;
+            height: 560px;
+            border-radius: 999px;
+            pointer-events: none;
+            opacity: 0.2;
+            background:
+                radial-gradient(
+                    circle,
+                    #ef4444,
+                    transparent 68%
+                );
+            filter: blur(34px);
+            transform: translateX(-50%);
+            animation:
+                recommendationGlow
+                7s
+                ease-in-out
+                infinite alternate;
+        }
+
+        .recommendation-stage::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.32;
+            background-image:
+                linear-gradient(
+                    rgba(255, 255, 255, 0.04) 1px,
+                    transparent 1px
+                ),
+                linear-gradient(
+                    90deg,
+                    rgba(255, 255, 255, 0.04) 1px,
+                    transparent 1px
+                );
+            background-size: 52px 52px;
+        }
+
+        .recommendation-heading {
+            opacity: 0;
+            transform: translateY(30px);
+            transition:
+                opacity 0.85s
+                    cubic-bezier(0.22, 1, 0.36, 1),
+                transform 0.85s
+                    cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .recommendation-heading.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .recommendation-feature,
+        .recommendation-side-card {
+            opacity: 0;
+            transform:
+                translateY(30px)
+                scale(0.98);
+            animation:
+                recommendationCardIn
+                0.68s
+                cubic-bezier(0.22, 1, 0.36, 1)
+                forwards;
+        }
+
+        .recommendation-feature {
+            animation-delay: 0.05s;
+        }
+
+        .recommendation-side-card:nth-child(1) {
+            animation-delay: 0.14s;
+        }
+
+        .recommendation-side-card:nth-child(2) {
+            animation-delay: 0.23s;
+        }
+
+        .recommendation-side-card:nth-child(3) {
+            animation-delay: 0.32s;
+        }
+
+        .recommendation-feature-cover,
+        .recommendation-side-cover {
+            transition:
+                transform 0.55s
+                    cubic-bezier(0.22, 1, 0.36, 1),
+                filter 0.4s ease;
+        }
+
+        .recommendation-feature:hover
+        .recommendation-feature-cover {
+            transform: scale(1.045);
+        }
+
+        .recommendation-side-card:hover
+        .recommendation-side-cover {
+            transform: scale(1.08);
+        }
+
+        @keyframes recommendationGlow {
+            to {
+                opacity: 0.34;
+                transform:
+                    translateX(-50%)
+                    translateY(70px)
+                    scale(1.14);
+            }
+        }
+
+        @keyframes recommendationCardIn {
+            to {
+                opacity: 1;
+                transform:
+                    translateY(0)
+                    scale(1);
+            }
+        }
+
         .catalog-line-clamp-2 {
             display: -webkit-box;
             overflow: hidden;
@@ -472,24 +790,24 @@ foreach ($products as $product) {
 
     <main>
         <section
-            class="relative overflow-hidden bg-[#111827] text-white"
+            class="catalog-hero relative overflow-hidden bg-[#111827] text-white"
             aria-labelledby="catalog-title"
         >
             <div
-                class="absolute inset-0 bg-[radial-gradient(circle_at_78%_30%,rgba(220,38,38,0.28),transparent_34%),radial-gradient(circle_at_15%_85%,rgba(59,130,246,0.15),transparent_32%)]"
+                class="catalog-hero-glow absolute inset-0 bg-[radial-gradient(circle_at_78%_30%,rgba(220,38,38,0.28),transparent_34%),radial-gradient(circle_at_15%_85%,rgba(59,130,246,0.15),transparent_32%)]"
             ></div>
             <div class="catalog-grid-pattern absolute inset-0 opacity-40"></div>
             <div
-                class="absolute -right-28 top-1/2 h-96 w-96 -translate-y-1/2 rounded-full border border-white/10"
+                class="catalog-hero-ring catalog-hero-ring-large absolute -right-28 top-1/2 h-96 w-96 -translate-y-1/2 rounded-full border border-white/10"
             ></div>
             <div
-                class="absolute -right-8 top-1/2 h-64 w-64 -translate-y-1/2 rounded-full border border-white/10"
+                class="catalog-hero-ring catalog-hero-ring-small absolute -right-8 top-1/2 h-64 w-64 -translate-y-1/2 rounded-full border border-white/10"
             ></div>
 
             <div
                 class="relative mx-auto grid max-w-7xl items-center gap-10 px-6 py-16 lg:grid-cols-[1fr_0.8fr] lg:py-20"
             >
-                <div class="max-w-3xl">
+                <div class="catalog-hero-copy max-w-3xl">
                     <p
                         class="text-xs font-black uppercase tracking-[0.24em] text-red-400"
                     >
@@ -517,7 +835,7 @@ foreach ($products as $product) {
                 </div>
 
                 <div
-                    class="grid grid-cols-3 gap-3 sm:gap-4"
+                    class="catalog-summary-grid grid grid-cols-3 gap-3 sm:gap-4"
                     aria-label="Catalog summary"
                 >
                     <div
@@ -529,7 +847,7 @@ foreach ($products as $product) {
                             data-catalog-counter-delay="0"
                             aria-label="<?= count($products) ?> titles"
                         >
-                            <?= count($products) ?>
+                            0
                         </p>
                         <p
                             class="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/40"
@@ -547,7 +865,7 @@ foreach ($products as $product) {
                             data-catalog-counter-delay="140"
                             aria-label="<?= $totalPhysicalFormats ?> physical formats"
                         >
-                            <?= $totalPhysicalFormats ?>
+                            0
                         </p>
                         <p
                             class="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/40"
@@ -565,7 +883,7 @@ foreach ($products as $product) {
                             data-catalog-counter-delay="280"
                             aria-label="<?= $totalEbookFormats ?> e-book formats"
                         >
-                            <?= $totalEbookFormats ?>
+                            0
                         </p>
                         <p
                             class="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/40"
@@ -580,7 +898,7 @@ foreach ($products as $product) {
         <section class="relative z-10 -mt-5 pb-20">
             <div class="mx-auto max-w-7xl px-6">
                 <div
-                    class="rounded-3xl border border-gray-100 bg-white p-4 shadow-[0_22px_70px_rgba(15,23,42,0.12)] sm:p-6"
+                    class="catalog-filter-panel rounded-3xl border border-gray-100 bg-white p-4 shadow-[0_22px_70px_rgba(15,23,42,0.12)] sm:p-6"
                 >
                     <form
                         method="GET"
@@ -961,7 +1279,7 @@ foreach ($products as $product) {
                                     </div>
                                 </a>
 
-                                <div class="flex flex-1 flex-col p-4">
+                                <div class="catalog-card-body flex flex-1 flex-col p-4">
                                     <p
                                         class="text-[10px] font-black uppercase tracking-[0.15em] text-gray-400"
                                     >
@@ -1139,62 +1457,76 @@ foreach ($products as $product) {
         <?php if (!$hasFilters): ?>
             <section
                 id="recommendations-section"
-                class="border-y border-gray-200 bg-[#fffdf9] py-20"
+                class="recommendation-stage border-y border-white/10 bg-[#0d1424] py-24 text-white"
             >
-                <div class="mx-auto max-w-7xl px-6">
+                <div class="relative z-10 mx-auto max-w-7xl px-6">
                     <div
-                        class="mb-9 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"
+                        class="recommendation-heading mx-auto max-w-2xl text-center"
                     >
-                        <div>
-                            <p
-                                class="text-xs font-black uppercase tracking-[0.18em] text-red-600"
+                        <div
+                            class="mx-auto inline-flex items-center gap-3 rounded-full border border-red-400/20 bg-red-400/10 px-4 py-2"
+                        >
+                            <span
+                                class="h-2 w-2 rounded-full bg-red-400 shadow-[0_0_16px_rgba(248,113,113,0.9)]"
+                            ></span>
+                            <span
+                                class="text-[10px] font-black uppercase tracking-[0.22em] text-red-300"
                             >
                                 Selected for you
-                            </p>
-                            <h2
-                                class="mt-2 text-3xl font-black tracking-[-0.04em] text-gray-950"
-                            >
-                                You Might Also Like
-                            </h2>
-                            <p
-                                class="mt-2 text-sm leading-6 text-gray-500"
-                            >
-                                Personalized picks based on your MangaVault activity.
-                            </p>
+                            </span>
                         </div>
 
-                        <span
-                            class="rounded-full border border-gray-200 bg-white px-4 py-2 text-xs font-bold text-gray-500"
+                        <h2
+                            class="mt-5 text-3xl font-black tracking-[-0.045em] text-white sm:text-4xl"
                         >
-                            Recommendations refresh automatically
-                        </span>
+                            Your next shelf favourite
+                            <span
+                                class="block bg-gradient-to-r from-red-400 via-orange-300 to-amber-200 bg-clip-text text-transparent"
+                            >
+                                might be right here.
+                            </span>
+                        </h2>
+
+                        <p
+                            class="mx-auto mt-4 max-w-xl text-sm leading-7 text-white/45"
+                        >
+                            A changing mix of titles selected from your
+                            MangaVault activity, available formats and current
+                            catalog.
+                        </p>
                     </div>
 
                     <div
                         id="recommendations-grid"
-                        class="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4"
+                        class="mt-12 grid gap-6 lg:grid-cols-[1.12fr_0.88fr]"
                         aria-live="polite"
                     >
-                        <?php for ($skeleton = 0; $skeleton < 4; $skeleton++): ?>
-                            <div
-                                class="overflow-hidden rounded-2xl border border-gray-100 bg-white"
-                            >
-                                <div
-                                    class="aspect-[2/3] animate-pulse bg-gray-200"
-                                ></div>
-                                <div class="space-y-3 p-4">
-                                    <div
-                                        class="h-3 w-4/5 animate-pulse rounded bg-gray-200"
-                                    ></div>
-                                    <div
-                                        class="h-3 w-2/5 animate-pulse rounded bg-gray-100"
-                                    ></div>
-                                    <div
-                                        class="h-4 w-1/3 animate-pulse rounded bg-red-100"
-                                    ></div>
-                                </div>
+                        <div
+                            class="grid min-h-[430px] animate-pulse overflow-hidden rounded-3xl border border-white/10 bg-white/[0.05] md:grid-cols-[0.78fr_1.22fr]"
+                        >
+                            <div class="bg-white/10"></div>
+                            <div class="space-y-5 p-8">
+                                <div class="h-3 w-24 rounded bg-white/10"></div>
+                                <div class="h-8 w-4/5 rounded bg-white/10"></div>
+                                <div class="h-4 w-2/3 rounded bg-white/[0.06]"></div>
+                                <div class="h-20 rounded bg-white/[0.05]"></div>
                             </div>
-                        <?php endfor; ?>
+                        </div>
+
+                        <div class="grid gap-4">
+                            <?php for ($skeleton = 0; $skeleton < 3; $skeleton++): ?>
+                                <div
+                                    class="grid min-h-[128px] animate-pulse grid-cols-[96px_1fr] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05]"
+                                >
+                                    <div class="bg-white/10"></div>
+                                    <div class="space-y-3 p-5">
+                                        <div class="h-3 w-4/5 rounded bg-white/10"></div>
+                                        <div class="h-3 w-1/2 rounded bg-white/[0.06]"></div>
+                                        <div class="h-4 w-20 rounded bg-red-400/10"></div>
+                                    </div>
+                                </div>
+                            <?php endfor; ?>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -1433,89 +1765,66 @@ foreach ($products as $product) {
                         ) || 0
                     );
 
+                    counter.textContent = '0';
+
                     if (reduceCatalogMotion) {
                         counter.textContent = String(target);
                         return;
                     }
 
                     window.setTimeout(() => {
-                        const duration = 1050;
-                        const interval = 48;
-                        const randomMaximum = Math.max(
-                            24,
-                            target * 3,
-                            99
-                        );
+                        const duration = 1450;
                         const startedAt = performance.now();
 
                         counter.classList.add(
-                            'is-rolling'
+                            'is-counting'
                         );
 
-                        const timer = window.setInterval(
-                            () => {
-                                const elapsed =
-                                    performance.now() -
-                                    startedAt;
+                        function updateCounter(currentTime) {
+                            const progress = Math.min(
+                                1,
+                                (
+                                    currentTime -
+                                    startedAt
+                                ) /
+                                duration
+                            );
 
-                                if (elapsed >= duration) {
-                                    window.clearInterval(
-                                        timer
-                                    );
-                                    counter.textContent =
-                                        String(target);
-                                    counter.classList.remove(
-                                        'is-rolling'
-                                    );
-                                    return;
-                                }
-
-                                const progress =
-                                    elapsed / duration;
-
-                                if (progress < 0.72) {
-                                    counter.textContent =
-                                        String(
-                                            Math.floor(
-                                                Math.random() *
-                                                (
-                                                    randomMaximum +
-                                                    1
-                                                )
-                                            )
-                                        );
-                                    return;
-                                }
-
-                                const settleProgress =
-                                    (
-                                        progress -
-                                        0.72
-                                    ) /
-                                    0.28;
-
-                                const eased =
+                            const eased =
+                                1 -
+                                Math.pow(
                                     1 -
-                                    Math.pow(
-                                        1 -
-                                        settleProgress,
-                                        3
-                                    );
+                                    progress,
+                                    3
+                                );
 
-                                counter.textContent =
-                                    String(
-                                        Math.round(
-                                            randomMaximum *
-                                            (
-                                                1 -
-                                                eased
-                                            ) +
-                                            target *
-                                            eased
-                                        )
-                                    );
-                            },
-                            interval
+                            const value = Math.min(
+                                target,
+                                Math.floor(
+                                    target *
+                                    eased
+                                )
+                            );
+
+                            counter.textContent =
+                                String(value);
+
+                            if (progress < 1) {
+                                window.requestAnimationFrame(
+                                    updateCounter
+                                );
+                                return;
+                            }
+
+                            counter.textContent =
+                                String(target);
+                            counter.classList.remove(
+                                'is-counting'
+                            );
+                        }
+
+                        window.requestAnimationFrame(
+                            updateCounter
                         );
                     }, delay);
                 });
@@ -1683,6 +1992,63 @@ foreach ($products as $product) {
 
             updateCatalogVisibility();
 
+            const grid = document.getElementById(
+                'catalogProductGrid'
+            );
+
+            function revealInitialBatch() {
+                items
+                    .slice(
+                        0,
+                        visibleCount
+                    )
+                    .forEach((item, index) => {
+                        item.classList.remove(
+                            'catalog-card-reveal'
+                        );
+                        item.style.animationDelay =
+                            `${index * 55}ms`;
+
+                        void item.offsetWidth;
+
+                        item.classList.add(
+                            'catalog-card-reveal'
+                        );
+                    });
+            }
+
+            if (
+                reduceCatalogMotion ||
+                !grid ||
+                !('IntersectionObserver' in window)
+            ) {
+                revealInitialBatch();
+            } else {
+                const gridObserver =
+                    new IntersectionObserver(
+                        entries => {
+                            if (
+                                !entries.some(
+                                    entry =>
+                                        entry.isIntersecting
+                                )
+                            ) {
+                                return;
+                            }
+
+                            revealInitialBatch();
+                            gridObserver.disconnect();
+                        },
+                        {
+                            threshold: 0.08,
+                            rootMargin:
+                                '0px 0px -5% 0px',
+                        }
+                    );
+
+                gridObserver.observe(grid);
+            }
+
             button.addEventListener(
                 'click',
                 () => {
@@ -1719,8 +2085,52 @@ foreach ($products as $product) {
             );
         }
 
+        function setupRecommendationHeading() {
+            const heading = document.querySelector(
+                '.recommendation-heading'
+            );
+
+            if (!heading) {
+                return;
+            }
+
+            if (
+                reduceCatalogMotion ||
+                !('IntersectionObserver' in window)
+            ) {
+                heading.classList.add(
+                    'is-visible'
+                );
+                return;
+            }
+
+            const observer = new IntersectionObserver(
+                entries => {
+                    if (
+                        !entries.some(
+                            entry =>
+                                entry.isIntersecting
+                        )
+                    ) {
+                        return;
+                    }
+
+                    heading.classList.add(
+                        'is-visible'
+                    );
+                    observer.disconnect();
+                },
+                {
+                    threshold: 0.3,
+                }
+            );
+
+            observer.observe(heading);
+        }
+
         animateCatalogCounters();
         setupCatalogPagination();
+        setupRecommendationHeading();
 
         const productModal = document.getElementById(
             'productModal'
@@ -1949,85 +2359,229 @@ foreach ($products as $product) {
                 return;
             }
 
-            grid.innerHTML = data.products
-                .slice(0, 4)
-                .map(product => {
-                    const productId = Number(
-                        product.product_id
-                    );
-                    const title = escapeHtml(
-                        product.product_title
-                    );
-                    const genres = escapeHtml(
-                        product.genres || ''
-                    );
-                    const price = Number(
-                        product.product_price
-                    ).toFixed(2);
-                    const cover = product.product_cover_image
-                        ? '../assets/images/' +
-                            encodeURIComponent(
-                                product.product_cover_image
-                            )
-                        : '';
-                    const isEbook =
-                        product.product_type === 'ebook';
-                    const stock = Number(
-                        product.physical_stock_quantity || 0
-                    );
-                    const availability = isEbook
-                        ? '<span class="text-blue-600">Instant e-book</span>'
-                        : stock > 0
-                            ? '<span class="text-green-700">In stock</span>'
-                            : '<span class="text-red-600">Out of stock</span>';
+            const products = data.products.slice(
+                0,
+                4
+            );
+
+            function recommendationData(product) {
+                const productId = Number(
+                    product.product_id
+                );
+                const title = escapeHtml(
+                    product.product_title
+                );
+                const genres = escapeHtml(
+                    product.genres || ''
+                );
+                const price = Number(
+                    product.product_price
+                ).toFixed(2);
+                const cover = product.product_cover_image
+                    ? '../assets/images/' +
+                        encodeURIComponent(
+                            product.product_cover_image
+                        )
+                    : '';
+                const isEbook =
+                    product.product_type === 'ebook';
+                const stock = Number(
+                    product.physical_stock_quantity || 0
+                );
+                const availabilityText = isEbook
+                    ? 'Instant e-book'
+                    : stock > 0
+                        ? 'In stock'
+                        : 'Out of stock';
+                const availabilityClass = isEbook
+                    ? 'bg-blue-400/15 text-blue-200'
+                    : stock > 0
+                        ? 'bg-emerald-400/15 text-emerald-200'
+                        : 'bg-red-400/15 text-red-200';
+
+                return {
+                    productId,
+                    title,
+                    genres,
+                    price,
+                    cover,
+                    availabilityText,
+                    availabilityClass,
+                };
+            }
+
+            const featured = recommendationData(
+                products[0]
+            );
+            const sideProducts = products
+                .slice(1)
+                .map(recommendationData);
+
+            const featuredCover = featured.cover
+                ? `<img
+                        src="${featured.cover}"
+                        alt="${featured.title} cover"
+                        class="recommendation-feature-cover h-full w-full object-cover"
+                        loading="lazy"
+                   >`
+                : `<div
+                        class="flex h-full items-center justify-center bg-white/10 text-5xl font-black text-white/25"
+                   >
+                        ${featured.title
+                            .substring(0, 2)
+                            .toUpperCase()}
+                   </div>`;
+
+            const sideCards = sideProducts
+                .map((product, index) => {
+                    const sideCover = product.cover
+                        ? `<img
+                                src="${product.cover}"
+                                alt="${product.title} cover"
+                                class="recommendation-side-cover h-full w-full object-cover"
+                                loading="lazy"
+                           >`
+                        : `<div
+                                class="flex h-full items-center justify-center bg-white/10 text-xl font-black text-white/25"
+                           >
+                                ${product.title
+                                    .substring(0, 2)
+                                    .toUpperCase()}
+                           </div>`;
 
                     return `
                         <a
-                            href="product_detail.php?id=${productId}"
-                            class="catalog-product-card group flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white transition duration-300 hover:-translate-y-2"
+                            href="product_detail.php?id=${product.productId}"
+                            class="recommendation-side-card group grid min-h-[132px] grid-cols-[98px_1fr] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.055] transition hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.09]"
                         >
-                            <div class="catalog-cover-stage">
-                                ${cover
-                                    ? `<img
-                                            src="${cover}"
-                                            alt="${title} cover"
-                                            class="catalog-cover-image"
-                                            loading="lazy"
-                                       >`
-                                    : `<div
-                                            class="flex h-full items-center justify-center bg-gray-100 text-4xl font-black text-gray-300"
-                                       >
-                                            ${title.substring(0, 2).toUpperCase()}
-                                       </div>`}
-
-                                <span
-                                    class="absolute bottom-3 left-3 rounded-full border border-white/30 bg-white/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] shadow-lg backdrop-blur"
-                                >
-                                    ${availability}
-                                </span>
+                            <div class="overflow-hidden bg-white/10">
+                                ${sideCover}
                             </div>
 
-                            <div class="flex flex-1 flex-col p-4">
-                                <h3
-                                    class="catalog-line-clamp-2 min-h-[2.5rem] text-sm font-black leading-5 text-gray-900"
+                            <div
+                                class="flex min-w-0 flex-col justify-center p-5"
+                            >
+                                <div
+                                    class="flex items-start justify-between gap-3"
                                 >
-                                    ${title}
-                                </h3>
+                                    <div class="min-w-0">
+                                        <p
+                                            class="text-[9px] font-black uppercase tracking-[0.18em] text-white/30"
+                                        >
+                                            Pick 0${index + 2}
+                                        </p>
+                                        <h3
+                                            class="mt-1 truncate text-sm font-black text-white transition group-hover:text-red-300"
+                                        >
+                                            ${product.title}
+                                        </h3>
+                                    </div>
+
+                                    <span
+                                        class="text-xs font-black text-white/25 transition group-hover:translate-x-1 group-hover:text-red-300"
+                                    >
+                                        →
+                                    </span>
+                                </div>
+
                                 <p
-                                    class="mt-1 truncate text-xs text-gray-400"
+                                    class="mt-2 truncate text-xs text-white/35"
                                 >
-                                    ${genres || 'MangaVault selection'}
+                                    ${product.genres || 'MangaVault selection'}
                                 </p>
-                                <p
-                                    class="mt-4 text-base font-black text-red-600"
+
+                                <div
+                                    class="mt-3 flex items-center justify-between gap-3"
                                 >
-                                    RM ${price}
-                                </p>
+                                    <span
+                                        class="rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.1em] ${product.availabilityClass}"
+                                    >
+                                        ${product.availabilityText}
+                                    </span>
+
+                                    <span
+                                        class="text-sm font-black text-red-300"
+                                    >
+                                        RM ${product.price}
+                                    </span>
+                                </div>
                             </div>
                         </a>
                     `;
                 })
                 .join('');
+
+            grid.innerHTML = `
+                <a
+                    href="product_detail.php?id=${featured.productId}"
+                    class="recommendation-feature group grid min-h-[430px] overflow-hidden rounded-3xl border border-white/10 bg-white/[0.055] shadow-[0_32px_90px_rgba(0,0,0,0.28)] transition hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.08] md:grid-cols-[0.78fr_1.22fr]"
+                >
+                    <div
+                        class="relative min-h-[320px] overflow-hidden bg-white/10 md:min-h-full"
+                    >
+                        ${featuredCover}
+
+                        <span
+                            class="absolute left-5 top-5 rounded-full border border-white/15 bg-gray-950/70 px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.16em] text-white backdrop-blur"
+                        >
+                            Featured match
+                        </span>
+                    </div>
+
+                    <div
+                        class="flex flex-col justify-center p-7 sm:p-9"
+                    >
+                        <p
+                            class="text-[10px] font-black uppercase tracking-[0.2em] text-red-300"
+                        >
+                            Recommendation 01
+                        </p>
+
+                        <h3
+                            class="mt-4 text-2xl font-black leading-tight tracking-[-0.035em] text-white transition group-hover:text-red-200 sm:text-3xl"
+                        >
+                            ${featured.title}
+                        </h3>
+
+                        <p
+                            class="mt-3 text-sm leading-6 text-white/40"
+                        >
+                            ${featured.genres || 'A MangaVault selection chosen from the current catalog.'}
+                        </p>
+
+                        <div
+                            class="mt-7 flex flex-wrap items-center gap-3"
+                        >
+                            <span
+                                class="rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.11em] ${featured.availabilityClass}"
+                            >
+                                ${featured.availabilityText}
+                            </span>
+
+                            <span
+                                class="text-xl font-black text-red-300"
+                            >
+                                RM ${featured.price}
+                            </span>
+                        </div>
+
+                        <div
+                            class="mt-8 inline-flex items-center gap-3 text-xs font-black uppercase tracking-[0.14em] text-white"
+                        >
+                            Explore this title
+                            <span
+                                class="transition group-hover:translate-x-2 group-hover:text-red-300"
+                            >
+                                →
+                            </span>
+                        </div>
+                    </div>
+                </a>
+
+                <div class="grid gap-4">
+                    ${sideCards}
+                </div>
+            `;
         })
         .catch(() => {
             const section = document.getElementById(
