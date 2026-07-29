@@ -302,6 +302,7 @@ function awardAnnualBirthdayBonus(
                 AND voucher_is_active = 1
                 AND voucher_is_points_redeem = 0
                 AND voucher_is_system_generated = 0
+                AND voucher_is_birthday_template = 1
                 AND (
                     voucher_start_date IS NULL
                     OR voucher_start_date <= ?

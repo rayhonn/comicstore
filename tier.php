@@ -1216,11 +1216,11 @@ function tierShippingLabel(array $config): string
                                         </div>
 
                                         <?php if ($is_current): ?>
-                                            <span
+                                            <!-- <span
                                                 class="rounded-full border border-white/20 bg-white/15 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.13em] text-white backdrop-blur"
                                             >
                                                 Your tier
-                                            </span>
+                                            </span> -->
                                         <?php endif; ?>
                                     </div>
                                 </div>

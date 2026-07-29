@@ -1,32 +1,38 @@
 <?php
 
-require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/money_helper.php';
+require_once __DIR__ . '/../includes/logger.php';
 
 require_admin();
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
-$success = '';
+$success = (string) ($_SESSION['admin_voucher_success'] ?? '');
+unset($_SESSION['admin_voucher_success']);
 $error = '';
 
 function requireVoucherId(mixed $value): int
 {
-    $id = filter_var(
+    $voucherId = filter_var(
         $value,
         FILTER_VALIDATE_INT,
-        ['options' => ['min_range' => 1]]
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
     );
 
-    if ($id === false || $id === null) {
+    if ($voucherId === false) {
         throw new InvalidArgumentException(
             'Invalid voucher.'
         );
     }
 
-    return (int) $id;
+    return (int) $voucherId;
 }
 
 function normalizeVoucherCode(mixed $value): string
@@ -69,7 +75,10 @@ function normalizeVoucherType(mixed $value): string
         !is_string($value) ||
         !in_array(
             $value,
-            ['percentage', 'fixed'],
+            [
+                'percentage',
+                'fixed',
+            ],
             true
         )
     ) {
@@ -90,24 +99,30 @@ function normalizeVoucherAmounts(
             (string) ($input['voucher_value'] ?? '')
         );
 
-        $minimum_raw = trim(
-            (string) ($input['voucher_min_order'] ?? '')
+        $minimumRaw = trim(
+            (string) (
+                $input['voucher_min_order'] ?? ''
+            )
         );
-        $minimum_order = moneyNormalizeDecimal(
-            $minimum_raw === '' ? '0' : $minimum_raw
+        $minimumOrder = moneyNormalizeDecimal(
+            $minimumRaw === ''
+                ? '0'
+                : $minimumRaw
         );
 
-        $maximum_raw = trim(
+        $maximumRaw = trim(
             (string) (
                 $input['voucher_max_discount'] ?? ''
             )
         );
-        $maximum_discount =
-            $maximum_raw === ''
+        $maximumDiscount =
+            $maximumRaw === ''
                 ? null
-                : moneyNormalizeDecimal($maximum_raw);
+                : moneyNormalizeDecimal(
+                    $maximumRaw
+                );
 
-        $value_sen = moneyDecimalToSen($value);
+        $valueSen = moneyDecimalToSen($value);
     } catch (MoneyValueException $e) {
         throw new InvalidArgumentException(
             'Please enter valid voucher amounts with up to two decimal places.',
@@ -116,7 +131,7 @@ function normalizeVoucherAmounts(
         );
     }
 
-    if ($value_sen < 1) {
+    if ($valueSen < 1) {
         throw new InvalidArgumentException(
             'Voucher value must be at least 0.01.'
         );
@@ -124,17 +139,21 @@ function normalizeVoucherAmounts(
 
     if (
         $type === 'percentage' &&
-        $value_sen > 10000
+        $valueSen > 10000
     ) {
         throw new InvalidArgumentException(
             'Percentage voucher value cannot exceed 100.00.'
         );
     }
 
+    if ($type === 'fixed') {
+        $maximumDiscount = null;
+    }
+
     return [
         $value,
-        $minimum_order,
-        $maximum_discount,
+        $minimumOrder,
+        $maximumDiscount,
     ];
 }
 
@@ -145,7 +164,7 @@ function normalizeVoucherUsageLimit(
         return null;
     }
 
-    $limit = filter_var(
+    $usageLimit = filter_var(
         $value,
         FILTER_VALIDATE_INT,
         [
@@ -156,13 +175,13 @@ function normalizeVoucherUsageLimit(
         ]
     );
 
-    if ($limit === false || $limit === null) {
+    if ($usageLimit === false) {
         throw new InvalidArgumentException(
             'Usage limit must be a positive whole number.'
         );
     }
 
-    return (int) $limit;
+    return (int) $usageLimit;
 }
 
 function normalizeVoucherDate(
@@ -203,6 +222,20 @@ function normalizeVoucherDate(
     return $date->format('Y-m-d H:i:s');
 }
 
+function clearTierBirthdayVoucherReferences(
+    PDO $pdo,
+    int $voucherId
+): void {
+    $statement = $pdo->prepare("
+        UPDATE tier_config
+        SET tier_birthday_voucher_id = NULL
+        WHERE tier_birthday_voucher_id = ?
+    ");
+    $statement->execute([
+        $voucherId,
+    ]);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
@@ -213,7 +246,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             !is_string($action) ||
             !in_array(
                 $action,
-                ['add', 'edit', 'delete', 'toggle'],
+                [
+                    'add',
+                    'edit',
+                    'delete',
+                    'toggle',
+                ],
                 true
             )
         ) {
@@ -222,63 +260,136 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
         }
 
-        if ($action === 'delete' || $action === 'toggle') {
-            $voucher_id = requireVoucherId(
+        if (
+            $action === 'delete' ||
+            $action === 'toggle'
+        ) {
+            $voucherId = requireVoucherId(
                 $_POST['voucher_id'] ?? null
             );
 
+            $voucherStatement = $pdo->prepare("
+                SELECT
+                    voucher_id,
+                    voucher_is_active,
+                    voucher_is_birthday_template
+                FROM vouchers
+                WHERE voucher_id = ?
+                AND voucher_is_system_generated = 0
+                LIMIT 1
+            ");
+            $voucherStatement->execute([
+                $voucherId,
+            ]);
+            $voucher = $voucherStatement->fetch(
+                PDO::FETCH_ASSOC
+            );
+
+            if (!$voucher) {
+                throw new InvalidArgumentException(
+                    'Voucher not found.'
+                );
+            }
+
+            $pdo->beginTransaction();
+
             if ($action === 'delete') {
-                $delete = $pdo->prepare("
+                clearTierBirthdayVoucherReferences(
+                    $pdo,
+                    $voucherId
+                );
+
+                $deleteStatement = $pdo->prepare("
                     DELETE FROM vouchers
                     WHERE voucher_id = ?
+                    AND voucher_is_system_generated = 0
                 ");
-                $delete->execute([$voucher_id]);
+                $deleteStatement->execute([
+                    $voucherId,
+                ]);
 
-                if ($delete->rowCount() !== 1) {
-                    throw new InvalidArgumentException(
-                        'Voucher not found.'
+                if ($deleteStatement->rowCount() !== 1) {
+                    throw new RuntimeException(
+                        'Voucher deletion failed.'
                     );
                 }
 
                 $success = 'Voucher deleted.';
             } else {
-                $toggle = $pdo->prepare("
-                    UPDATE vouchers
-                    SET voucher_is_active =
-                        NOT voucher_is_active
-                    WHERE voucher_id = ?
-                ");
-                $toggle->execute([$voucher_id]);
+                $newActiveStatus =
+                    (int) $voucher[
+                        'voucher_is_active'
+                    ] === 1
+                        ? 0
+                        : 1;
 
-                if ($toggle->rowCount() !== 1) {
-                    throw new InvalidArgumentException(
-                        'Voucher not found.'
+                $toggleStatement = $pdo->prepare("
+                    UPDATE vouchers
+                    SET voucher_is_active = ?
+                    WHERE voucher_id = ?
+                    AND voucher_is_system_generated = 0
+                ");
+                $toggleStatement->execute([
+                    $newActiveStatus,
+                    $voucherId,
+                ]);
+
+                if ($toggleStatement->rowCount() !== 1) {
+                    throw new RuntimeException(
+                        'Voucher status update failed.'
                     );
                 }
 
-                header('Location: vouchers.php');
-                exit;
+                if ($newActiveStatus === 0) {
+                    clearTierBirthdayVoucherReferences(
+                        $pdo,
+                        $voucherId
+                    );
+                }
+
+                $success =
+                    $newActiveStatus === 1
+                        ? 'Voucher enabled.'
+                        : 'Voucher disabled.';
             }
+
+            $pdo->commit();
         } else {
-            $voucher_id = null;
+            $voucherId = null;
+            $isPointsVoucher = false;
 
             if ($action === 'edit') {
-                $voucher_id = requireVoucherId(
+                $voucherId = requireVoucherId(
                     $_POST['voucher_id'] ?? null
                 );
 
-                $exists = $pdo->prepare("
-                    SELECT voucher_id
+                $existingStatement = $pdo->prepare("
+                    SELECT
+                        voucher_id,
+                        voucher_is_points_redeem
                     FROM vouchers
                     WHERE voucher_id = ?
+                    AND voucher_is_system_generated = 0
+                    LIMIT 1
                 ");
-                $exists->execute([$voucher_id]);
+                $existingStatement->execute([
+                    $voucherId,
+                ]);
+                $existingVoucher =
+                    $existingStatement->fetch(
+                        PDO::FETCH_ASSOC
+                    );
 
-                if (!$exists->fetchColumn()) {
+                if (!$existingVoucher) {
                     throw new InvalidArgumentException(
                         'Voucher not found.'
                     );
                 }
+
+                $isPointsVoucher =
+                    (int) $existingVoucher[
+                        'voucher_is_points_redeem'
+                    ] === 1;
             }
 
             $code = normalizeVoucherCode(
@@ -289,59 +400,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             [
                 $value,
-                $min_order,
-                $max_discount,
-            ] = normalizeVoucherAmounts($_POST, $type);
-
-            $usage_limit = normalizeVoucherUsageLimit(
-                $_POST['voucher_usage_limit'] ?? null
+                $minimumOrder,
+                $maximumDiscount,
+            ] = normalizeVoucherAmounts(
+                $_POST,
+                $type
             );
-            $start_date = normalizeVoucherDate(
+
+            $usageLimit =
+                normalizeVoucherUsageLimit(
+                    $_POST[
+                        'voucher_usage_limit'
+                    ] ?? null
+                );
+            $startDate = normalizeVoucherDate(
                 $_POST['voucher_start_date'] ?? null,
                 'start date'
             );
-            $end_date = normalizeVoucherDate(
+            $endDate = normalizeVoucherDate(
                 $_POST['voucher_end_date'] ?? null,
                 'end date'
             );
-            $is_active =
-                isset($_POST['voucher_is_active'])
+            $isActive = isset(
+                $_POST['voucher_is_active']
+            ) ? 1 : 0;
+            $isBirthdayTemplate =
+                !$isPointsVoucher &&
+                isset(
+                    $_POST[
+                        'voucher_is_birthday_template'
+                    ]
+                )
                     ? 1
                     : 0;
 
             if (
-                $start_date !== null &&
-                $end_date !== null &&
-                strtotime($end_date) < strtotime($start_date)
+                $startDate !== null &&
+                $endDate !== null &&
+                strtotime($endDate) <
+                    strtotime($startDate)
             ) {
                 throw new InvalidArgumentException(
                     'End date cannot be earlier than start date.'
                 );
             }
 
-            $duplicate_sql = "
+            $duplicateSql = "
                 SELECT voucher_id
                 FROM vouchers
                 WHERE voucher_code = ?
             ";
-            $duplicate_params = [$code];
+            $duplicateParams = [$code];
 
-            if ($voucher_id !== null) {
-                $duplicate_sql .= " AND voucher_id != ?";
-                $duplicate_params[] = $voucher_id;
+            if ($voucherId !== null) {
+                $duplicateSql .=
+                    ' AND voucher_id != ?';
+                $duplicateParams[] = $voucherId;
             }
 
-            $duplicate = $pdo->prepare($duplicate_sql);
-            $duplicate->execute($duplicate_params);
+            $duplicateStatement = $pdo->prepare(
+                $duplicateSql
+            );
+            $duplicateStatement->execute(
+                $duplicateParams
+            );
 
-            if ($duplicate->fetchColumn()) {
+            if ($duplicateStatement->fetchColumn()) {
                 throw new InvalidArgumentException(
                     'Voucher code already exists.'
                 );
             }
 
+            $pdo->beginTransaction();
+
             if ($action === 'add') {
-                $insert = $pdo->prepare("
+                $insertStatement = $pdo->prepare("
                     INSERT INTO vouchers (
                         voucher_code,
                         voucher_type,
@@ -351,25 +484,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         voucher_usage_limit,
                         voucher_start_date,
                         voucher_end_date,
-                        voucher_is_active
+                        voucher_is_active,
+                        voucher_is_birthday_template
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ");
-                $insert->execute([
+                $insertStatement->execute([
                     $code,
                     $type,
                     $value,
-                    $min_order,
-                    $max_discount,
-                    $usage_limit,
-                    $start_date,
-                    $end_date,
-                    $is_active,
+                    $minimumOrder,
+                    $maximumDiscount,
+                    $usageLimit,
+                    $startDate,
+                    $endDate,
+                    $isActive,
+                    $isBirthdayTemplate,
                 ]);
 
                 $success = 'Voucher created!';
             } else {
-                $update = $pdo->prepare("
+                $updateStatement = $pdo->prepare("
                     UPDATE vouchers
                     SET voucher_code = ?,
                         voucher_type = ?,
@@ -379,27 +514,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         voucher_usage_limit = ?,
                         voucher_start_date = ?,
                         voucher_end_date = ?,
-                        voucher_is_active = ?
+                        voucher_is_active = ?,
+                        voucher_is_birthday_template = ?
                     WHERE voucher_id = ?
+                    AND voucher_is_system_generated = 0
                 ");
-                $update->execute([
+                $updateStatement->execute([
                     $code,
                     $type,
                     $value,
-                    $min_order,
-                    $max_discount,
-                    $usage_limit,
-                    $start_date,
-                    $end_date,
-                    $is_active,
-                    $voucher_id,
+                    $minimumOrder,
+                    $maximumDiscount,
+                    $usageLimit,
+                    $startDate,
+                    $endDate,
+                    $isActive,
+                    $isBirthdayTemplate,
+                    $voucherId,
                 ]);
+
+                if (
+                    $isBirthdayTemplate === 0 ||
+                    $isActive === 0
+                ) {
+                    clearTierBirthdayVoucherReferences(
+                        $pdo,
+                        (int) $voucherId
+                    );
+                }
 
                 $success = 'Voucher updated!';
             }
+
+            $pdo->commit();
         }
+
+        $_SESSION['admin_voucher_success'] =
+            $success;
+
+        header('Location: vouchers.php');
+        exit;
     } catch (InvalidArgumentException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
         $error = $e->getMessage();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        app_error_log(
+            'Admin voucher management failed: ' .
+            $e->getMessage()
+        );
+
+        $error =
+            'Unable to update the voucher. Please try again.';
     }
 }
 
@@ -419,258 +591,747 @@ $vouchers = $pdo->query("
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
     <title>Vouchers - MangaVault Admin</title>
+
     <script src="https://cdn.tailwindcss.com"></script>
+
     <style>
-        body { opacity: 0; animation: fadeIn 0.4s ease forwards; }
-        @keyframes fadeIn { to { opacity: 1; } }
-        .modal { display: none; }
-        .modal.active { display: flex; }
+        body {
+            opacity: 0;
+            animation: fadeIn 0.4s ease forwards;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+            }
+        }
+
+        .voucher-modal {
+            display: none;
+        }
+
+        .voucher-modal.active {
+            display: flex;
+        }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
 
-    <?php include '../includes/admin_navbar.php'; ?>
+<body class="min-h-screen bg-gray-100">
 
-    <div class="max-w-7xl mx-auto px-6 py-8">
+    <?php include __DIR__ . '/../includes/admin_navbar.php'; ?>
 
-        <div class="flex justify-between items-center mb-6">
+    <main class="mx-auto max-w-7xl px-6 py-8">
+        <div
+            class="mb-6 flex items-center justify-between gap-4"
+        >
             <div>
-                <h1 class="text-2xl font-black text-gray-800">Vouchers</h1>
-                <p class="text-sm text-gray-400 mt-0.5"><?= count($vouchers) ?> vouchers total</p>
+                <h1
+                    class="text-2xl font-black text-gray-800"
+                >
+                    Vouchers
+                </h1>
+
+                <p class="mt-0.5 text-sm text-gray-400">
+                    <?= count($vouchers) ?> vouchers total
+                </p>
             </div>
-            <button onclick="openAddModal()"
-                    class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition-colors">
+
+            <button
+                type="button"
+                onclick="openAddModal()"
+                class="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+            >
                 + Create Voucher
             </button>
         </div>
 
-        <?php if ($success): ?>
-        <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">✅ <?= htmlspecialchars($success) ?></div>
-        <?php endif; ?>
-        <?php if ($error): ?>
-        <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5">❌ <?= htmlspecialchars($error) ?></div>
-        <?php endif; ?>
-
-        <?php if (empty($vouchers)): ?>
-        <div class="bg-white rounded-2xl shadow-sm p-12 text-center">
-            <div class="text-5xl mb-4">🎟️</div>
-            <p class="text-gray-500 font-medium mb-4">No vouchers yet</p>
-            <button onclick="openAddModal()" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-5 py-2 rounded-xl text-sm transition-colors">
-                Create First Voucher
-            </button>
-        </div>
-        <?php else: ?>
-        <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-            <table class="w-full">
-                <thead>
-                    <tr class="bg-gray-50 border-b border-gray-100">
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Code</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Discount</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Min Order</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Usage</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Validity</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($vouchers as $v):
-                        $voucher_value_sen = moneyDecimalToSen(
-                            (string) $v['voucher_value']
-                        );
-                        $voucher_min_order_sen = moneyDecimalToSen(
-                            (string) $v['voucher_min_order']
-                        );
-                        $voucher_max_discount_sen =
-                            $v['voucher_max_discount'] === null
-                                ? null
-                                : moneyDecimalToSen(
-                                    (string) $v['voucher_max_discount']
-                                );
-                        $now = new DateTime();
-                        $is_expired = $v['voucher_end_date'] && new DateTime($v['voucher_end_date']) < $now;
-                        $is_maxed = $v['voucher_usage_limit'] && $v['actual_usage'] >= $v['voucher_usage_limit'];
-                    ?>
-                    <tr class="border-t border-gray-50 hover:bg-gray-50 transition-colors <?= (!$v['voucher_is_active'] || $is_expired || $is_maxed) ? 'opacity-60' : '' ?>">
-                        <td class="px-5 py-4">
-                            <span class="font-mono font-black text-gray-800 bg-gray-100 px-3 py-1 rounded-lg text-sm">
-                                <?= htmlspecialchars($v['voucher_code']) ?>
-                            </span>
-                        </td>
-                        <td class="px-5 py-4">
-                            <p class="font-bold text-red-600">
-                                <?= $v['voucher_type'] === 'percentage'
-                                    ? htmlspecialchars((string) $v['voucher_value'], ENT_QUOTES, 'UTF-8') . '%'
-                                    : 'RM ' . moneyFormatSen($voucher_value_sen) ?>
-                            </p>
-                            <?php if (
-                                $voucher_max_discount_sen !== null &&
-                                $voucher_max_discount_sen > 0
-                            ): ?>
-                            <p class="text-xs text-gray-400">Max: RM <?= moneyFormatSen($voucher_max_discount_sen) ?></p>
-                            <?php endif; ?>
-                        </td>
-                        <td class="px-5 py-4 text-sm text-gray-600">
-                            <?= $voucher_min_order_sen > 0
-                                ? 'RM ' . moneyFormatSen($voucher_min_order_sen)
-                                : '—' ?>
-                        </td>
-                        <td class="px-5 py-4 text-sm">
-                            <span class="font-semibold text-gray-800"><?= $v['actual_usage'] ?></span>
-                            <?php if ($v['voucher_usage_limit']): ?>
-                            <span class="text-gray-400"> / <?= $v['voucher_usage_limit'] ?></span>
-                            <?php else: ?>
-                            <span class="text-gray-400"> / ∞</span>
-                            <?php endif; ?>
-                        </td>
-                        <td class="px-5 py-4 text-xs text-gray-500">
-                            <?php if ($v['voucher_start_date']): ?>
-                            <p>From: <?= date('d M Y', strtotime($v['voucher_start_date'])) ?></p>
-                            <?php endif; ?>
-                            <?php if ($v['voucher_end_date']): ?>
-                            <p class="<?= $is_expired ? 'text-red-500 font-semibold' : '' ?>">
-                                Until: <?= date('d M Y', strtotime($v['voucher_end_date'])) ?>
-                                <?= $is_expired ? '(Expired)' : '' ?>
-                            </p>
-                            <?php else: ?>
-                            <p>No expiry</p>
-                            <?php endif; ?>
-                        </td>
-                        <td class="px-5 py-4">
-                            <?php if ($is_expired): ?>
-                            <span class="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full font-semibold">Expired</span>
-                            <?php elseif ($is_maxed): ?>
-                            <span class="bg-orange-100 text-orange-600 text-xs px-2 py-1 rounded-full font-semibold">Maxed Out</span>
-                            <?php elseif ($v['voucher_is_active']): ?>
-                            <span class="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full font-semibold">Active</span>
-                            <?php else: ?>
-                            <span class="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full font-semibold">Inactive</span>
-                            <?php endif; ?>
-                        </td>
-                        <td class="px-5 py-4">
-                            <div class="flex gap-2">
-                                <button onclick="openEditModal(<?= htmlspecialchars(
-                                    json_encode($v),
-                                    ENT_QUOTES,
-                                    'UTF-8'
-                                ) ?>)"
-                                        class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">
-                                    ✏️ Edit
-                                </button>
-                                <form method="POST" class="inline">
-                                    <?php csrf_field(); ?>
-<input type="hidden" name="action" value="toggle">
-                                    <input type="hidden" name="voucher_id" value="<?= (int) $v['voucher_id'] ?>">
-                                    <button type="submit"
-                                            class="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
-                                        <?= $v['voucher_is_active'] ? '🙈 Disable' : '👁️ Enable' ?>
-                                    </button>
-                                </form>
-                                <form method="POST" class="inline">
-                                    <?php csrf_field(); ?>
-<input type="hidden" name="action" value="delete">
-                                    <input type="hidden" name="voucher_id" value="<?= (int) $v['voucher_id'] ?>">
-                                    <button type="submit" onclick="return confirm('Delete this voucher?')"
-                                            class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
-                                        🗑️
-                                    </button>
-                                </form>
-                            </div>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-        <?php endif; ?>
-    </div>
-
-    <!-- Add/Edit Modal -->
-    <div id="voucherModal" class="modal fixed inset-0 bg-black/50 z-50 items-center justify-center px-4">
-        <div class="bg-white rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div class="p-5 border-b border-gray-100 flex justify-between items-center">
-                <h3 class="font-black text-gray-800" id="modalTitle">Create Voucher</h3>
-                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        <?php if ($success !== ''): ?>
+            <div
+                class="mb-5 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
+            >
+                ✅
+                <?= htmlspecialchars(
+                    $success,
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?>
             </div>
-            <form method="POST" class="p-5 space-y-4">
+        <?php endif; ?>
+
+        <?php if ($error !== ''): ?>
+            <div
+                class="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+                ❌
+                <?= htmlspecialchars(
+                    $error,
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($vouchers === []): ?>
+            <div
+                class="rounded-2xl bg-white p-12 text-center shadow-sm"
+            >
+                <div class="mb-4 text-5xl">🎟️</div>
+                <p class="mb-4 font-medium text-gray-500">
+                    No vouchers yet
+                </p>
+
+                <button
+                    type="button"
+                    onclick="openAddModal()"
+                    class="rounded-xl bg-red-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+                >
+                    Create First Voucher
+                </button>
+            </div>
+        <?php else: ?>
+            <div
+                class="overflow-x-auto rounded-2xl bg-white shadow-sm"
+            >
+                <table class="min-w-full">
+                    <thead>
+                        <tr
+                            class="border-b border-gray-100 bg-gray-50"
+                        >
+                            <th
+                                class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            >
+                                Code
+                            </th>
+                            <th
+                                class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            >
+                                Purpose
+                            </th>
+                            <th
+                                class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            >
+                                Discount
+                            </th>
+                            <th
+                                class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            >
+                                Min Order
+                            </th>
+                            <th
+                                class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            >
+                                Usage
+                            </th>
+                            <th
+                                class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            >
+                                Validity
+                            </th>
+                            <th
+                                class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            >
+                                Status
+                            </th>
+                            <th
+                                class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            >
+                                Actions
+                            </th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        <?php foreach (
+                            $vouchers as $voucher
+                        ): ?>
+                            <?php
+                            $valueSen = moneyDecimalToSen(
+                                (string) $voucher[
+                                    'voucher_value'
+                                ]
+                            );
+                            $minimumOrderSen =
+                                moneyDecimalToSen(
+                                    (string) $voucher[
+                                        'voucher_min_order'
+                                    ]
+                                );
+                            $maximumDiscountSen =
+                                $voucher[
+                                    'voucher_max_discount'
+                                ] === null
+                                    ? null
+                                    : moneyDecimalToSen(
+                                        (string) $voucher[
+                                            'voucher_max_discount'
+                                        ]
+                                    );
+                            $now = new DateTimeImmutable();
+                            $isExpired =
+                                !empty(
+                                    $voucher[
+                                        'voucher_end_date'
+                                    ]
+                                ) &&
+                                new DateTimeImmutable(
+                                    (string) $voucher[
+                                        'voucher_end_date'
+                                    ]
+                                ) < $now;
+                            $isMaxed =
+                                $voucher[
+                                    'voucher_usage_limit'
+                                ] !== null &&
+                                (int) $voucher[
+                                    'actual_usage'
+                                ] >=
+                                (int) $voucher[
+                                    'voucher_usage_limit'
+                                ];
+                            $isBirthdayTemplate =
+                                (int) (
+                                    $voucher[
+                                        'voucher_is_birthday_template'
+                                    ] ?? 0
+                                ) === 1;
+                            $isPointsVoucher =
+                                (int) (
+                                    $voucher[
+                                        'voucher_is_points_redeem'
+                                    ] ?? 0
+                                ) === 1;
+                            ?>
+
+                            <tr
+                                class="border-t border-gray-50 transition-colors hover:bg-gray-50 <?= (!(int) $voucher['voucher_is_active'] || $isExpired || $isMaxed) ? 'opacity-60' : '' ?>"
+                            >
+                                <td class="px-5 py-4">
+                                    <span
+                                        class="rounded-lg bg-gray-100 px-3 py-1 font-mono text-sm font-black text-gray-800"
+                                    >
+                                        <?= htmlspecialchars(
+                                            (string) $voucher[
+                                                'voucher_code'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </span>
+                                </td>
+
+                                <td class="px-5 py-4">
+                                    <?php if (
+                                        $isBirthdayTemplate
+                                    ): ?>
+                                        <span
+                                            class="inline-flex rounded-full bg-pink-100 px-2.5 py-1 text-xs font-semibold text-pink-700"
+                                        >
+                                            🎂 Birthday Template
+                                        </span>
+                                    <?php elseif (
+                                        $isPointsVoucher
+                                    ): ?>
+                                        <span
+                                            class="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700"
+                                        >
+                                            ⭐ Points Redeem
+                                        </span>
+                                    <?php else: ?>
+                                        <span
+                                            class="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700"
+                                        >
+                                            General
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
+
+                                <td class="px-5 py-4">
+                                    <p class="font-bold text-red-600">
+                                        <?= $voucher[
+                                            'voucher_type'
+                                        ] === 'percentage'
+                                            ? htmlspecialchars(
+                                                (string) $voucher[
+                                                    'voucher_value'
+                                                ],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) . '%'
+                                            : 'RM ' .
+                                                moneyFormatSen(
+                                                    $valueSen
+                                                ) ?>
+                                    </p>
+
+                                    <?php if (
+                                        $maximumDiscountSen !== null &&
+                                        $maximumDiscountSen > 0
+                                    ): ?>
+                                        <p
+                                            class="text-xs text-gray-400"
+                                        >
+                                            Max: RM
+                                            <?= moneyFormatSen(
+                                                $maximumDiscountSen
+                                            ) ?>
+                                        </p>
+                                    <?php endif; ?>
+                                </td>
+
+                                <td
+                                    class="px-5 py-4 text-sm text-gray-600"
+                                >
+                                    <?= $minimumOrderSen > 0
+                                        ? 'RM ' .
+                                            moneyFormatSen(
+                                                $minimumOrderSen
+                                            )
+                                        : '—' ?>
+                                </td>
+
+                                <td class="px-5 py-4 text-sm">
+                                    <span
+                                        class="font-semibold text-gray-800"
+                                    >
+                                        <?= (int) $voucher[
+                                            'actual_usage'
+                                        ] ?>
+                                    </span>
+
+                                    <span class="text-gray-400">
+                                        /
+                                        <?= $voucher[
+                                            'voucher_usage_limit'
+                                        ] !== null
+                                            ? (int) $voucher[
+                                                'voucher_usage_limit'
+                                            ]
+                                            : '∞' ?>
+                                    </span>
+                                </td>
+
+                                <td
+                                    class="px-5 py-4 text-xs text-gray-500"
+                                >
+                                    <?php if (!empty(
+                                        $voucher[
+                                            'voucher_start_date'
+                                        ]
+                                    )): ?>
+                                        <p>
+                                            From:
+                                            <?= date(
+                                                'd M Y',
+                                                strtotime(
+                                                    (string) $voucher[
+                                                        'voucher_start_date'
+                                                    ]
+                                                )
+                                            ) ?>
+                                        </p>
+                                    <?php endif; ?>
+
+                                    <?php if (!empty(
+                                        $voucher[
+                                            'voucher_end_date'
+                                        ]
+                                    )): ?>
+                                        <p
+                                            class="<?= $isExpired ? 'font-semibold text-red-500' : '' ?>"
+                                        >
+                                            Until:
+                                            <?= date(
+                                                'd M Y',
+                                                strtotime(
+                                                    (string) $voucher[
+                                                        'voucher_end_date'
+                                                    ]
+                                                )
+                                            ) ?>
+                                            <?= $isExpired
+                                                ? '(Expired)'
+                                                : '' ?>
+                                        </p>
+                                    <?php else: ?>
+                                        <p>No expiry</p>
+                                    <?php endif; ?>
+                                </td>
+
+                                <td class="px-5 py-4">
+                                    <?php if ($isExpired): ?>
+                                        <span
+                                            class="rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-500"
+                                        >
+                                            Expired
+                                        </span>
+                                    <?php elseif ($isMaxed): ?>
+                                        <span
+                                            class="rounded-full bg-orange-100 px-2 py-1 text-xs font-semibold text-orange-600"
+                                        >
+                                            Maxed Out
+                                        </span>
+                                    <?php elseif ((int) $voucher[
+                                        'voucher_is_active'
+                                    ] === 1): ?>
+                                        <span
+                                            class="rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700"
+                                        >
+                                            Active
+                                        </span>
+                                    <?php else: ?>
+                                        <span
+                                            class="rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-500"
+                                        >
+                                            Inactive
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
+
+                                <td class="px-5 py-4">
+                                    <div class="flex gap-2">
+                                        <button
+                                            type="button"
+                                            data-voucher="<?= htmlspecialchars(
+                                                json_encode(
+                                                    $voucher,
+                                                    JSON_HEX_TAG |
+                                                    JSON_HEX_AMP |
+                                                    JSON_HEX_APOS |
+                                                    JSON_HEX_QUOT
+                                                ),
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>"
+                                            class="edit-voucher-button rounded-lg border border-blue-200 px-3 py-1.5 text-xs text-blue-600 transition-colors hover:bg-blue-50"
+                                        >
+                                            ✏️ Edit
+                                        </button>
+
+                                        <form method="POST">
+                                            <?php csrf_field(); ?>
+                                            <input
+                                                type="hidden"
+                                                name="action"
+                                                value="toggle"
+                                            >
+                                            <input
+                                                type="hidden"
+                                                name="voucher_id"
+                                                value="<?= (int) $voucher[
+                                                    'voucher_id'
+                                                ] ?>"
+                                            >
+                                            <button
+                                                type="submit"
+                                                class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-50"
+                                            >
+                                                <?= (int) $voucher[
+                                                    'voucher_is_active'
+                                                ] === 1
+                                                    ? '🙈 Disable'
+                                                    : '👁️ Enable' ?>
+                                            </button>
+                                        </form>
+
+                                        <form
+                                            method="POST"
+                                            onsubmit="return confirm('Delete this voucher?')"
+                                        >
+                                            <?php csrf_field(); ?>
+                                            <input
+                                                type="hidden"
+                                                name="action"
+                                                value="delete"
+                                            >
+                                            <input
+                                                type="hidden"
+                                                name="voucher_id"
+                                                value="<?= (int) $voucher[
+                                                    'voucher_id'
+                                                ] ?>"
+                                            >
+                                            <button
+                                                type="submit"
+                                                class="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 transition-colors hover:bg-red-50"
+                                                aria-label="Delete voucher"
+                                            >
+                                                🗑️
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </main>
+
+    <div
+        id="voucherModal"
+        class="voucher-modal fixed inset-0 z-50 items-center justify-center bg-black/50 px-4"
+    >
+        <div
+            class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl"
+        >
+            <div
+                class="flex items-center justify-between border-b border-gray-100 p-5"
+            >
+                <h3
+                    id="modalTitle"
+                    class="font-black text-gray-800"
+                >
+                    Create Voucher
+                </h3>
+
+                <button
+                    type="button"
+                    onclick="closeModal()"
+                    class="text-xl text-gray-400 hover:text-gray-600"
+                    aria-label="Close voucher form"
+                >
+                    ✕
+                </button>
+            </div>
+
+            <form
+                method="POST"
+                class="space-y-4 p-5"
+                id="voucherForm"
+            >
                 <?php csrf_field(); ?>
-                <input type="hidden" name="action" id="formAction" value="add">
-                <input type="hidden" name="voucher_id" id="formId">
+
+                <input
+                    type="hidden"
+                    name="action"
+                    id="formAction"
+                    value="add"
+                >
+
+                <input
+                    type="hidden"
+                    name="voucher_id"
+                    id="formId"
+                >
 
                 <div>
-                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Voucher Code *</label>
-                    <input type="text" name="voucher_code" id="formCode" maxlength="50" pattern="[A-Za-z0-9_-]+" required
-                           placeholder="e.g. MANGA10"
-                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white uppercase">
+                    <label
+                        class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500"
+                    >
+                        Voucher Code *
+                    </label>
+
+                    <input
+                        type="text"
+                        name="voucher_code"
+                        id="formCode"
+                        maxlength="50"
+                        pattern="[A-Za-z0-9_-]+"
+                        required
+                        placeholder="e.g. BIRTHDAY10"
+                        class="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm uppercase focus:border-red-400 focus:bg-white focus:outline-none"
+                    >
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Discount Type *</label>
-                        <select name="voucher_type" id="formType" onchange="toggleMaxDiscount()"
-                                class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
-                            <option value="percentage">Percentage (%)</option>
-                            <option value="fixed">Fixed Amount (RM)</option>
+                        <label
+                            class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500"
+                        >
+                            Discount Type *
+                        </label>
+
+                        <select
+                            name="voucher_type"
+                            id="formType"
+                            onchange="toggleMaxDiscount()"
+                            class="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm focus:border-red-400 focus:bg-white focus:outline-none"
+                        >
+                            <option value="percentage">
+                                Percentage (%)
+                            </option>
+                            <option value="fixed">
+                                Fixed Amount (RM)
+                            </option>
                         </select>
                     </div>
+
                     <div>
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Value *</label>
-                        <input type="number" name="voucher_value" id="formValue" required step="0.01" min="0.01" max="99999999.99"
-                               placeholder="e.g. 10"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
+                        <label
+                            class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500"
+                        >
+                            Value *
+                        </label>
+
+                        <input
+                            type="number"
+                            name="voucher_value"
+                            id="formValue"
+                            required
+                            step="0.01"
+                            min="0.01"
+                            max="99999999.99"
+                            placeholder="e.g. 10"
+                            class="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm focus:border-red-400 focus:bg-white focus:outline-none"
+                        >
                     </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Min Order (RM)</label>
-                        <input type="number" name="voucher_min_order" id="formMinOrder" step="0.01" min="0" max="99999999.99" value="0"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
+                        <label
+                            class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500"
+                        >
+                            Min Order (RM)
+                        </label>
+
+                        <input
+                            type="number"
+                            name="voucher_min_order"
+                            id="formMinOrder"
+                            step="0.01"
+                            min="0"
+                            max="99999999.99"
+                            value="0"
+                            class="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm focus:border-red-400 focus:bg-white focus:outline-none"
+                        >
                     </div>
+
                     <div id="maxDiscountDiv">
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Max Discount (RM)</label>
-                        <input type="number" name="voucher_max_discount" id="formMaxDiscount" step="0.01" min="0" max="99999999.99"
-                               placeholder="Leave empty = no limit"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
+                        <label
+                            class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500"
+                        >
+                            Max Discount (RM)
+                        </label>
+
+                        <input
+                            type="number"
+                            name="voucher_max_discount"
+                            id="formMaxDiscount"
+                            step="0.01"
+                            min="0"
+                            max="99999999.99"
+                            placeholder="No limit"
+                            class="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm focus:border-red-400 focus:bg-white focus:outline-none"
+                        >
                     </div>
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Usage Limit</label>
-                    <input type="number" name="voucher_usage_limit" id="formUsageLimit" min="1" max="2147483647"
-                           placeholder="Leave empty = unlimited"
-                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
+                    <label
+                        class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500"
+                    >
+                        Usage Limit
+                    </label>
+
+                    <input
+                        type="number"
+                        name="voucher_usage_limit"
+                        id="formUsageLimit"
+                        min="1"
+                        max="2147483647"
+                        placeholder="Unlimited"
+                        class="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm focus:border-red-400 focus:bg-white focus:outline-none"
+                    >
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Start Date</label>
-                        <input type="datetime-local" name="voucher_start_date" id="formStartDate"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
+                        <label
+                            class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500"
+                        >
+                            Start Date
+                        </label>
+
+                        <input
+                            type="datetime-local"
+                            name="voucher_start_date"
+                            id="formStartDate"
+                            class="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm focus:border-red-400 focus:bg-white focus:outline-none"
+                        >
                     </div>
+
                     <div>
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">End Date</label>
-                        <input type="datetime-local" name="voucher_end_date" id="formEndDate"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
+                        <label
+                            class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500"
+                        >
+                            End Date
+                        </label>
+
+                        <input
+                            type="datetime-local"
+                            name="voucher_end_date"
+                            id="formEndDate"
+                            class="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm focus:border-red-400 focus:bg-white focus:outline-none"
+                        >
                     </div>
                 </div>
 
-                <div id="activeToggleDiv">
-                    <label class="flex items-center gap-3 cursor-pointer">
-                        <input type="checkbox" name="voucher_is_active" id="formActive" checked class="w-4 h-4 accent-red-600">
-                        <span class="text-sm text-gray-700 font-medium">Active (visible to customers)</span>
-                    </label>
-                </div>
+                <label
+                    id="birthdayTemplateLabel"
+                    class="flex cursor-pointer items-start gap-3 rounded-xl border border-pink-100 bg-pink-50 p-4"
+                >
+                    <input
+                        type="checkbox"
+                        name="voucher_is_birthday_template"
+                        id="formBirthdayTemplate"
+                        class="mt-0.5 h-4 w-4 accent-pink-600"
+                    >
+
+                    <span>
+                        <span
+                            class="block text-sm font-semibold text-gray-700"
+                        >
+                            Birthday Voucher Template
+                        </span>
+
+                        <span
+                            class="mt-1 block text-xs leading-5 text-gray-500"
+                        >
+                            Only vouchers marked here appear in the
+                            Tier Management birthday voucher dropdown.
+                        </span>
+                    </span>
+                </label>
+
+                <label
+                    class="flex cursor-pointer items-center gap-3"
+                >
+                    <input
+                        type="checkbox"
+                        name="voucher_is_active"
+                        id="formActive"
+                        checked
+                        class="h-4 w-4 accent-red-600"
+                    >
+
+                    <span
+                        class="text-sm font-medium text-gray-700"
+                    >
+                        Active
+                    </span>
+                </label>
 
                 <div class="flex gap-3 pt-2">
-                    <button type="button" onclick="closeModal()"
-                            class="flex-1 py-3 border-2 border-gray-100 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50">
+                    <button
+                        type="button"
+                        onclick="closeModal()"
+                        class="flex-1 rounded-xl border-2 border-gray-100 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50"
+                    >
                         Cancel
                     </button>
-                    <button type="submit"
-                            class="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">
+
+                    <button
+                        type="submit"
+                        class="flex-1 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+                    >
                         Save Voucher
                     </button>
                 </div>
@@ -679,54 +1340,181 @@ $vouchers = $pdo->query("
     </div>
 
     <script>
-    function openAddModal() {
-        document.getElementById('modalTitle').textContent = 'Create Voucher';
-        document.getElementById('formAction').value = 'add';
-        document.getElementById('formId').value = '';
-        document.getElementById('formCode').value = '';
-        document.getElementById('formType').value = 'percentage';
-        document.getElementById('formValue').value = '';
-        document.getElementById('formMinOrder').value = '0';
-        document.getElementById('formMaxDiscount').value = '';
-        document.getElementById('formUsageLimit').value = '';
-        document.getElementById('formStartDate').value = '';
-        document.getElementById('formEndDate').value = '';
-        document.getElementById('formActive').checked = true;
-        document.getElementById('formCode').removeAttribute('readonly');
-        toggleMaxDiscount();
-        document.getElementById('voucherModal').classList.add('active');
-    }
+        const voucherModal =
+            document.getElementById(
+                'voucherModal'
+            );
+        const birthdayTemplateLabel =
+            document.getElementById(
+                'birthdayTemplateLabel'
+            );
+        const birthdayTemplateInput =
+            document.getElementById(
+                'formBirthdayTemplate'
+            );
 
-    function openEditModal(v) {
-        document.getElementById('modalTitle').textContent = 'Edit Voucher';
-        document.getElementById('formAction').value = 'edit';
-        document.getElementById('formId').value = v.voucher_id;
-        document.getElementById('formCode').value = v.voucher_code;
-        document.getElementById('formCode').setAttribute('readonly', true);
-        document.getElementById('formType').value = v.voucher_type;
-        document.getElementById('formValue').value = v.voucher_value;
-        document.getElementById('formMinOrder').value = v.voucher_min_order;
-        document.getElementById('formMaxDiscount').value = v.voucher_max_discount || '';
-        document.getElementById('formUsageLimit').value = v.voucher_usage_limit || '';
-        document.getElementById('formStartDate').value = v.voucher_start_date ? v.voucher_start_date.slice(0,16) : '';
-        document.getElementById('formEndDate').value = v.voucher_end_date ? v.voucher_end_date.slice(0,16) : '';
-        document.getElementById('formActive').checked = v.voucher_is_active == 1;
-        toggleMaxDiscount();
-        document.getElementById('voucherModal').classList.add('active');
-    }
+        function resetVoucherForm() {
+            document.getElementById(
+                'voucherForm'
+            ).reset();
+            document.getElementById(
+                'formAction'
+            ).value = 'add';
+            document.getElementById(
+                'formId'
+            ).value = '';
+            document.getElementById(
+                'formCode'
+            ).readOnly = false;
+            document.getElementById(
+                'formMinOrder'
+            ).value = '0';
+            document.getElementById(
+                'formActive'
+            ).checked = true;
+            birthdayTemplateInput.checked = false;
+            birthdayTemplateInput.disabled = false;
+            birthdayTemplateLabel.classList.remove(
+                'hidden'
+            );
+            toggleMaxDiscount();
+        }
 
-    function closeModal() {
-        document.getElementById('voucherModal').classList.remove('active');
-    }
+        function openAddModal() {
+            resetVoucherForm();
+            document.getElementById(
+                'modalTitle'
+            ).textContent = 'Create Voucher';
+            voucherModal.classList.add('active');
+        }
 
-    function toggleMaxDiscount() {
-        const type = document.getElementById('formType').value;
-        document.getElementById('maxDiscountDiv').style.display = type === 'percentage' ? 'block' : 'none';
-    }
+        function openEditModal(voucher) {
+            resetVoucherForm();
 
-    document.getElementById('voucherModal').addEventListener('click', function(e) {
-        if (e.target === this) closeModal();
-    });
+            document.getElementById(
+                'modalTitle'
+            ).textContent = 'Edit Voucher';
+            document.getElementById(
+                'formAction'
+            ).value = 'edit';
+            document.getElementById(
+                'formId'
+            ).value = voucher.voucher_id;
+            document.getElementById(
+                'formCode'
+            ).value = voucher.voucher_code;
+            document.getElementById(
+                'formCode'
+            ).readOnly = true;
+            document.getElementById(
+                'formType'
+            ).value = voucher.voucher_type;
+            document.getElementById(
+                'formValue'
+            ).value = voucher.voucher_value;
+            document.getElementById(
+                'formMinOrder'
+            ).value = voucher.voucher_min_order;
+            document.getElementById(
+                'formMaxDiscount'
+            ).value =
+                voucher.voucher_max_discount || '';
+            document.getElementById(
+                'formUsageLimit'
+            ).value =
+                voucher.voucher_usage_limit || '';
+            document.getElementById(
+                'formStartDate'
+            ).value = voucher.voucher_start_date
+                ? voucher.voucher_start_date.slice(
+                    0,
+                    16
+                )
+                : '';
+            document.getElementById(
+                'formEndDate'
+            ).value = voucher.voucher_end_date
+                ? voucher.voucher_end_date.slice(
+                    0,
+                    16
+                )
+                : '';
+            document.getElementById(
+                'formActive'
+            ).checked =
+                Number(
+                    voucher.voucher_is_active
+                ) === 1;
+
+            const isPointsVoucher =
+                Number(
+                    voucher.voucher_is_points_redeem
+                ) === 1;
+
+            birthdayTemplateInput.checked =
+                !isPointsVoucher &&
+                Number(
+                    voucher.voucher_is_birthday_template
+                ) === 1;
+            birthdayTemplateInput.disabled =
+                isPointsVoucher;
+
+            birthdayTemplateLabel.classList.toggle(
+                'hidden',
+                isPointsVoucher
+            );
+
+            toggleMaxDiscount();
+            voucherModal.classList.add('active');
+        }
+
+        function closeModal() {
+            voucherModal.classList.remove('active');
+        }
+
+        function toggleMaxDiscount() {
+            const voucherType =
+                document.getElementById(
+                    'formType'
+                ).value;
+
+            document.getElementById(
+                'maxDiscountDiv'
+            ).style.display =
+                voucherType === 'percentage'
+                    ? 'block'
+                    : 'none';
+        }
+
+        document.querySelectorAll(
+            '.edit-voucher-button'
+        ).forEach(button => {
+            button.addEventListener(
+                'click',
+                () => {
+                    const rawVoucher =
+                        button.dataset.voucher;
+
+                    if (!rawVoucher) {
+                        return;
+                    }
+
+                    openEditModal(
+                        JSON.parse(rawVoucher)
+                    );
+                }
+            );
+        });
+
+        voucherModal.addEventListener(
+            'click',
+            event => {
+                if (event.target === voucherModal) {
+                    closeModal();
+                }
+            }
+        );
     </script>
+
 </body>
 </html>

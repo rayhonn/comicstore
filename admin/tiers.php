@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/money_helper.php';
+require_once __DIR__ . '/../includes/logger.php';
 
 require_admin();
 
@@ -231,6 +232,7 @@ function normalizeOptionalVoucherId(
         AND voucher_is_active = 1
         AND voucher_is_points_redeem = 0
         AND voucher_is_system_generated = 0
+        AND voucher_is_birthday_template = 1
         AND (
             voucher_end_date IS NULL
             OR voucher_end_date >= NOW()
@@ -482,6 +484,7 @@ $birthdayVoucherOptions = $pdo->query("
     WHERE voucher_is_active = 1
     AND voucher_is_points_redeem = 0
     AND voucher_is_system_generated = 0
+    AND voucher_is_birthday_template = 1
     AND (
         voucher_end_date IS NULL
         OR voucher_end_date >= NOW()
@@ -891,8 +894,7 @@ function birthdayVoucherLabel(array $voucher): string
                                 <p
                                     class="mt-1 text-xs text-gray-400"
                                 >
-                                    Create the reusable template in
-                                    Voucher Management, then select it here.
+                                    Create a voucher in Voucher Management and mark it as a Birthday Voucher Template.
                                 </p>
                             </div>
 
