@@ -5,6 +5,7 @@ require_once __DIR__ . '/voucher_helper.php';
 require_once __DIR__ . '/stock_helper.php';
 require_once __DIR__ . '/notifications.php';
 require_once __DIR__ . '/logger.php';
+require_once __DIR__ . '/birthday_helper.php';
 
 $nav_home_url = app_path('index.php');
 $nav_catalog_url = app_path('customer/home.php');
@@ -125,6 +126,21 @@ if (isset($_SESSION['user_id'])) {
                 $e->getMessage()
             );
         }
+    }
+}
+
+
+if (isset($_SESSION['user_id'])) {
+    try {
+        awardAnnualBirthdayBonus(
+            $pdo,
+            (int) $_SESSION['user_id']
+        );
+    } catch (Throwable $e) {
+        app_error_log(
+            'Navbar birthday bonus processing failed: ' .
+            $e->getMessage()
+        );
     }
 }
 

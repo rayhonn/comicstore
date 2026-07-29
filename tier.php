@@ -50,7 +50,7 @@ $tier_display = [
     'platinum' => [
         'label' => 'Platinum',
         'emoji' => '💎',
-        'eyebrow' => 'The ultimate reader tier',
+        'eyebrow' => 'The ultimate reader',
         'gradient' =>
             'from-[#1e3a8a] via-[#2563eb] to-[#67e8f9]',
         'soft_background' => 'bg-blue-50',
@@ -510,8 +510,22 @@ function tierShippingLabel(array $config): string
                 );
         }
 
+        .tier-stat-card {
+            min-width: 0;
+            overflow: hidden;
+            padding-right: 0.5rem;
+            padding-left: 0.5rem;
+        }
+
         .tier-stat-value {
+            display: block;
+            max-width: 100%;
+            overflow: hidden;
             white-space: nowrap;
+            font-size: clamp(0.78rem, 1vw, 1.125rem);
+            line-height: 1.2;
+            letter-spacing: -0.025em;
+            text-overflow: clip;
         }
 
         .tier-progress-fill {
@@ -671,7 +685,8 @@ function tierShippingLabel(array $config): string
                     >
                         Confirmed purchases increase your lifetime spending,
                         move you through four membership levels and unlock
-                        stronger points and standard-shipping benefits.
+                        stronger points, annual birthday points and
+                        standard-shipping benefits.
                     </p>
                 </div>
 
@@ -1214,10 +1229,10 @@ function tierShippingLabel(array $config): string
                                     class="flex flex-1 flex-col p-6"
                                 >
                                     <div
-                                        class="grid grid-cols-3 gap-2"
+                                        class="grid grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.2fr)] gap-2"
                                     >
                                         <div
-                                            class="rounded-2xl <?= $display[
+                                            class="tier-stat-card rounded-2xl <?= $display[
                                                 'soft_background'
                                             ] ?> p-3 text-center"
                                         >
@@ -1244,7 +1259,7 @@ function tierShippingLabel(array $config): string
                                         </div>
 
                                         <div
-                                            class="rounded-2xl <?= $display[
+                                            class="tier-stat-card rounded-2xl <?= $display[
                                                 'soft_background'
                                             ] ?> p-3 text-center"
                                         >
@@ -1265,12 +1280,12 @@ function tierShippingLabel(array $config): string
                                             <p
                                                 class="mt-1 text-[9px] font-black uppercase tracking-[0.12em] text-gray-400"
                                             >
-                                                Birthday*
+                                                Birthday
                                             </p>
                                         </div>
 
                                         <div
-                                            class="rounded-2xl <?= $display[
+                                            class="tier-stat-card rounded-2xl <?= $display[
                                                 'soft_background'
                                             ] ?> p-3 text-center"
                                         >
@@ -1385,8 +1400,8 @@ function tierShippingLabel(array $config): string
                     <p
                         class="mt-7 text-center text-xs leading-5 text-gray-400"
                     >
-                        * Birthday bonus values are configured in the system,
-                        but automatic birthday-point crediting is not active yet.
+                        Birthday points are awarded automatically once per
+                        calendar year based on the member's active tier.
                     </p>
                 <?php endif; ?>
             </div>
