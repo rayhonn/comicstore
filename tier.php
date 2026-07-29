@@ -326,7 +326,7 @@ function tierShippingLabel(array $config): string
     >
     <meta
         name="description"
-        content="Explore MangaVault membership tiers, points multipliers, birthday rewards and shipping benefits."
+        content="Explore MangaVault membership tiers, points multipliers, shipping benefits and tier progression."
     >
 
     <title>Membership Tiers - MangaVault</title>
@@ -362,18 +362,24 @@ function tierShippingLabel(array $config): string
             }
         }
 
-        @keyframes tierHeroFloat {
+        @keyframes tierPassFloat {
             0%,
             100% {
-                transform:
-                    translate3d(0, 0, 0)
-                    scale(1);
+                transform: translateY(0);
             }
 
             50% {
-                transform:
-                    translate3d(0, -16px, 0)
-                    scale(1.04);
+                transform: translateY(-7px);
+            }
+        }
+
+        @keyframes tierPassSheen {
+            from {
+                transform: translateX(-160%) rotate(16deg);
+            }
+
+            to {
+                transform: translateX(260%) rotate(16deg);
             }
         }
 
@@ -401,12 +407,111 @@ function tierShippingLabel(array $config): string
             background-size: 46px 46px;
         }
 
-        .tier-hero-orb {
+        .membership-hero {
+            background:
+                radial-gradient(
+                    circle at 10% 12%,
+                    rgba(220, 38, 38, 0.1),
+                    transparent 30%
+                ),
+                radial-gradient(
+                    circle at 88% 20%,
+                    rgba(37, 99, 235, 0.09),
+                    transparent 31%
+                ),
+                linear-gradient(
+                    180deg,
+                    #fffdf9 0%,
+                    #f5f0eb 100%
+                );
+        }
+
+        .membership-hero::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.42;
+            background-image:
+                linear-gradient(
+                    rgba(17, 24, 39, 0.035) 1px,
+                    transparent 1px
+                ),
+                linear-gradient(
+                    90deg,
+                    rgba(17, 24, 39, 0.035) 1px,
+                    transparent 1px
+                );
+            background-size: 52px 52px;
+            mask-image:
+                linear-gradient(
+                    to bottom,
+                    black,
+                    transparent 88%
+                );
+        }
+
+        .membership-board {
+            box-shadow:
+                0 30px 90px rgba(15, 23, 42, 0.12),
+                0 2px 8px rgba(15, 23, 42, 0.04);
+        }
+
+        .membership-pass {
+            position: relative;
+            overflow: hidden;
             animation:
-                tierHeroFloat
-                8s
+                tierPassFloat
+                6s
                 ease-in-out
                 infinite;
+        }
+
+        .membership-pass::after {
+            content: '';
+            position: absolute;
+            top: -45%;
+            bottom: -45%;
+            left: -35%;
+            width: 22%;
+            pointer-events: none;
+            background:
+                linear-gradient(
+                    90deg,
+                    transparent,
+                    rgba(255, 255, 255, 0.4),
+                    transparent
+                );
+            animation:
+                tierPassSheen
+                5.5s
+                ease-in-out
+                infinite;
+        }
+
+        .tier-journey-track {
+            position: absolute;
+            top: 1.45rem;
+            right: 9%;
+            left: 9%;
+            height: 2px;
+            background: #e5e7eb;
+        }
+
+        .tier-journey-progress {
+            height: 100%;
+            border-radius: 999px;
+            background:
+                linear-gradient(
+                    90deg,
+                    #dc2626,
+                    #f59e0b,
+                    #2563eb
+                );
+        }
+
+        .tier-stat-value {
+            white-space: nowrap;
         }
 
         .tier-progress-fill {
@@ -489,6 +594,12 @@ function tierShippingLabel(array $config): string
             color: transparent;
         }
 
+        @media (max-width: 639px) {
+            .tier-journey-track {
+                display: none;
+            }
+        }
+
         @media (prefers-reduced-motion: reduce) {
             *,
             *::before,
@@ -517,328 +628,422 @@ function tierShippingLabel(array $config): string
     <?php include __DIR__ . '/includes/customer_navbar.php'; ?>
 
     <main>
-        <!-- Hero -->
+        <!-- Membership overview -->
         <section
-            class="relative overflow-hidden bg-[#111827] text-white"
+            class="membership-hero relative overflow-hidden border-b border-gray-200/70"
             aria-labelledby="membership-title"
         >
             <div
-                class="tier-grid-pattern absolute inset-0 opacity-40"
-            ></div>
-
-            <div
-                class="tier-hero-orb absolute -left-24 top-20 h-80 w-80 rounded-full bg-red-600/20 blur-[100px]"
-            ></div>
-
-            <div
-                class="tier-hero-orb absolute -right-24 bottom-0 h-96 w-96 rounded-full bg-blue-500/20 blur-[110px]"
-                style="animation-delay: -3s;"
-            ></div>
-
-            <div
-                class="relative mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 lg:grid-cols-[1fr_0.9fr] lg:py-24"
+                class="relative mx-auto max-w-7xl px-6 py-16 lg:py-20"
             >
-                <div class="max-w-3xl">
+                <div
+                    class="mx-auto max-w-3xl text-center"
+                >
                     <div
-                        class="mb-6 inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 backdrop-blur-xl"
+                        class="inline-flex items-center gap-3 rounded-full border border-red-100 bg-white/80 px-4 py-2 shadow-sm backdrop-blur"
                     >
                         <span
-                            class="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_16px_rgba(239,68,68,0.9)]"
-                        ></span>
+                            class="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-[10px] font-black text-white"
+                            aria-hidden="true"
+                        >
+                            M
+                        </span>
 
                         <p
-                            class="text-[11px] font-black uppercase tracking-[0.24em] text-white/60"
+                            class="text-[11px] font-black uppercase tracking-[0.22em] text-gray-500"
                         >
-                            MangaVault Loyalty Program
+                            MangaVault Membership
                         </p>
                     </div>
 
                     <h1
                         id="membership-title"
-                        class="max-w-3xl text-5xl font-black leading-[0.94] tracking-[-0.055em] sm:text-6xl lg:text-7xl"
+                        class="mt-6 text-5xl font-black leading-[0.96] tracking-[-0.055em] text-gray-950 sm:text-6xl"
                     >
-                        Collect more.
-                        <span
-                            class="block bg-gradient-to-r from-red-400 via-orange-300 to-amber-200 bg-clip-text text-transparent"
-                        >
-                            Unlock more.
+                        Your reading journey,
+                        <span class="text-red-600">
+                            mapped into rewards.
                         </span>
                     </h1>
 
                     <p
-                        class="mt-7 max-w-2xl text-base leading-7 text-white/55 sm:text-lg"
+                        class="mx-auto mt-6 max-w-2xl text-base leading-7 text-gray-500 sm:text-lg"
                     >
-                        Every confirmed purchase builds your lifetime
-                        spending, upgrades your membership tier and unlocks
-                        stronger points, birthday rewards and shipping perks.
+                        Confirmed purchases increase your lifetime spending,
+                        move you through four membership levels and unlock
+                        stronger points and standard-shipping benefits.
                     </p>
-
-                    <div
-                        class="mt-9 flex flex-wrap gap-3 text-xs font-black uppercase tracking-[0.13em] text-white/55"
-                    >
-                        <span
-                            class="rounded-full border border-white/10 bg-white/[0.05] px-4 py-2"
-                        >
-                            Automatic upgrades
-                        </span>
-                        <span
-                            class="rounded-full border border-white/10 bg-white/[0.05] px-4 py-2"
-                        >
-                            No membership fee
-                        </span>
-                        <span
-                            class="rounded-full border border-white/10 bg-white/[0.05] px-4 py-2"
-                        >
-                            Rewards from confirmed orders
-                        </span>
-                    </div>
                 </div>
 
-                <?php if (
-                    isset($_SESSION['user_id']) &&
-                    $current_config !== null &&
-                    $current_display !== null
-                ): ?>
-                    <aside
-                        class="rounded-3xl border border-white/10 bg-white/[0.07] p-6 shadow-[0_30px_90px_rgba(0,0,0,0.35)] backdrop-blur-2xl sm:p-8"
-                        aria-label="Your membership progress"
-                    >
+                <div
+                    class="membership-board relative mx-auto mt-12 max-w-6xl overflow-hidden rounded-[2rem] border border-white bg-white/90 p-5 backdrop-blur-xl sm:p-7 lg:p-9"
+                >
+                    <?php if (
+                        isset($_SESSION['user_id']) &&
+                        $current_config !== null &&
+                        $current_display !== null
+                    ): ?>
                         <div
-                            class="flex items-start justify-between gap-5"
+                            class="grid gap-6 lg:grid-cols-[0.82fr_1.18fr]"
                         >
-                            <div>
-                                <p
-                                    class="text-[11px] font-black uppercase tracking-[0.2em] text-white/35"
-                                >
-                                    Your current tier
-                                </p>
-
+                            <div
+                                class="membership-pass rounded-[1.7rem] bg-gradient-to-br <?= $current_display[
+                                    'gradient'
+                                ] ?> p-6 text-white shadow-2xl <?= $current_display[
+                                    'glow'
+                                ] ?> sm:p-7"
+                            >
                                 <div
-                                    class="mt-3 flex items-center gap-3"
+                                    class="relative z-10 flex items-start justify-between gap-5"
                                 >
-                                    <span class="text-4xl">
-                                        <?= $current_display[
-                                            'emoji'
-                                        ] ?>
-                                    </span>
-
                                     <div>
+                                        <p
+                                            class="text-[10px] font-black uppercase tracking-[0.2em] text-white/65"
+                                        >
+                                            MangaVault member
+                                        </p>
+
                                         <h2
-                                            class="text-2xl font-black text-white"
+                                            class="mt-4 text-4xl font-black tracking-[-0.045em]"
                                         >
                                             <?= htmlspecialchars(
-                                                $current_display[
-                                                    'label'
-                                                ],
+                                                $current_display['label'],
                                                 ENT_QUOTES,
                                                 'UTF-8'
                                             ) ?>
                                         </h2>
 
                                         <p
-                                            class="mt-0.5 text-sm text-white/45"
+                                            class="mt-2 text-sm font-semibold text-white/70"
                                         >
                                             <?= htmlspecialchars(
-                                                $current_display[
-                                                    'eyebrow'
-                                                ],
+                                                $current_display['eyebrow'],
                                                 ENT_QUOTES,
                                                 'UTF-8'
                                             ) ?>
                                         </p>
                                     </div>
+
+                                    <span
+                                        class="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/25 bg-white/15 text-4xl shadow-xl backdrop-blur"
+                                        aria-hidden="true"
+                                    >
+                                        <?= $current_display['emoji'] ?>
+                                    </span>
                                 </div>
-                            </div>
 
-                            <div
-                                class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-right"
-                            >
-                                <p
-                                    class="text-[10px] font-black uppercase tracking-[0.16em] text-white/35"
+                                <div
+                                    class="relative z-10 mt-12 flex items-end justify-between gap-4"
                                 >
-                                    Lifetime spend
-                                </p>
+                                    <div>
+                                        <p
+                                            class="text-[10px] font-black uppercase tracking-[0.18em] text-white/60"
+                                        >
+                                            Lifetime spending
+                                        </p>
 
-                                <p
-                                    class="mt-1 text-lg font-black text-white"
-                                >
-                                    <?= tierMoney(
-                                        $user_spending
-                                    ) ?>
-                                </p>
-                            </div>
-                        </div>
-
-                        <div class="mt-8">
-                            <div
-                                class="flex items-end justify-between gap-4"
-                            >
-                                <div>
-                                    <p
-                                        class="text-xs font-bold text-white/45"
-                                    >
-                                        <?= $next_display !== null
-                                            ? 'Progress to ' .
-                                                htmlspecialchars(
-                                                    $next_display[
-                                                        'label'
-                                                    ],
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                )
-                                            : 'Highest tier reached' ?>
-                                    </p>
-
-                                    <p
-                                        class="mt-1 text-sm font-black text-white"
-                                    >
-                                        <?php if (
-                                            $next_display !== null
-                                        ): ?>
+                                        <p
+                                            class="mt-2 text-2xl font-black"
+                                        >
                                             <?= tierMoney(
-                                                $amount_needed
+                                                $user_spending
                                             ) ?>
-                                            remaining
-                                        <?php else: ?>
-                                            All membership tiers unlocked
-                                        <?php endif; ?>
+                                        </p>
+                                    </div>
+
+                                    <p
+                                        class="text-right text-[10px] font-black uppercase leading-5 tracking-[0.16em] text-white/60"
+                                    >
+                                        Automatic<br>
+                                        tier upgrades
                                     </p>
                                 </div>
-
-                                <span
-                                    class="text-sm font-black text-blue-300"
-                                >
-                                    <?= number_format(
-                                        $progress_percentage,
-                                        0
-                                    ) ?>%
-                                </span>
                             </div>
 
                             <div
-                                class="mt-4 h-3 overflow-hidden rounded-full bg-white/10"
-                                role="progressbar"
-                                aria-valuemin="0"
-                                aria-valuemax="100"
-                                aria-valuenow="<?= (int) round(
-                                    $progress_percentage
-                                ) ?>"
+                                class="rounded-[1.7rem] border border-gray-100 bg-[#fbfaf8] p-6 sm:p-7"
                             >
                                 <div
-                                    class="tier-progress-fill h-full rounded-full bg-gradient-to-r from-red-500 via-orange-400 to-blue-300"
-                                    style="width: <?= number_format(
-                                        $progress_percentage,
+                                    class="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"
+                                >
+                                    <div>
+                                        <p
+                                            class="text-[10px] font-black uppercase tracking-[0.18em] text-gray-400"
+                                        >
+                                            Membership progress
+                                        </p>
+
+                                        <h2
+                                            class="mt-3 text-2xl font-black tracking-[-0.035em] text-gray-950"
+                                        >
+                                            <?= $next_display !== null
+                                                ? 'Next stop: ' .
+                                                    htmlspecialchars(
+                                                        $next_display['label'],
+                                                        ENT_QUOTES,
+                                                        'UTF-8'
+                                                    )
+                                                : 'Every tier unlocked' ?>
+                                        </h2>
+
+                                        <p
+                                            class="mt-2 text-sm text-gray-500"
+                                        >
+                                            <?php if (
+                                                $next_display !== null
+                                            ): ?>
+                                                <?= tierMoney(
+                                                    $amount_needed
+                                                ) ?> remains before your
+                                                next automatic upgrade.
+                                            <?php else: ?>
+                                                You have reached the highest
+                                                MangaVault membership level.
+                                            <?php endif; ?>
+                                        </p>
+                                    </div>
+
+                                    <div
+                                        class="rounded-2xl bg-gray-950 px-4 py-3 text-center text-white"
+                                    >
+                                        <p
+                                            class="text-2xl font-black"
+                                        >
+                                            <?= number_format(
+                                                $progress_percentage,
+                                                0
+                                            ) ?>%
+                                        </p>
+
+                                        <p
+                                            class="text-[9px] font-black uppercase tracking-[0.14em] text-white/45"
+                                        >
+                                            Complete
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div
+                                    class="mt-6 h-3 overflow-hidden rounded-full bg-gray-200"
+                                    role="progressbar"
+                                    aria-valuemin="0"
+                                    aria-valuemax="100"
+                                    aria-valuenow="<?= (int) round(
+                                        $progress_percentage
+                                    ) ?>"
+                                >
+                                    <div
+                                        class="tier-progress-fill h-full rounded-full bg-gradient-to-r from-red-500 via-orange-400 to-blue-500"
+                                        style="width: <?= number_format(
+                                            $progress_percentage,
+                                            2,
+                                            '.',
+                                            ''
+                                        ) ?>%;"
+                                    ></div>
+                                </div>
+
+                                <div
+                                    class="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-3"
+                                >
+                                    <div
+                                        class="rounded-2xl border border-gray-100 bg-white p-4"
+                                    >
+                                        <p
+                                            class="text-[9px] font-black uppercase tracking-[0.15em] text-gray-400"
+                                        >
+                                            Points rate
+                                        </p>
+
+                                        <p
+                                            class="tier-stat-value mt-2 text-lg font-black text-gray-950"
+                                        >
+                                            <?= number_format(
+                                                (float) (
+                                                    $current_config[
+                                                        'tier_points_multiplier'
+                                                    ] ?? 1
+                                                ),
+                                                1
+                                            ) ?>×
+                                        </p>
+                                    </div>
+
+                                    <div
+                                        class="rounded-2xl border border-gray-100 bg-white p-4"
+                                    >
+                                        <p
+                                            class="text-[9px] font-black uppercase tracking-[0.15em] text-gray-400"
+                                        >
+                                            Shipping
+                                        </p>
+
+                                        <p
+                                            class="tier-stat-value mt-2 text-sm font-black text-gray-950"
+                                        >
+                                            <?= htmlspecialchars(
+                                                tierShippingLabel(
+                                                    $current_config
+                                                ),
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>
+                                        </p>
+                                    </div>
+
+                                    <div
+                                        class="rounded-2xl border border-gray-100 bg-white p-4"
+                                    >
+                                        <p
+                                            class="text-[9px] font-black uppercase tracking-[0.15em] text-gray-400"
+                                        >
+                                            Upgrade mode
+                                        </p>
+
+                                        <p
+                                            class="mt-2 text-sm font-black text-gray-950"
+                                        >
+                                            Automatic
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php else: ?>
+                        <div
+                            class="grid items-center gap-8 lg:grid-cols-[1fr_auto]"
+                        >
+                            <div>
+                                <p
+                                    class="text-[10px] font-black uppercase tracking-[0.2em] text-red-600"
+                                >
+                                    Your membership starts free
+                                </p>
+
+                                <h2
+                                    class="mt-3 text-3xl font-black tracking-[-0.04em] text-gray-950"
+                                >
+                                    Create an account and let every confirmed
+                                    purchase move you forward.
+                                </h2>
+
+                                <p
+                                    class="mt-3 max-w-2xl text-sm leading-6 text-gray-500"
+                                >
+                                    MangaVault automatically tracks your
+                                    lifetime spending and assigns the correct
+                                    membership tier.
+                                </p>
+                            </div>
+
+                            <a
+                                href="register.php"
+                                class="inline-flex items-center justify-center gap-3 rounded-xl bg-red-600 px-7 py-4 text-sm font-black uppercase tracking-[0.13em] text-white shadow-xl shadow-red-100 transition hover:-translate-y-1 hover:bg-red-700"
+                            >
+                                Create free account
+                                <span aria-hidden="true">→</span>
+                            </a>
+                        </div>
+                    <?php endif; ?>
+
+                    <div
+                        class="relative mt-8 border-t border-gray-100 pt-8"
+                        aria-label="Membership tier journey"
+                    >
+                        <div
+                            class="tier-journey-track"
+                            aria-hidden="true"
+                        >
+                            <div
+                                class="tier-journey-progress"
+                                style="width: <?= $current_tier_index === false
+                                    ? '0'
+                                    : number_format(
+                                        max(
+                                            0,
+                                            min(
+                                                100,
+                                                (
+                                                    $current_tier_index /
+                                                    max(
+                                                        1,
+                                                        count(
+                                                            $available_tiers
+                                                        ) - 1
+                                                    )
+                                                ) * 100
+                                            )
+                                        ),
                                         2,
                                         '.',
                                         ''
                                     ) ?>%;"
-                                ></div>
-                            </div>
+                            ></div>
                         </div>
 
                         <div
-                            class="mt-7 grid grid-cols-3 gap-3"
+                            class="relative grid grid-cols-2 gap-5 sm:grid-cols-4"
                         >
-                            <div
-                                class="rounded-2xl border border-white/10 bg-black/15 p-3"
-                            >
-                                <p
-                                    class="text-[10px] font-black uppercase tracking-[0.14em] text-white/30"
-                                >
-                                    Points
-                                </p>
+                            <?php foreach (
+                                $available_tiers as $journey_index => $journey_tier
+                            ): ?>
+                                <?php
+                                $journey_display =
+                                    $tier_display[$journey_tier];
+                                $journey_config =
+                                    $tier_config[$journey_tier];
+                                $journey_is_current =
+                                    $user_tier === $journey_tier;
+                                $journey_is_reached =
+                                    $current_tier_index !== false &&
+                                    $journey_index <=
+                                        $current_tier_index;
+                                ?>
 
-                                <p
-                                    class="mt-2 text-base font-black text-white"
+                                <div
+                                    class="flex flex-col items-center text-center"
                                 >
-                                    <?= number_format(
-                                        (float) (
-                                            $current_config[
-                                                'tier_points_multiplier'
-                                            ] ?? 1
-                                        ),
-                                        1
-                                    ) ?>×
-                                </p>
-                            </div>
+                                    <span
+                                        class="relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-4 <?= $journey_is_current
+                                            ? 'border-red-100 bg-red-600 text-white shadow-lg shadow-red-100'
+                                            : (
+                                                $journey_is_reached
+                                                    ? 'border-white bg-gray-950 text-white shadow-md'
+                                                    : 'border-white bg-gray-100 text-gray-400'
+                                            ) ?> text-lg"
+                                        aria-hidden="true"
+                                    >
+                                        <?= $journey_display['emoji'] ?>
+                                    </span>
 
-                            <div
-                                class="rounded-2xl border border-white/10 bg-black/15 p-3"
-                            >
-                                <p
-                                    class="text-[10px] font-black uppercase tracking-[0.14em] text-white/30"
-                                >
-                                    Birthday
-                                </p>
+                                    <p
+                                        class="mt-3 text-sm font-black <?= $journey_is_current
+                                            ? 'text-red-600'
+                                            : 'text-gray-800' ?>"
+                                    >
+                                        <?= htmlspecialchars(
+                                            $journey_display['label'],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </p>
 
-                                <p
-                                    class="mt-2 text-base font-black text-white"
-                                >
-                                    +<?= number_format(
-                                        (int) (
-                                            $current_config[
-                                                'tier_birthday_bonus_points'
-                                            ] ?? 0
-                                        )
-                                    ) ?>
-                                </p>
-                            </div>
-
-                            <div
-                                class="rounded-2xl border border-white/10 bg-black/15 p-3"
-                            >
-                                <p
-                                    class="text-[10px] font-black uppercase tracking-[0.14em] text-white/30"
-                                >
-                                    Shipping
-                                </p>
-
-                                <p
-                                    class="mt-2 line-clamp-2 text-xs font-black leading-4 text-white"
-                                >
-                                    <?= htmlspecialchars(
-                                        tierShippingLabel(
-                                            $current_config
-                                        ),
-                                        ENT_QUOTES,
-                                        'UTF-8'
-                                    ) ?>
-                                </p>
-                            </div>
+                                    <p
+                                        class="mt-1 text-[10px] font-bold text-gray-400"
+                                    >
+                                        From <?= tierMoney(
+                                            (float) (
+                                                $journey_config[
+                                                    'tier_min_spending'
+                                                ] ?? 0
+                                            )
+                                        ) ?>
+                                    </p>
+                                </div>
+                            <?php endforeach; ?>
                         </div>
-                    </aside>
-                <?php else: ?>
-                    <aside
-                        class="rounded-3xl border border-white/10 bg-white/[0.07] p-8 shadow-[0_30px_90px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
-                    >
-                        <p
-                            class="text-[11px] font-black uppercase tracking-[0.2em] text-blue-300"
-                        >
-                            Your rewards begin here
-                        </p>
-
-                        <h2
-                            class="mt-4 text-3xl font-black tracking-[-0.04em] text-white"
-                        >
-                            Create an account and start building your tier.
-                        </h2>
-
-                        <p
-                            class="mt-4 text-sm leading-6 text-white/50"
-                        >
-                            Your confirmed purchases will automatically count
-                            towards lifetime spending and membership progress.
-                        </p>
-
-                        <a
-                            href="register.php"
-                            class="mt-7 inline-flex w-full items-center justify-center gap-3 rounded-xl bg-red-600 px-6 py-4 text-sm font-black uppercase tracking-[0.13em] text-white transition hover:-translate-y-1 hover:bg-red-500"
-                        >
-                            Create free account
-                            <span aria-hidden="true">→</span>
-                        </a>
-                    </aside>
-                <?php endif; ?>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -1017,7 +1222,7 @@ function tierShippingLabel(array $config): string
                                             ] ?> p-3 text-center"
                                         >
                                             <p
-                                                class="text-lg font-black <?= $display[
+                                                class="tier-stat-value text-lg font-black <?= $display[
                                                     'soft_text'
                                                 ] ?>"
                                             >
@@ -1044,7 +1249,7 @@ function tierShippingLabel(array $config): string
                                             ] ?> p-3 text-center"
                                         >
                                             <p
-                                                class="text-lg font-black <?= $display[
+                                                class="tier-stat-value text-lg font-black <?= $display[
                                                     'soft_text'
                                                 ] ?>"
                                             >
@@ -1060,7 +1265,7 @@ function tierShippingLabel(array $config): string
                                             <p
                                                 class="mt-1 text-[9px] font-black uppercase tracking-[0.12em] text-gray-400"
                                             >
-                                                Birthday
+                                                Birthday*
                                             </p>
                                         </div>
 
@@ -1070,7 +1275,7 @@ function tierShippingLabel(array $config): string
                                             ] ?> p-3 text-center"
                                         >
                                             <p
-                                                class="text-lg font-black <?= $display[
+                                                class="tier-stat-value text-base font-black <?= $display[
                                                     'soft_text'
                                                 ] ?>"
                                             >
@@ -1176,6 +1381,13 @@ function tierShippingLabel(array $config): string
                             </article>
                         <?php endforeach; ?>
                     </div>
+
+                    <p
+                        class="mt-7 text-center text-xs leading-5 text-gray-400"
+                    >
+                        * Birthday bonus values are configured in the system,
+                        but automatic birthday-point crediting is not active yet.
+                    </p>
                 <?php endif; ?>
             </div>
         </section>
@@ -1322,17 +1534,143 @@ function tierShippingLabel(array $config): string
         </section>
     </main>
 
-    <footer class="bg-[#0d1424] text-white">
-        <div
-            class="mx-auto flex max-w-7xl flex-col gap-3 px-6 py-8 text-xs text-white/35 sm:flex-row sm:items-center sm:justify-between"
-        >
-            <p>
-                © 2026 MangaVault. All rights reserved.
-            </p>
+    <!-- Footer -->
+    <footer
+        class="border-t border-gray-200 bg-[#F5F0EB] py-12 text-gray-800"
+    >
+        <div class="mx-auto max-w-7xl px-6">
+            <div
+                class="mb-10 grid grid-cols-2 gap-8 md:grid-cols-4"
+            >
+                <div class="col-span-2 md:col-span-1">
+                    <h3 class="mb-4 text-lg font-black">
+                        MANGA<span class="text-red-600">VAULT</span>
+                    </h3>
 
-            <p>
-                Physical manga · E-books · Membership rewards
-            </p>
+                    <p
+                        class="text-sm leading-relaxed text-gray-600"
+                    >
+                        Malaysia's ultimate destination for manga and
+                        comic book lovers.
+                    </p>
+                </div>
+
+                <div>
+                    <h4
+                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
+                    >
+                        Shop
+                    </h4>
+
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li>
+                            <a
+                                href="customer/home.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                All Manga
+                            </a>
+                        </li>
+                        <li>
+                            <a
+                                href="customer/home.php?type=physical"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                Physical Books
+                            </a>
+                        </li>
+                        <li>
+                            <a
+                                href="customer/home.php?type=ebook"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                E-Books
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4
+                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
+                    >
+                        Help
+                    </h4>
+
+                    <ul class="space-y-2 text-sm text-gray-600">
+                        <li>
+                            <a
+                                href="customer/orders.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                My Orders
+                            </a>
+                        </li>
+                        <li>
+                            <a
+                                href="customer/profile.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                My Account
+                            </a>
+                        </li>
+                        <li>
+                            <a
+                                href="customer/faq.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                FAQ
+                            </a>
+                        </li>
+                        <li>
+                            <a
+                                href="customer/about.php"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
+                            >
+                                About Us
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4
+                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
+                    >
+                        Follow Us
+                    </h4>
+
+                    <div class="flex gap-3">
+                        <a
+                            href="#"
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
+                            aria-label="Facebook"
+                        >
+                            f
+                        </a>
+                        <a
+                            href="#"
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
+                            aria-label="Twitter"
+                        >
+                            t
+                        </a>
+                        <a
+                            href="#"
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
+                            aria-label="LinkedIn"
+                        >
+                            in
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div
+                class="border-t border-gray-300 pt-6 text-center text-xs text-gray-500"
+            >
+                © 2026 MangaVault. All rights reserved.
+            </div>
         </div>
     </footer>
 
