@@ -591,12 +591,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $shipping_zone = 'peninsular';
     }
 
-    // Apply tier shipping benefit (standard only)
+    // Apply the active tier shipping benefit to physical deliveries.
     if (
         $has_physical &&
         empty($error) &&
-        $shipping_fee_sen > 0 &&
-        $shipping_type === 'std'
+        $shipping_fee_sen > 0
     ) {
         $user_tier_info = $pdo->prepare("
             SELECT user_tier
@@ -1860,6 +1859,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ) ?>
     );
 
+    function applyTierShippingBenefit(baseFee) {
+        if (tierFreeShipping) {
+            return 0;
+        }
+
+        if (tierShippingDiscount > 0) {
+            return Math.max(
+                0,
+                baseFee - tierShippingDiscount
+            );
+        }
+
+        return baseFee;
+    }
+
+    function formatTierShippingPrice(baseFee) {
+        const finalFee =
+            applyTierShippingBenefit(baseFee);
+
+        if (finalFee === baseFee) {
+            return 'RM ' + baseFee.toFixed(2);
+        }
+
+        return (
+            '<span class="line-through text-gray-400">' +
+            'RM ' +
+            baseFee.toFixed(2) +
+            '</span> ' +
+            '<span class="font-bold text-green-600">' +
+            (
+                finalFee === 0
+                    ? 'Free'
+                    : 'RM ' + finalFee.toFixed(2)
+            ) +
+            '</span>'
+        );
+    }
+
     const couriersData =
         <?= json_encode($couriers) ?>;
 
@@ -1922,8 +1959,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         document.getElementById('speed_std_days').textContent = stdDays;
         document.getElementById('speed_exp_days').textContent = expDays;
-        document.getElementById('speed_std_price').textContent = 'RM ' + minStd.toFixed(2);
-        document.getElementById('speed_exp_price').textContent = 'RM ' + minExp.toFixed(2);
+        document.getElementById(
+            'speed_std_price'
+        ).innerHTML =
+            formatTierShippingPrice(minStd);
+
+        document.getElementById(
+            'speed_exp_price'
+        ).innerHTML =
+            formatTierShippingPrice(minExp);
 
         document.getElementById('speed_standard').className = 'p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
         document.getElementById('speed_express').className = 'p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-all duration-200 text-left';
@@ -1978,19 +2022,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Object.keys(couriersData).forEach(key => {
             const priceEl = document.getElementById('courier_price_' + key);
             if (!priceEl) return;
-            const baseFee = couriersData[key][feeKey];
-            if (speed === 'standard') {
-                if (tierFreeShipping) {
-                    priceEl.innerHTML = '<span class="line-through text-gray-400">RM ' + baseFee.toFixed(2) + '</span> <span class="text-green-600">RM 0.00</span>';
-                } else if (tierShippingDiscount > 0) {
-                    const discounted = Math.max(0, baseFee - tierShippingDiscount);
-                    priceEl.innerHTML = '<span class="line-through text-gray-400">RM ' + baseFee.toFixed(2) + '</span> <span class="text-green-600">RM ' + discounted.toFixed(2) + '</span>';
-                } else {
-                    priceEl.textContent = 'RM ' + baseFee.toFixed(2);
-                }
-            } else {
-                priceEl.textContent = 'RM ' + baseFee.toFixed(2);
-            }
+            const baseFee =
+                couriersData[key][feeKey];
+
+            priceEl.innerHTML =
+                formatTierShippingPrice(baseFee);
         });
 
         document.querySelectorAll('.courier-option').forEach(btn => {
@@ -2042,27 +2078,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         const feeKey = zonePrefix + '_' + (currentSpeed === 'express' ? 'exp' : 'std');
         const baseFee = couriersData[courier][feeKey];
 
-        if (currentSpeed === 'standard') {
-            if (tierFreeShipping) {
-                currentShipping = 0;
-            } else if (tierShippingDiscount > 0) {
-                currentShipping = Math.max(0, baseFee - tierShippingDiscount);
-            } else {
-                currentShipping = baseFee;
-            }
-        } else {
-            currentShipping = baseFee;
-        }
+        currentShipping =
+            applyTierShippingBenefit(baseFee);
 
-        if (currentShipping === 0) {
-            document.getElementById('shippingFee').innerHTML = 
-            '<span class="line-through text-gray-400">RM ' + baseFee.toFixed(2) + '</span> <span class="text-green-600 font-bold">RM 0.00</span>';
-        } else if (tierShippingDiscount > 0 && currentSpeed === 'standard') {
-            document.getElementById('shippingFee').innerHTML = 
-            '<span class="line-through text-gray-400">RM ' + baseFee.toFixed(2) + '</span> <span class="text-green-600 font-bold">RM ' + currentShipping.toFixed(2) + '</span>';
-        } else {
-            document.getElementById('shippingFee').textContent = 'RM ' + currentShipping.toFixed(2);
-        }
+        document.getElementById(
+            'shippingFee'
+        ).innerHTML =
+            formatTierShippingPrice(baseFee);
         document.getElementById('shippingMethodInput').value = courier + '_' + currentSpeed;
         document.getElementById('shippingCourierInput').value = courier;
         document.getElementById('courierError').classList.add('hidden');

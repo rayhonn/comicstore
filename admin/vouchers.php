@@ -410,6 +410,7 @@ $vouchers = $pdo->query("
     FROM vouchers v
     LEFT JOIN voucher_usage vu
         ON v.voucher_id = vu.usage_voucher_id
+    WHERE v.voucher_is_system_generated = 0
     GROUP BY v.voucher_id
     ORDER BY v.voucher_created_at DESC
 ")->fetchAll(PDO::FETCH_ASSOC);

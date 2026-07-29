@@ -60,7 +60,11 @@ function normalizeTierMoney(
 
 function normalizeTierMultiplier(mixed $value): string
 {
-    if (!is_string($value) && !is_int($value)) {
+    if (
+        !is_string($value) &&
+        !is_int($value) &&
+        !is_float($value)
+    ) {
         throw new InvalidArgumentException(
             'Points multiplier must be between 1.0 and 99.9.'
         );
@@ -108,7 +112,36 @@ function requireNonNegativeInt(
 
     if ($validated === false) {
         throw new InvalidArgumentException(
-            $label . ' must be a valid non-negative whole number.'
+            $label .
+                ' must be a valid non-negative whole number.'
+        );
+    }
+
+    return (int) $validated;
+}
+
+function requireBoundedPositiveInt(
+    mixed $value,
+    string $label,
+    int $maximum
+): int {
+    $validated = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+                'max_range' => $maximum,
+            ],
+        ]
+    );
+
+    if ($validated === false) {
+        throw new InvalidArgumentException(
+            $label .
+                ' must be between 1 and ' .
+                $maximum .
+                '.'
         );
     }
 
@@ -167,121 +200,254 @@ function normalizeBenefitText(mixed $value): string
     return $value;
 }
 
-// Handle tier config update
+function normalizeOptionalVoucherId(
+    PDO $pdo,
+    mixed $value
+): ?int {
+    if ($value === null || $value === '') {
+        return null;
+    }
+
+    $voucherId = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+            ],
+        ]
+    );
+
+    if ($voucherId === false) {
+        throw new InvalidArgumentException(
+            'Please select a valid birthday voucher.'
+        );
+    }
+
+    $voucherStatement = $pdo->prepare("
+        SELECT voucher_id
+        FROM vouchers
+        WHERE voucher_id = ?
+        AND voucher_is_active = 1
+        AND voucher_is_points_redeem = 0
+        AND voucher_is_system_generated = 0
+        AND (
+            voucher_end_date IS NULL
+            OR voucher_end_date >= NOW()
+        )
+        LIMIT 1
+    ");
+    $voucherStatement->execute([
+        (int) $voucherId,
+    ]);
+
+    if ($voucherStatement->fetchColumn() === false) {
+        throw new InvalidArgumentException(
+            'The selected birthday voucher is unavailable.'
+        );
+    }
+
+    return (int) $voucherId;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
     $action = $_POST['action'] ?? '';
 
     try {
-        // Update tier spending threshold & multiplier
         if ($action === 'update_config') {
-            $tier_name = requireTierName(
+            $tierName = requireTierName(
                 $_POST['tier_name'] ?? null
             );
 
-            $min_spending = $tier_name === 'bronze'
-                ? '0.00'
-                : normalizeTierMoney(
-                    $_POST['tier_min_spending'] ?? null,
-                    'Minimum spending'
-                );
+            $minimumSpending =
+                $tierName === 'bronze'
+                    ? '0.00'
+                    : normalizeTierMoney(
+                        $_POST[
+                            'tier_min_spending'
+                        ] ?? null,
+                        'Minimum spending'
+                    );
 
             if (
-                $tier_name !== 'bronze' &&
-                moneyDecimalToSen($min_spending) < 100
+                $tierName !== 'bronze' &&
+                moneyDecimalToSen(
+                    $minimumSpending
+                ) < 100
             ) {
                 throw new InvalidArgumentException(
                     'Minimum spending must be at least RM 1.00.'
                 );
             }
 
-            $multiplier = normalizeTierMultiplier(
-                $_POST['tier_points_multiplier'] ?? null
-            );
+            $pointsMultiplier =
+                normalizeTierMultiplier(
+                    $_POST[
+                        'tier_points_multiplier'
+                    ] ?? null
+                );
 
-            $birthday_bonus = requireNonNegativeInt(
-                $_POST['tier_birthday_bonus_points'] ?? null,
-                'Birthday bonus points'
-            );
+            $birthdayBonusPoints =
+                requireNonNegativeInt(
+                    $_POST[
+                        'tier_birthday_bonus_points'
+                    ] ?? null,
+                    'Birthday bonus points'
+                );
 
-            $shipping_discount = normalizeTierMoney(
-                $_POST['tier_shipping_discount'] ?? null,
-                'Shipping discount'
-            );
+            $birthdayVoucherId =
+                normalizeOptionalVoucherId(
+                    $pdo,
+                    $_POST[
+                        'tier_birthday_voucher_id'
+                    ] ?? null
+                );
 
-            $free_shipping = isset(
+            $birthdayVoucherValidDays =
+                requireBoundedPositiveInt(
+                    $_POST[
+                        'tier_birthday_voucher_valid_days'
+                    ] ?? null,
+                    'Birthday voucher validity',
+                    365
+                );
+
+            $shippingDiscount =
+                normalizeTierMoney(
+                    $_POST[
+                        'tier_shipping_discount'
+                    ] ?? null,
+                    'Shipping discount'
+                );
+
+            $freeShipping = isset(
                 $_POST['tier_free_shipping']
             ) ? 1 : 0;
 
-            $pdo->prepare("UPDATE tier_config SET tier_min_spending = ?, tier_points_multiplier = ?, tier_birthday_bonus_points = ?, tier_shipping_discount = ?, tier_free_shipping = ? WHERE tier_name = ?")
-                ->execute([
-                    $min_spending,
-                    $multiplier,
-                    $birthday_bonus,
-                    $shipping_discount,
-                    $free_shipping,
-                    $tier_name,
-                ]);
+            if ($freeShipping === 1) {
+                $shippingDiscount = '0.00';
+            }
 
-            $success = ucfirst($tier_name) .
-                ' tier config updated successfully.';
+            $updateConfig = $pdo->prepare("
+                UPDATE tier_config
+                SET tier_min_spending = ?,
+                    tier_points_multiplier = ?,
+                    tier_birthday_bonus_points = ?,
+                    tier_birthday_voucher_id = ?,
+                    tier_birthday_voucher_valid_days = ?,
+                    tier_shipping_discount = ?,
+                    tier_free_shipping = ?
+                WHERE tier_name = ?
+            ");
 
-        // Add new benefit
+            $updateConfig->execute([
+                $minimumSpending,
+                $pointsMultiplier,
+                $birthdayBonusPoints,
+                $birthdayVoucherId,
+                $birthdayVoucherValidDays,
+                $shippingDiscount,
+                $freeShipping,
+                $tierName,
+            ]);
+
+            $success =
+                ucfirst($tierName) .
+                ' tier settings updated successfully.';
         } elseif ($action === 'add_benefit') {
-            $tier = requireTierName(
+            $tierName = requireTierName(
                 $_POST['benefit_tier'] ?? null
             );
 
-            $text = normalizeBenefitText(
-                $_POST['benefit_text'] ?? null
-            );
+            $benefitText =
+                normalizeBenefitText(
+                    $_POST[
+                        'benefit_text'
+                    ] ?? null
+                );
 
-            $max_order = $pdo->prepare("SELECT MAX(benefit_order) FROM tier_benefits WHERE benefit_tier = ?");
-            $max_order->execute([$tier]);
-            $next_order = (int) (
-                $max_order->fetchColumn() ?? 0
-            ) + 1;
+            $maximumOrder = $pdo->prepare("
+                SELECT MAX(benefit_order)
+                FROM tier_benefits
+                WHERE benefit_tier = ?
+            ");
+            $maximumOrder->execute([
+                $tierName,
+            ]);
 
-            $pdo->prepare("INSERT INTO tier_benefits (benefit_tier, benefit_text, benefit_order) VALUES (?, ?, ?)")
-                ->execute([
-                    $tier,
-                    $text,
-                    $next_order,
-                ]);
+            $nextOrder =
+                (int) (
+                    $maximumOrder->fetchColumn() ??
+                    0
+                ) + 1;
 
-            $success = 'Benefit added successfully.';
+            $insertBenefit = $pdo->prepare("
+                INSERT INTO tier_benefits (
+                    benefit_tier,
+                    benefit_text,
+                    benefit_order
+                )
+                VALUES (?, ?, ?)
+            ");
+            $insertBenefit->execute([
+                $tierName,
+                $benefitText,
+                $nextOrder,
+            ]);
 
-        // Delete benefit
+            $success =
+                'Benefit added successfully.';
         } elseif ($action === 'delete_benefit') {
-            $benefit_id = requirePositiveId(
+            $benefitId = requirePositiveId(
                 $_POST['benefit_id'] ?? null,
                 'Benefit ID'
             );
 
-            $pdo->prepare("DELETE FROM tier_benefits WHERE benefit_id = ?")
-                ->execute([$benefit_id]);
+            $deleteBenefit = $pdo->prepare("
+                DELETE FROM tier_benefits
+                WHERE benefit_id = ?
+            ");
+            $deleteBenefit->execute([
+                $benefitId,
+            ]);
 
-            $success = 'Benefit removed successfully.';
+            if (
+                $deleteBenefit->rowCount() !== 1
+            ) {
+                throw new InvalidArgumentException(
+                    'Benefit not found.'
+                );
+            }
 
-        // Edit benefit text
+            $success =
+                'Benefit removed successfully.';
         } elseif ($action === 'edit_benefit') {
-            $benefit_id = requirePositiveId(
+            $benefitId = requirePositiveId(
                 $_POST['benefit_id'] ?? null,
                 'Benefit ID'
             );
 
-            $text = normalizeBenefitText(
-                $_POST['benefit_text'] ?? null
-            );
+            $benefitText =
+                normalizeBenefitText(
+                    $_POST[
+                        'benefit_text'
+                    ] ?? null
+                );
 
-            $pdo->prepare("UPDATE tier_benefits SET benefit_text = ? WHERE benefit_id = ?")
-                ->execute([
-                    $text,
-                    $benefit_id,
-                ]);
+            $updateBenefit = $pdo->prepare("
+                UPDATE tier_benefits
+                SET benefit_text = ?
+                WHERE benefit_id = ?
+            ");
+            $updateBenefit->execute([
+                $benefitText,
+                $benefitId,
+            ]);
 
-            $success = 'Benefit updated successfully.';
+            $success =
+                'Benefit updated successfully.';
         } else {
             throw new InvalidArgumentException(
                 'Invalid tier management action.'
@@ -289,160 +455,718 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (InvalidArgumentException $e) {
         $error = $e->getMessage();
+    } catch (PDOException $e) {
+        app_error_log(
+            'Tier management database error: ' .
+            $e->getMessage()
+        );
+
+        $error =
+            'Unable to update tier settings. Please try again.';
     }
 }
 
-// Load data
-$tier_configs = $pdo->query("SELECT * FROM tier_config ORDER BY tier_min_spending ASC")->fetchAll(PDO::FETCH_ASSOC);
-$benefit_rows = $pdo->query("SELECT * FROM tier_benefits ORDER BY benefit_tier, benefit_order ASC")->fetchAll(PDO::FETCH_ASSOC);
+$tierConfigs = $pdo->query("
+    SELECT *
+    FROM tier_config
+    ORDER BY tier_min_spending ASC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$birthdayVoucherOptions = $pdo->query("
+    SELECT
+        voucher_id,
+        voucher_code,
+        voucher_type,
+        voucher_value
+    FROM vouchers
+    WHERE voucher_is_active = 1
+    AND voucher_is_points_redeem = 0
+    AND voucher_is_system_generated = 0
+    AND (
+        voucher_end_date IS NULL
+        OR voucher_end_date >= NOW()
+    )
+    ORDER BY voucher_code ASC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$benefitRows = $pdo->query("
+    SELECT *
+    FROM tier_benefits
+    ORDER BY
+        benefit_tier,
+        benefit_order ASC,
+        benefit_id ASC
+")->fetchAll(PDO::FETCH_ASSOC);
+
 $benefits = [];
-foreach ($benefit_rows as $row) {
-    $benefits[$row['benefit_tier']][] = $row;
+
+foreach ($benefitRows as $row) {
+    $benefits[
+        $row['benefit_tier']
+    ][] = $row;
 }
 
-$tier_display = [
-    'bronze'   => ['label' => 'Bronze',   'emoji' => '🥉', 'color' => 'text-orange-600', 'bg' => 'bg-orange-50',  'border' => 'border-orange-200'],
-    'silver'   => ['label' => 'Silver',   'emoji' => '🥈', 'color' => 'text-gray-500',   'bg' => 'bg-gray-50',    'border' => 'border-gray-200'],
-    'gold'     => ['label' => 'Gold',     'emoji' => '🥇', 'color' => 'text-yellow-600', 'bg' => 'bg-yellow-50',  'border' => 'border-yellow-200'],
-    'platinum' => ['label' => 'Platinum', 'emoji' => '💎', 'color' => 'text-blue-600',   'bg' => 'bg-blue-50',    'border' => 'border-blue-200'],
+$tierDisplay = [
+    'bronze' => [
+        'label' => 'Bronze',
+        'emoji' => '🥉',
+        'color' => 'text-orange-600',
+        'background' => 'bg-orange-50',
+        'border' => 'border-orange-200',
+    ],
+    'silver' => [
+        'label' => 'Silver',
+        'emoji' => '🥈',
+        'color' => 'text-gray-500',
+        'background' => 'bg-gray-50',
+        'border' => 'border-gray-200',
+    ],
+    'gold' => [
+        'label' => 'Gold',
+        'emoji' => '🥇',
+        'color' => 'text-yellow-600',
+        'background' => 'bg-yellow-50',
+        'border' => 'border-yellow-200',
+    ],
+    'platinum' => [
+        'label' => 'Platinum',
+        'emoji' => '💎',
+        'color' => 'text-blue-600',
+        'background' => 'bg-blue-50',
+        'border' => 'border-blue-200',
+    ],
 ];
+
+function birthdayVoucherLabel(array $voucher): string
+{
+    $value = (string) $voucher['voucher_value'];
+
+    if (
+        $voucher['voucher_type'] ===
+        'percentage'
+    ) {
+        return
+            $voucher['voucher_code'] .
+            ' — ' .
+            $value .
+            '% off';
+    }
+
+    return
+        $voucher['voucher_code'] .
+        ' — RM ' .
+        $value .
+        ' off';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tier Management - MangaVault Admin</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 min-h-screen">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-    <!-- Topbar -->
-    <nav class="bg-white shadow-sm px-6 py-4 flex justify-between items-center">
+    <title>Tier Management - MangaVault Admin</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        body {
+            opacity: 0;
+            animation: fadeIn 0.4s ease forwards;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+
+<body class="min-h-screen bg-gray-100">
+
+    <nav class="flex items-center justify-between bg-white px-6 py-4 shadow-sm">
         <div class="flex items-center gap-4">
-            <a href="dashboard.php" class="text-xl font-black">MANGA<span class="text-red-600">VAULT</span></a>
+            <a
+                href="dashboard.php"
+                class="text-xl font-black"
+            >
+                MANGA<span class="text-red-600">VAULT</span>
+            </a>
+
             <span class="text-gray-300">|</span>
-            <span class="text-gray-600 text-sm font-medium">Tier Management</span>
+
+            <span class="text-sm font-medium text-gray-600">
+                Tier Management
+            </span>
         </div>
-        <a href="dashboard.php" class="text-sm text-gray-500 hover:text-red-600 transition">← Back to Dashboard</a>
+
+        <a
+            href="dashboard.php"
+            class="text-sm text-gray-500 transition hover:text-red-600"
+        >
+            ← Back to Dashboard
+        </a>
     </nav>
 
-    <div class="max-w-6xl mx-auto px-6 py-8">
-
-        <?php if ($success): ?>
-        <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl mb-6 text-sm">✅ <?= htmlspecialchars($success, ENT_QUOTES, 'UTF-8') ?></div>
-        <?php endif; ?>
-
-        <?php if ($error): ?>
-        <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6 text-sm">⚠️ <?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></div>
-        <?php endif; ?>
-
-        <div class="mb-8">
-            <h1 class="text-2xl font-black text-gray-800">Tier Management</h1>
-            <p class="text-gray-500 text-sm mt-1">Manage spending thresholds, points multipliers, and benefits for each tier.</p>
-        </div>
-
-        <?php foreach ($tier_configs as $config):
-            $key = $config['tier_name'];
-            $display = $tier_display[$key];
-            $tier_benefits = $benefits[$key] ?? [];
-        ?>
-        <div class="<?= $display['bg'] ?> <?= $display['border'] ?> border-2 rounded-2xl mb-6 overflow-hidden">
-
-            <!-- Tier Header -->
-            <div class="px-6 py-4 border-b <?= $display['border'] ?> flex items-center gap-3">
-                <span class="text-3xl"><?= $display['emoji'] ?></span>
-                <h2 class="text-xl font-black <?= $display['color'] ?>"><?= $display['label'] ?> Tier</h2>
+    <main class="mx-auto max-w-6xl px-6 py-8">
+        <?php if ($success !== ''): ?>
+            <div
+                class="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
+            >
+                ✅
+                <?= htmlspecialchars(
+                    $success,
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?>
             </div>
+        <?php endif; ?>
 
-            <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <?php if ($error !== ''): ?>
+            <div
+                class="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+                ⚠️
+                <?= htmlspecialchars(
+                    $error,
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?>
+            </div>
+        <?php endif; ?>
 
-                <!-- Config Form -->
-                <div class="bg-white rounded-xl p-5 shadow-sm">
-                    <h3 class="font-bold text-gray-700 mb-4 text-sm uppercase tracking-wide">Tier Settings</h3>
-                    <form method="POST">
-                        <?php csrf_field(); ?>
-                        <input type="hidden" name="action" value="update_config">
-                        <input type="hidden" name="tier_name" value="<?= htmlspecialchars($key, ENT_QUOTES, 'UTF-8') ?>">
+        <header class="mb-8">
+            <h1
+                class="text-2xl font-black text-gray-800"
+            >
+                Tier Management
+            </h1>
 
-                        <div class="space-y-3">
+            <p
+                class="mt-1 text-sm text-gray-500"
+            >
+                Manage spending thresholds, points, birthday rewards,
+                shipping benefits and customer-facing tier benefits.
+            </p>
+        </header>
+
+        <?php foreach (
+            $tierConfigs as $config
+        ): ?>
+            <?php
+            $tierName =
+                (string) $config['tier_name'];
+            $display =
+                $tierDisplay[$tierName];
+            $tierBenefits =
+                $benefits[$tierName] ?? [];
+            $freeShipping =
+                (int) (
+                    $config[
+                        'tier_free_shipping'
+                    ] ?? 0
+                ) === 1;
+            ?>
+
+            <section
+                class="<?= $display[
+                    'background'
+                ] ?> <?= $display[
+                    'border'
+                ] ?> mb-6 overflow-hidden rounded-2xl border-2"
+            >
+                <div
+                    class="<?= $display[
+                        'border'
+                    ] ?> flex items-center gap-3 border-b px-6 py-4"
+                >
+                    <span class="text-3xl">
+                        <?= $display['emoji'] ?>
+                    </span>
+
+                    <h2
+                        class="text-xl font-black <?= $display[
+                            'color'
+                        ] ?>"
+                    >
+                        <?= htmlspecialchars(
+                            $display['label'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                        Tier
+                    </h2>
+                </div>
+
+                <div
+                    class="grid grid-cols-1 gap-6 p-6 lg:grid-cols-2"
+                >
+                    <div
+                        class="rounded-xl bg-white p-5 shadow-sm"
+                    >
+                        <h3
+                            class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-700"
+                        >
+                            Tier Settings
+                        </h3>
+
+                        <form
+                            method="POST"
+                            class="space-y-4"
+                        >
+                            <?php csrf_field(); ?>
+
+                            <input
+                                type="hidden"
+                                name="action"
+                                value="update_config"
+                            >
+
+                            <input
+                                type="hidden"
+                                name="tier_name"
+                                value="<?= htmlspecialchars(
+                                    $tierName,
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>"
+                            >
+
                             <div>
-                                <label class="text-xs text-gray-500 font-semibold block mb-1">Min Spending (RM)</label>
-                                <?php if ($key === 'bronze'): ?>
-                                    <input type="number" value="0.00" disabled class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-400 cursor-not-allowed">
-                                    <input type="hidden" name="tier_min_spending" value="0.00">
-                                    <p class="text-xs text-gray-400 mt-1">Bronze always starts at RM 0</p>
+                                <label
+                                    class="mb-1 block text-xs font-semibold text-gray-500"
+                                >
+                                    Min Spending (RM)
+                                </label>
+
+                                <?php if (
+                                    $tierName === 'bronze'
+                                ): ?>
+                                    <input
+                                        type="number"
+                                        value="0.00"
+                                        disabled
+                                        class="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-400"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        name="tier_min_spending"
+                                        value="0.00"
+                                    >
+
+                                    <p
+                                        class="mt-1 text-xs text-gray-400"
+                                    >
+                                        Bronze always starts at RM 0.
+                                    </p>
                                 <?php else: ?>
-                                    <input type="number" name="tier_min_spending" value="<?= htmlspecialchars($config['tier_min_spending'], ENT_QUOTES, 'UTF-8') ?>" step="0.01" min="1" max="99999999.99" required class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300">
+                                    <input
+                                        type="number"
+                                        name="tier_min_spending"
+                                        value="<?= htmlspecialchars(
+                                            (string) $config[
+                                                'tier_min_spending'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        step="0.01"
+                                        min="1"
+                                        max="99999999.99"
+                                        required
+                                        class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                                    >
                                 <?php endif; ?>
                             </div>
-                            <div>
-                                <label class="text-xs text-gray-500 font-semibold block mb-1">Points Multiplier</label>
-                                <input type="number" name="tier_points_multiplier" value="<?= htmlspecialchars($config['tier_points_multiplier'], ENT_QUOTES, 'UTF-8') ?>" step="0.1" min="1" max="99.9" required class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300">
-                                <p class="text-xs text-gray-400 mt-1">e.g. 1.5 = 1.5x points per RM spent</p>
-                            </div>
-                            <div>
-                                <label class="text-xs text-gray-500 font-semibold block mb-1">Birthday Bonus Points</label>
-                                <input type="number" name="tier_birthday_bonus_points" value="<?= (int) $config['tier_birthday_bonus_points'] ?>" min="0" max="2147483647" required class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300">
-                            </div>
-                            <div>
-                                <label class="text-xs text-gray-500 font-semibold block mb-1">Shipping Discount (RM)</label>
-                                <input type="number" name="tier_shipping_discount" value="<?= htmlspecialchars($config['tier_shipping_discount'], ENT_QUOTES, 'UTF-8') ?>" step="0.01" min="0" max="99999999.99" required class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300">
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <input type="checkbox" name="tier_free_shipping" id="free_shipping_<?= htmlspecialchars($key, ENT_QUOTES, 'UTF-8') ?>" <?= $config['tier_free_shipping'] ? 'checked' : '' ?> class="w-4 h-4 text-red-600">
-                                <label for="free_shipping_<?= htmlspecialchars($key, ENT_QUOTES, 'UTF-8') ?>" class="text-sm text-gray-600">Free Shipping</label>
-                            </div>
-                        </div>
 
-                        <button type="submit" class="mt-4 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg text-sm transition">
-                            Save Settings
-                        </button>
-                    </form>
-                </div>
+                            <div>
+                                <label
+                                    class="mb-1 block text-xs font-semibold text-gray-500"
+                                >
+                                    Points Multiplier
+                                </label>
 
-                <!-- Benefits Management -->
-                <div class="bg-white rounded-xl p-5 shadow-sm">
-                    <h3 class="font-bold text-gray-700 mb-4 text-sm uppercase tracking-wide">Benefits</h3>
+                                <input
+                                    type="number"
+                                    name="tier_points_multiplier"
+                                    value="<?= htmlspecialchars(
+                                        (string) $config[
+                                            'tier_points_multiplier'
+                                        ],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>"
+                                    step="0.1"
+                                    min="1"
+                                    max="99.9"
+                                    required
+                                    class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                                >
 
-                    <!-- Existing benefits -->
-                    <div class="space-y-2 mb-4">
-                        <?php if (empty($tier_benefits)): ?>
-                            <p class="text-gray-400 text-sm italic">No benefits added yet.</p>
-                        <?php endif; ?>
-                        <?php foreach ($tier_benefits as $benefit): ?>
-                        <div class="flex items-center gap-2 group">
-                            <form method="POST" class="flex-1 flex gap-2">
-                                <?php csrf_field(); ?>
-                                <input type="hidden" name="action" value="edit_benefit">
-                                <input type="hidden" name="benefit_id" value="<?= (int) $benefit['benefit_id'] ?>">
-                                <input type="text" name="benefit_text" value="<?= htmlspecialchars($benefit['benefit_text'], ENT_QUOTES, 'UTF-8') ?>" maxlength="255" required class="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-300">
-                                <button type="submit" class="bg-gray-100 hover:bg-green-100 text-gray-600 hover:text-green-700 px-3 py-1.5 rounded-lg text-xs font-semibold transition">Save</button>
-                            </form>
-                            <form method="POST" onsubmit="return confirm('Remove this benefit?')">
-                                <?php csrf_field(); ?>
-                                <input type="hidden" name="action" value="delete_benefit">
-                                <input type="hidden" name="benefit_id" value="<?= (int) $benefit['benefit_id'] ?>">
-                                <button type="submit" class="text-red-400 hover:text-red-600 transition text-lg leading-none">×</button>
-                            </form>
-                        </div>
-                        <?php endforeach; ?>
+                                <p
+                                    class="mt-1 text-xs text-gray-400"
+                                >
+                                    1.5 means eligible spending × 1.5;
+                                    2 means eligible spending × 2.0.
+                                </p>
+                            </div>
+
+                            <div>
+                                <label
+                                    class="mb-1 block text-xs font-semibold text-gray-500"
+                                >
+                                    Birthday Bonus Points
+                                </label>
+
+                                <input
+                                    type="number"
+                                    name="tier_birthday_bonus_points"
+                                    value="<?= (int) $config[
+                                        'tier_birthday_bonus_points'
+                                    ] ?>"
+                                    min="0"
+                                    max="2147483647"
+                                    required
+                                    class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                                >
+
+                                <p
+                                    class="mt-1 text-xs text-gray-400"
+                                >
+                                    Awarded automatically once per
+                                    calendar year.
+                                </p>
+                            </div>
+
+                            <div>
+                                <label
+                                    class="mb-1 block text-xs font-semibold text-gray-500"
+                                >
+                                    Birthday Voucher
+                                </label>
+
+                                <select
+                                    name="tier_birthday_voucher_id"
+                                    class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                                >
+                                    <option value="">
+                                        No birthday voucher
+                                    </option>
+
+                                    <?php foreach (
+                                        $birthdayVoucherOptions
+                                        as $voucher
+                                    ): ?>
+                                        <option
+                                            value="<?= (int) $voucher[
+                                                'voucher_id'
+                                            ] ?>"
+                                            <?= (int) (
+                                                $config[
+                                                    'tier_birthday_voucher_id'
+                                                ] ?? 0
+                                            ) ===
+                                            (int) $voucher[
+                                                'voucher_id'
+                                            ]
+                                                ? 'selected'
+                                                : '' ?>
+                                        >
+                                            <?= htmlspecialchars(
+                                                birthdayVoucherLabel(
+                                                    $voucher
+                                                ),
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+
+                                <p
+                                    class="mt-1 text-xs text-gray-400"
+                                >
+                                    Create the reusable template in
+                                    Voucher Management, then select it here.
+                                </p>
+                            </div>
+
+                            <div>
+                                <label
+                                    class="mb-1 block text-xs font-semibold text-gray-500"
+                                >
+                                    Birthday Voucher Validity (Days)
+                                </label>
+
+                                <input
+                                    type="number"
+                                    name="tier_birthday_voucher_valid_days"
+                                    value="<?= (int) (
+                                        $config[
+                                            'tier_birthday_voucher_valid_days'
+                                        ] ?? 30
+                                    ) ?>"
+                                    min="1"
+                                    max="365"
+                                    required
+                                    class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                                >
+                            </div>
+
+                            <div>
+                                <label
+                                    class="mb-1 block text-xs font-semibold text-gray-500"
+                                >
+                                    Shipping Discount (RM)
+                                </label>
+
+                                <input
+                                    type="number"
+                                    name="tier_shipping_discount"
+                                    value="<?= htmlspecialchars(
+                                        $freeShipping
+                                            ? '0.00'
+                                            : (string) $config[
+                                                'tier_shipping_discount'
+                                            ],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>"
+                                    step="0.01"
+                                    min="0"
+                                    max="99999999.99"
+                                    required
+                                    class="tier-shipping-discount w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                                >
+
+                                <p
+                                    class="mt-1 text-xs text-gray-400"
+                                >
+                                    Deducted from each physical order's
+                                    selected delivery fee.
+                                </p>
+                            </div>
+
+                            <label
+                                class="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3"
+                            >
+                                <input
+                                    type="checkbox"
+                                    name="tier_free_shipping"
+                                    value="1"
+                                    <?= $freeShipping
+                                        ? 'checked'
+                                        : '' ?>
+                                    class="tier-free-shipping mt-0.5 h-4 w-4 accent-red-600"
+                                >
+
+                                <span>
+                                    <span
+                                        class="block text-sm font-semibold text-gray-700"
+                                    >
+                                        Free Shipping
+                                    </span>
+
+                                    <span
+                                        class="mt-0.5 block text-xs leading-5 text-gray-400"
+                                    >
+                                        Applies to every physical delivery
+                                        method. It overrides the shipping
+                                        discount.
+                                    </span>
+                                </span>
+                            </label>
+
+                            <button
+                                type="submit"
+                                class="w-full rounded-lg bg-red-600 py-2.5 text-sm font-bold text-white transition hover:bg-red-700"
+                            >
+                                Save Settings
+                            </button>
+                        </form>
                     </div>
 
-                    <!-- Add new benefit -->
-                    <form method="POST" class="flex gap-2">
-                        <?php csrf_field(); ?>
-                        <input type="hidden" name="action" value="add_benefit">
-                        <input type="hidden" name="benefit_tier" value="<?= htmlspecialchars($key, ENT_QUOTES, 'UTF-8') ?>">
-                        <input type="text" name="benefit_text" placeholder="Add new benefit..." maxlength="255" required class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300">
-                        <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg text-sm transition">+ Add</button>
-                    </form>
+                    <div
+                        class="rounded-xl bg-white p-5 shadow-sm"
+                    >
+                        <h3
+                            class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-700"
+                        >
+                            Benefits
+                        </h3>
+
+                        <div class="mb-4 space-y-2">
+                            <?php if (
+                                $tierBenefits === []
+                            ): ?>
+                                <p
+                                    class="text-sm italic text-gray-400"
+                                >
+                                    No benefits added yet.
+                                </p>
+                            <?php endif; ?>
+
+                            <?php foreach (
+                                $tierBenefits as $benefit
+                            ): ?>
+                                <div
+                                    class="group flex items-center gap-2"
+                                >
+                                    <form
+                                        method="POST"
+                                        class="flex flex-1 gap-2"
+                                    >
+                                        <?php csrf_field(); ?>
+
+                                        <input
+                                            type="hidden"
+                                            name="action"
+                                            value="edit_benefit"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="benefit_id"
+                                            value="<?= (int) $benefit[
+                                                'benefit_id'
+                                            ] ?>"
+                                        >
+
+                                        <input
+                                            type="text"
+                                            name="benefit_text"
+                                            value="<?= htmlspecialchars(
+                                                (string) $benefit[
+                                                    'benefit_text'
+                                                ],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>"
+                                            maxlength="255"
+                                            required
+                                            class="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                                        >
+
+                                        <button
+                                            type="submit"
+                                            class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-green-100 hover:text-green-700"
+                                        >
+                                            Save
+                                        </button>
+                                    </form>
+
+                                    <form
+                                        method="POST"
+                                        onsubmit="return confirm('Remove this benefit?')"
+                                    >
+                                        <?php csrf_field(); ?>
+
+                                        <input
+                                            type="hidden"
+                                            name="action"
+                                            value="delete_benefit"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="benefit_id"
+                                            value="<?= (int) $benefit[
+                                                'benefit_id'
+                                            ] ?>"
+                                        >
+
+                                        <button
+                                            type="submit"
+                                            class="text-lg leading-none text-red-400 transition hover:text-red-600"
+                                            aria-label="Remove benefit"
+                                        >
+                                            ×
+                                        </button>
+                                    </form>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <form
+                            method="POST"
+                            class="flex gap-2"
+                        >
+                            <?php csrf_field(); ?>
+
+                            <input
+                                type="hidden"
+                                name="action"
+                                value="add_benefit"
+                            >
+
+                            <input
+                                type="hidden"
+                                name="benefit_tier"
+                                value="<?= htmlspecialchars(
+                                    $tierName,
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>"
+                            >
+
+                            <input
+                                type="text"
+                                name="benefit_text"
+                                placeholder="Add new benefit..."
+                                maxlength="255"
+                                required
+                                class="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                            >
+
+                            <button
+                                type="submit"
+                                class="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700"
+                            >
+                                + Add
+                            </button>
+                        </form>
+                    </div>
                 </div>
-
-            </div>
-        </div>
+            </section>
         <?php endforeach; ?>
+    </main>
 
-    </div>
+    <script>
+        document.querySelectorAll(
+            'form'
+        ).forEach(form => {
+            const freeShipping =
+                form.querySelector(
+                    '.tier-free-shipping'
+                );
+            const shippingDiscount =
+                form.querySelector(
+                    '.tier-shipping-discount'
+                );
+
+            if (
+                !freeShipping ||
+                !shippingDiscount
+            ) {
+                return;
+            }
+
+            freeShipping.addEventListener(
+                'change',
+                () => {
+                    if (freeShipping.checked) {
+                        shippingDiscount.value =
+                            '0.00';
+                    }
+                }
+            );
+        });
+    </script>
+
 </body>
 </html>

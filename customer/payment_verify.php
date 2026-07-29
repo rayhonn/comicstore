@@ -248,8 +248,28 @@ if (
                         ]
                     );
 
+                $shipping_fee_sen =
+                    moneyDecimalToSen(
+                        (string) (
+                            $order[
+                                'order_shipping_fee'
+                            ] ?? '0.00'
+                        )
+                    );
+
+                $eligible_spending_sen = max(
+                    0,
+                    $order_total_sen -
+                        $shipping_fee_sen
+                );
+
+                $eligible_spending =
+                    moneySenToDecimal(
+                        $eligible_spending_sen
+                    );
+
                 $points_earned = intdiv(
-                    $order_total_sen *
+                    $eligible_spending_sen *
                     $multiplier_hundredths,
                     10000
                 );
@@ -264,9 +284,7 @@ if (
                 ");
                 $update_user->execute([
                     $points_earned,
-                    $order[
-                        'order_total_amount'
-                    ],
+                    $eligible_spending,
                     $order_user_id,
                 ]);
 
@@ -307,7 +325,7 @@ if (
                             'user_lifetime_spending'
                         ]
                     ) +
-                    $order_total_sen;
+                    $eligible_spending_sen;
 
                 $all_tiers = $pdo->query("
                     SELECT

@@ -686,7 +686,7 @@ function tierShippingLabel(array $config): string
                         Confirmed purchases increase your lifetime spending,
                         move you through four membership levels and unlock
                         stronger points, annual birthday points and
-                        standard-shipping benefits.
+                        shipping benefits.
                     </p>
                 </div>
 
