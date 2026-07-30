@@ -566,6 +566,8 @@ $payment_methods = $payment_methods_stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </div>
 
+    <script src="../assets/js/password-toggle.js" defer></script>
+
     <script>
     function confirmDelete(pmId) {
         document.getElementById('deletePmId').value = pmId;

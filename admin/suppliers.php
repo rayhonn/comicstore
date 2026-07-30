@@ -545,6 +545,8 @@ $suppliers = $pdo->query("
         </div>
     </div>
 
+    <script src="../assets/js/password-toggle.js" defer></script>
+
     <script>
     function openAddModal() {
         document.getElementById('modalTitle').textContent = 'Add Supplier';

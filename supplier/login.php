@@ -132,5 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <p class="text-center text-blue-300 text-xs mt-6">© 2026 MangaVault. Supplier Portal v1.0</p>
     </div>
 
+    <script src="../assets/js/password-toggle.js" defer></script>
+
 </body>
 </html>

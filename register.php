@@ -439,7 +439,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ← <a href="login.php" class="text-red-600 font-medium hover:underline">Back to sign in</a>
         </p>
     </div>
-
+    
+    <script src="assets/js/password-toggle.js" defer></script>
 <script>
 const phoneInput = document.getElementById('phoneInput');
 phoneInput.addEventListener('input', function() {

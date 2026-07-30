@@ -172,6 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ← <a href="register.php" class="text-red-600 font-medium hover:underline">Back to sign up</a>
         </p>
     </div>
-
+    
+    <script src="assets/js/password-toggle.js" defer></script>
 </body>
 </html>

@@ -273,6 +273,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
 
+    <script src="../assets/js/password-toggle.js" defer></script>
+
     <script>
     const newPassInput = document.getElementById('newPassInput');
     const confirmPassInput = document.getElementById('confirmPassInput');

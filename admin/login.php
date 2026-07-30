@@ -202,5 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <p class="text-center text-white/20 text-xs mt-6">MangaVault Management System © 2026</p>
     </div>
+
+    <script src="../assets/js/password-toggle.js" defer></script>
 </body>
 </html>

@@ -654,6 +654,8 @@ $staff = $pdo->query(
         </div>
     </div>
 
+    <script src="../assets/js/password-toggle.js" defer></script>
+
     <script>
     function openAddModal() { document.getElementById('addModal').classList.add('active'); }
     function closeAddModal() { document.getElementById('addModal').classList.remove('active'); }
