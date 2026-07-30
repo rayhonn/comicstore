@@ -606,7 +606,7 @@ foreach ($available_credits as $c) {
 
     <?php include '../includes/admin_navbar.php'; ?>
 
-    <div class="max-w-6xl mx-auto px-5 py-8">
+    <div class="max-w-[1500px] mx-auto px-5 py-8">
 
         <div class="mb-8">
             <h1 class="text-2xl font-black text-gray-800">🧾 Supplier Invoices</h1>
@@ -632,26 +632,65 @@ foreach ($available_credits as $c) {
         </div>
         <?php endif; ?>
 
-        <div class="bg-white rounded-2xl shadow-sm overflow-hidden isolate">
+        <div class="bg-white rounded-2xl shadow-sm overflow-x-auto isolate">
             <?php if (count($invoices) === 0): ?>
             <div class="text-center py-16">
                 <div class="text-5xl mb-4">🧾</div>
                 <p class="text-gray-400">No invoices recorded yet.</p>
             </div>
             <?php else: ?>
-            <table class="w-full border-separate" style="border-spacing: 0;">
+            <table class="w-full min-w-[1280px] border-separate table-auto" style="border-spacing: 0;">
                 <thead>
-                    <tr class="bg-gray-50 border-b border-gray-100 rounded-t-2xl overflow-hidden">
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase rounded-tl-2xl">Invoice #</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Supplier</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">PO</th>
-                        <th class="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Amount</th>
-                        <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Match</th>
-                        <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Due Date</th>
-                        <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Status</th>
-                        <th class="px-5 py-3 text-center text-xs font-semibold text-gray-500 uppercase rounded-tr-2xl">Action</th>
-                    </tr>
-                </thead>
+                    <tr class="bg-gray-50 border-b border-gray-100">
+                        <th
+                            class="min-w-[160px] px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase rounded-tl-2xl"
+                        >
+                            Invoice #
+                        </th>
+
+                        <th
+                            class="min-w-[260px] px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase"
+                        >
+                            Supplier
+                        </th>
+
+                        <th
+                            class="min-w-[110px] px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase"
+                        >
+                            PO
+                        </th>
+
+                        <th
+                            class="min-w-[155px] px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase"
+                        >
+                            Amount
+                        </th>
+
+                        <th
+                            class="min-w-[120px] px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase"
+                        >
+                            Match
+                        </th>
+
+                        <th
+                            class="min-w-[130px] px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase"
+                        >
+                            Due Date
+                        </th>
+
+                            <th
+                                class="min-w-[110px] px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase"
+                            >
+                                Status
+                            </th>
+
+                            <th
+                                class="min-w-[190px] px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase rounded-tr-2xl"
+                            >
+                                Action
+                            </th>
+                        </tr>
+                    </thead>
                 <tbody>
                     <?php foreach ($invoices as $inv):
                         $invoice_amount_sen =
@@ -778,7 +817,7 @@ foreach ($available_credits as $c) {
                                 <?= $inv['invoice_status'] ?>
                             </span>
                         </td>
-                        <td class="px-5 py-4 text-center whitespace-nowrap">
+                        <td class="min-w-[190px] px-4 py-4 text-center whitespace-nowrap">
                             <?php if ($inv['invoice_status'] === 'unpaid'): ?>
                             <div class="flex flex-col items-center gap-2">
                                 <?php if (!$inv['invoice_credit_note_id'] && !empty($credits_by_supplier[$inv['invoice_supplier_id']])): ?>

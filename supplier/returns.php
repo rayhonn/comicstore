@@ -268,7 +268,7 @@ if (isset($_SESSION['flash_error'])) {
                 <?php if ($ret['return_status'] === 'resolved' && $ret['return_resolution_type'] === 'dispute_rejected'): ?>
                 <p class="text-sm text-gray-600 mb-4">No deduction has been made — this was reversed after review.</p>
                 <?php else: ?>
-                <p class="text-sm text-gray-600 mb-4">This amount (<strong class="text-red-600">RM <?= moneyFormatSen($ret['total_value_sen']) ?></strong>) has been deducted from your payment for this order.</p>
+                <p class="text-sm text-gray-600 mb-4">This amount (<strong class="text-red-600">RM <?= moneyFormatSen($ret['total_value_sen']) ?></strong>) is currently under review. Any credit adjustment will only be applied after the return is resolved.</p>
                 <?php endif; ?>
 
                 <?php if ($ret['return_supplier_response'] === 'pending'): ?>

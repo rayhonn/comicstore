@@ -5,18 +5,17 @@ require_supplier();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/logger.php';
 require_once __DIR__ .
     '/../includes/procurement_receipt_helper.php';
 
-use BaconQrCode\Renderer\ImageRenderer;
-use BaconQrCode\Renderer\Image\SvgImageBackEnd;
-use BaconQrCode\Renderer\RendererStyle\RendererStyle;
-use BaconQrCode\Writer;
-use Dompdf\Dompdf;
-
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
-$supplierId = (int) ($_SESSION['supplier_id'] ?? 0);
+$supplierId = filter_var(
+    $_SESSION['supplier_id'] ?? null,
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
+);
 $poId = filter_input(
     INPUT_GET,
     'po_id',
@@ -24,35 +23,344 @@ $poId = filter_input(
     ['options' => ['min_range' => 1]]
 );
 
-if ($poId === false || $poId === null) {
+if (
+    $supplierId === false ||
+    $supplierId === null ||
+    $poId === false ||
+    $poId === null
+) {
     redirect_to(app_path('supplier/purchase_orders.php'));
 }
 
+$supplierId = (int) $supplierId;
 $poId = (int) $poId;
 $error = '';
-$success = (string) (
-    $_SESSION['supplier_do_success'] ?? ''
-);
+$success = (string) ($_SESSION['supplier_do_success'] ?? '');
 unset($_SESSION['supplier_do_success']);
 
-$poStatement = $pdo->prepare("
-    SELECT
-        po.*,
-        s.supplier_name,
-        s.supplier_phone
-    FROM purchase_orders po
-    JOIN suppliers s
-        ON s.supplier_id = po.po_supplier_id
-    WHERE po.po_id = ?
-    AND po.po_supplier_id = ?
-    AND po.po_status IN ('confirmed', 'completed')
-    LIMIT 1
-");
-$poStatement->execute([
-    $poId,
-    $supplierId,
-]);
-$po = $poStatement->fetch(PDO::FETCH_ASSOC);
+function loadSupplierDeliveryPo(
+    PDO $pdo,
+    int $poId,
+    int $supplierId
+): ?array {
+    $statement = $pdo->prepare("
+        SELECT
+            po.*,
+            supplier.supplier_name,
+            supplier.supplier_phone,
+            supplier.supplier_email,
+            supplier.supplier_address
+        FROM purchase_orders po
+        JOIN suppliers supplier
+            ON supplier.supplier_id = po.po_supplier_id
+        WHERE po.po_id = ?
+        AND po.po_supplier_id = ?
+        AND po.po_status IN ('confirmed', 'completed')
+        LIMIT 1
+    ");
+    $statement->execute([$poId, $supplierId]);
+
+    $result = $statement->fetch(PDO::FETCH_ASSOC);
+    return $result ?: null;
+}
+
+function loadSupplierDeliveryItems(
+    PDO $pdo,
+    int $poId
+): array {
+    $statement = $pdo->prepare("
+        SELECT
+            item.po_item_id,
+            item.po_item_product_id,
+            item.po_item_quantity,
+            item.po_item_received_quantity,
+            item.po_item_rejected_quantity,
+            item.po_item_unit_price,
+            product.product_title,
+            product.product_volume_number,
+            COALESCE((
+                SELECT SUM(delivery_item.doi_quantity)
+                FROM delivery_order_items delivery_item
+                JOIN delivery_orders delivery
+                    ON delivery.do_id = delivery_item.doi_do_id
+                WHERE delivery_item.doi_po_item_id =
+                    item.po_item_id
+                AND delivery.do_status = 'issued'
+            ), 0) AS pending_delivery_quantity
+        FROM po_items item
+        JOIN products product
+            ON product.product_id = item.po_item_product_id
+        WHERE item.po_item_po_id = ?
+        ORDER BY item.po_item_id
+    ");
+    $statement->execute([$poId]);
+
+    return $statement->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function loadSupplierDeliveryHistory(
+    PDO $pdo,
+    int $poId,
+    int $supplierId
+): array {
+    $statement = $pdo->prepare("
+        SELECT
+            delivery.*,
+            receipt.gr_number,
+            receipt.gr_status,
+            CONCAT_WS(
+                ' ',
+                receiver.user_first_name,
+                receiver.user_last_name
+            ) AS received_by_name,
+            COALESCE(SUM(delivery_item.doi_quantity), 0)
+                AS total_quantity
+        FROM delivery_orders delivery
+        LEFT JOIN delivery_order_items delivery_item
+            ON delivery_item.doi_do_id = delivery.do_id
+        LEFT JOIN goods_received receipt
+            ON receipt.gr_do_id = delivery.do_id
+        LEFT JOIN users receiver
+            ON receiver.user_id = delivery.do_received_by
+        WHERE delivery.do_po_id = ?
+        AND delivery.do_supplier_id = ?
+        GROUP BY delivery.do_id
+        ORDER BY delivery.do_id DESC
+    ");
+    $statement->execute([$poId, $supplierId]);
+
+    return $statement->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function assertDeliveryPdfReady(): void
+{
+    procurementReceiptSecret();
+
+    if (!defined('APP_URL')) {
+        throw new RuntimeException(
+            'APP_URL is not configured. Add the full local project URL to the project .env file.'
+        );
+    }
+
+    $appUrl = rtrim(trim((string) APP_URL), '/');
+    $scheme = strtolower((string) parse_url($appUrl, PHP_URL_SCHEME));
+
+    if (
+        $appUrl === '' ||
+        filter_var($appUrl, FILTER_VALIDATE_URL) === false ||
+        !in_array($scheme, ['http', 'https'], true)
+    ) {
+        throw new RuntimeException(
+            'APP_URL must be a valid http or https URL, for example http://localhost/comicstore.'
+        );
+    }
+
+    $autoloadPath = __DIR__ . '/../vendor/autoload.php';
+
+    if (!is_file($autoloadPath)) {
+        throw new RuntimeException(
+            'PDF dependencies are not installed. Run Composer install before creating a delivery order.'
+        );
+    }
+
+    require_once $autoloadPath;
+
+    $requiredClasses = [
+        Dompdf\Dompdf::class,
+        BaconQrCode\Renderer\ImageRenderer::class,
+        BaconQrCode\Renderer\Image\SvgImageBackEnd::class,
+        BaconQrCode\Renderer\RendererStyle\RendererStyle::class,
+        BaconQrCode\Writer::class,
+    ];
+
+    foreach ($requiredClasses as $requiredClass) {
+        if (!class_exists($requiredClass)) {
+            throw new RuntimeException(
+                'A required PDF or QR library is unavailable. Run Composer install and try again.'
+            );
+        }
+    }
+}
+
+function outputDeliveryOrderPdf(
+    PDO $pdo,
+    int $deliveryOrderId,
+    int $poId,
+    int $supplierId
+): void {
+    assertDeliveryPdfReady();
+
+    $deliveryStatement = $pdo->prepare("
+        SELECT
+            delivery.*,
+            po.po_number,
+            supplier.supplier_name,
+            supplier.supplier_phone,
+            supplier.supplier_email,
+            supplier.supplier_address,
+            receipt.gr_number
+        FROM delivery_orders delivery
+        JOIN purchase_orders po
+            ON po.po_id = delivery.do_po_id
+        JOIN suppliers supplier
+            ON supplier.supplier_id = delivery.do_supplier_id
+        LEFT JOIN goods_received receipt
+            ON receipt.gr_do_id = delivery.do_id
+        WHERE delivery.do_id = ?
+        AND delivery.do_po_id = ?
+        AND delivery.do_supplier_id = ?
+        LIMIT 1
+    ");
+    $deliveryStatement->execute([
+        $deliveryOrderId,
+        $poId,
+        $supplierId,
+    ]);
+    $deliveryOrder = $deliveryStatement->fetch(PDO::FETCH_ASSOC);
+
+    if (!$deliveryOrder) {
+        throw new RuntimeException('Delivery order not found.');
+    }
+
+    $itemStatement = $pdo->prepare("
+        SELECT
+            delivery_item.doi_quantity,
+            product.product_title,
+            product.product_volume_number
+        FROM delivery_order_items delivery_item
+        JOIN products product
+            ON product.product_id = delivery_item.doi_product_id
+        WHERE delivery_item.doi_do_id = ?
+        ORDER BY delivery_item.doi_id
+    ");
+    $itemStatement->execute([$deliveryOrderId]);
+    $deliveryItems = $itemStatement->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!$deliveryItems) {
+        throw new RuntimeException(
+            'No items were found for this delivery order.'
+        );
+    }
+
+    $nonce = strtolower(trim(
+        (string) $deliveryOrder['do_receipt_nonce']
+    ));
+    $qrUrl = procurementReceiptUrl($deliveryOrderId, $nonce);
+
+    $renderer = new BaconQrCode\Renderer\ImageRenderer(
+        new BaconQrCode\Renderer\RendererStyle\RendererStyle(180),
+        new BaconQrCode\Renderer\Image\SvgImageBackEnd()
+    );
+    $writer = new BaconQrCode\Writer($renderer);
+    $qrDataUri =
+        'data:image/svg+xml;base64,' .
+        base64_encode($writer->writeString($qrUrl));
+
+    $safe = static fn(mixed $value): string => htmlspecialchars(
+        (string) $value,
+        ENT_QUOTES,
+        'UTF-8'
+    );
+
+    $itemRows = '';
+    foreach ($deliveryItems as $deliveryItem) {
+        $title = $safe($deliveryItem['product_title']);
+        if (
+            $deliveryItem['product_volume_number'] !== null &&
+            $deliveryItem['product_volume_number'] !== ''
+        ) {
+            $title .= ' (Vol.' .
+                (int) $deliveryItem['product_volume_number'] .
+                ')';
+        }
+
+        $itemRows .=
+            '<tr>' .
+            '<td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;">' .
+            $title .
+            '</td>' .
+            '<td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;text-align:center;">' .
+            (int) $deliveryItem['doi_quantity'] .
+            '</td>' .
+            '</tr>';
+    }
+
+    $statusLabel =
+        $deliveryOrder['do_status'] === 'received'
+            ? 'RECEIVED'
+            : 'AWAITING RECEIPT';
+    $statusColour =
+        $deliveryOrder['do_status'] === 'received'
+            ? '#15803d'
+            : '#b45309';
+    $notes = trim((string) ($deliveryOrder['do_notes'] ?? ''));
+    $notesBlock = $notes === ''
+        ? ''
+        : '<div style="background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:24px;">' .
+            '<p style="font-size:11px;color:#6b7280;margin:0;">Notes: ' .
+            $safe($notes) .
+            '</p></div>';
+
+    $html = '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>' .
+        '<body style="font-family:Arial,sans-serif;margin:0;padding:30px;color:#111827;">' .
+        '<div style="background:#1e2d4a;padding:24px;border-radius:8px;margin-bottom:28px;">' .
+        '<h1 style="color:#fff;font-size:22px;margin:0;font-weight:900;">MANGA<span style="color:#ef4444;">VAULT</span></h1>' .
+        '<p style="color:rgba(255,255,255,.7);font-size:12px;margin:4px 0 0;">Delivery Order</p></div>' .
+        '<div style="display:table;width:100%;margin-bottom:22px;">' .
+        '<div style="display:table-cell;width:60%;vertical-align:top;">' .
+        '<h2 style="font-size:18px;margin:0 0 4px;">' .
+        $safe($deliveryOrder['do_number']) .
+        '</h2><p style="font-size:12px;color:#6b7280;margin:0;">For: ' .
+        $safe($deliveryOrder['po_number']) .
+        '</p><p style="font-size:12px;color:#6b7280;margin:3px 0 0;">Delivery Date: ' .
+        date(
+            'd F Y',
+            strtotime((string) $deliveryOrder['do_delivery_date'])
+        ) .
+        '</p><p style="font-size:11px;color:' .
+        $statusColour .
+        ';font-weight:700;margin:8px 0 0;">' .
+        $statusLabel .
+        '</p></div>' .
+        '<div style="display:table-cell;width:40%;text-align:right;vertical-align:top;">' .
+        '<img src="' . $qrDataUri . '" style="width:92px;height:92px;">' .
+        '<p style="font-size:9px;color:#9ca3af;margin:4px 0 0;">Secure receipt verification</p>' .
+        '</div></div>' .
+        '<div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:22px;">' .
+        '<p style="font-size:10px;color:#9ca3af;margin:0 0 5px;text-transform:uppercase;font-weight:700;">Supplier</p>' .
+        '<p style="font-size:14px;font-weight:700;margin:0 0 2px;">' .
+        $safe($deliveryOrder['supplier_name']) .
+        '</p><p style="font-size:11px;color:#6b7280;margin:0;">' .
+        $safe($deliveryOrder['supplier_phone']) .
+        ($deliveryOrder['supplier_email']
+            ? ' · ' . $safe($deliveryOrder['supplier_email'])
+            : '') .
+        '</p></div>' .
+        '<table style="width:100%;border-collapse:collapse;margin-bottom:22px;">' .
+        '<tr style="background:#1e2d4a;color:#fff;">' .
+        '<td style="padding:10px 12px;font-size:11px;font-weight:700;">Product</td>' .
+        '<td style="padding:10px 12px;font-size:11px;font-weight:700;text-align:center;">Quantity Delivered</td></tr>' .
+        $itemRows .
+        '</table>' .
+        $notesBlock .
+        '<div style="border-top:2px solid #f3f4f6;padding-top:14px;margin-top:34px;">' .
+        '<p style="font-size:10px;color:#9ca3af;margin:0;">The signed QR is bound to this delivery order. Each delivery order can be received only once.</p>' .
+        '<p style="font-size:10px;color:#9ca3af;margin:4px 0 0;">Generated on ' .
+        date('d F Y, h:i A') .
+        '</p></div></body></html>';
+
+    $dompdf = new Dompdf\Dompdf();
+    $dompdf->loadHtml($html);
+    $dompdf->setPaper('A4', 'portrait');
+    $dompdf->render();
+    $dompdf->stream(
+        (string) $deliveryOrder['do_number'] . '.pdf',
+        ['Attachment' => true]
+    );
+    exit;
+}
+
+$po = loadSupplierDeliveryPo($pdo, $poId, $supplierId);
 
 if (!$po) {
     redirect_to(app_path('supplier/purchase_orders.php'));
@@ -69,76 +377,6 @@ if (
     );
 }
 
-function loadSupplierPoItems(
-    PDO $pdo,
-    int $poId
-): array {
-    $statement = $pdo->prepare("
-        SELECT
-            pi.po_item_id,
-            pi.po_item_product_id,
-            pi.po_item_quantity,
-            pi.po_item_received_quantity,
-            pi.po_item_rejected_quantity,
-            pi.po_item_unit_price,
-            p.product_title,
-            p.product_volume_number,
-            COALESCE((
-                SELECT SUM(doi.doi_quantity)
-                FROM delivery_order_items doi
-                JOIN delivery_orders delivery
-                    ON delivery.do_id = doi.doi_do_id
-                WHERE doi.doi_po_item_id = pi.po_item_id
-                AND delivery.do_status = 'issued'
-            ), 0) AS pending_delivery_quantity
-        FROM po_items pi
-        JOIN products p
-            ON p.product_id = pi.po_item_product_id
-        WHERE pi.po_item_po_id = ?
-        ORDER BY pi.po_item_id
-    ");
-    $statement->execute([$poId]);
-
-    return $statement->fetchAll(PDO::FETCH_ASSOC);
-}
-
-function loadSupplierDeliveryOrders(
-    PDO $pdo,
-    int $poId,
-    int $supplierId
-): array {
-    $statement = $pdo->prepare("
-        SELECT
-            delivery.*,
-            gr.gr_number,
-            gr.gr_status,
-            CONCAT_WS(
-                ' ',
-                receiver.user_first_name,
-                receiver.user_last_name
-            ) AS received_by_name,
-            COALESCE(SUM(doi.doi_quantity), 0)
-                AS total_quantity
-        FROM delivery_orders delivery
-        LEFT JOIN delivery_order_items doi
-            ON doi.doi_do_id = delivery.do_id
-        LEFT JOIN goods_received gr
-            ON gr.gr_do_id = delivery.do_id
-        LEFT JOIN users receiver
-            ON receiver.user_id = delivery.do_received_by
-        WHERE delivery.do_po_id = ?
-        AND delivery.do_supplier_id = ?
-        GROUP BY delivery.do_id
-        ORDER BY delivery.do_id DESC
-    ");
-    $statement->execute([
-        $poId,
-        $supplierId,
-    ]);
-
-    return $statement->fetchAll(PDO::FETCH_ASSOC);
-}
-
 $downloadDeliveryOrderId = filter_input(
     INPUT_GET,
     'download_pdf',
@@ -151,217 +389,20 @@ if (
     $downloadDeliveryOrderId !== null
 ) {
     try {
-        require_once __DIR__ . '/../vendor/autoload.php';
-
-        $deliveryStatement = $pdo->prepare("
-            SELECT
-                delivery.*,
-                po.po_number,
-                supplier.supplier_name,
-                supplier.supplier_phone,
-                gr.gr_number
-            FROM delivery_orders delivery
-            JOIN purchase_orders po
-                ON po.po_id = delivery.do_po_id
-            JOIN suppliers supplier
-                ON supplier.supplier_id =
-                    delivery.do_supplier_id
-            LEFT JOIN goods_received gr
-                ON gr.gr_do_id = delivery.do_id
-            WHERE delivery.do_id = ?
-            AND delivery.do_po_id = ?
-            AND delivery.do_supplier_id = ?
-            LIMIT 1
-        ");
-        $deliveryStatement->execute([
+        outputDeliveryOrderPdf(
+            $pdo,
             (int) $downloadDeliveryOrderId,
             $poId,
-            $supplierId,
-        ]);
-        $deliveryOrder = $deliveryStatement->fetch(
-            PDO::FETCH_ASSOC
+            $supplierId
         );
-
-        if (!$deliveryOrder) {
-            throw new RuntimeException(
-                'Delivery order not found.'
-            );
-        }
-
-        $deliveryItemStatement = $pdo->prepare("
-            SELECT
-                doi.doi_quantity,
-                p.product_title,
-                p.product_volume_number
-            FROM delivery_order_items doi
-            JOIN products p
-                ON p.product_id = doi.doi_product_id
-            WHERE doi.doi_do_id = ?
-            ORDER BY doi.doi_id
-        ");
-        $deliveryItemStatement->execute([
-            (int) $deliveryOrder['do_id'],
-        ]);
-        $deliveryItems = $deliveryItemStatement->fetchAll(
-            PDO::FETCH_ASSOC
-        );
-
-        $nonce = strtolower(trim(
-            (string) $deliveryOrder['do_receipt_nonce']
-        ));
-        $qrUrl = procurementReceiptUrl(
-            (int) $deliveryOrder['do_id'],
-            $nonce
-        );
-
-        $renderer = new ImageRenderer(
-            new RendererStyle(140),
-            new SvgImageBackEnd()
-        );
-        $writer = new Writer($renderer);
-        $qrSvg = $writer->writeString($qrUrl);
-        $qrBase64 =
-            'data:image/svg+xml;base64,' .
-            base64_encode($qrSvg);
-
-        $itemRows = '';
-        foreach ($deliveryItems as $deliveryItem) {
-            $title = htmlspecialchars(
-                (string) $deliveryItem['product_title'],
-                ENT_QUOTES,
-                'UTF-8'
-            );
-            $volume = $deliveryItem[
-                'product_volume_number'
-            ];
-            if ($volume !== null && $volume !== '') {
-                $title .= ' (Vol.' . (int) $volume . ')';
-            }
-
-            $itemRows .=
-                "<tr>" .
-                "<td style='padding:10px 12px;font-size:12px;border-bottom:1px solid #e5e7eb;'>" .
-                $title .
-                "</td>" .
-                "<td style='padding:10px 12px;font-size:12px;text-align:center;border-bottom:1px solid #e5e7eb;'>" .
-                (int) $deliveryItem['doi_quantity'] .
-                "</td>" .
-                "</tr>";
-        }
-
-        $deliveryStatus =
-            $deliveryOrder['do_status'] === 'received'
-                ? 'RECEIVED'
-                : 'AWAITING RECEIPT';
-        $statusColour =
-            $deliveryOrder['do_status'] === 'received'
-                ? '#15803d'
-                : '#b45309';
-        $safeNotes = htmlspecialchars(
-            (string) ($deliveryOrder['do_notes'] ?? ''),
-            ENT_QUOTES,
-            'UTF-8'
-        );
-        $safeDoNumber = htmlspecialchars(
-            (string) $deliveryOrder['do_number'],
-            ENT_QUOTES,
-            'UTF-8'
-        );
-        $safePoNumber = htmlspecialchars(
-            (string) $deliveryOrder['po_number'],
-            ENT_QUOTES,
-            'UTF-8'
-        );
-        $safeSupplierName = htmlspecialchars(
-            (string) $deliveryOrder['supplier_name'],
-            ENT_QUOTES,
-            'UTF-8'
-        );
-        $safeSupplierPhone = htmlspecialchars(
-            (string) (
-                $deliveryOrder['supplier_phone'] ?? ''
-            ),
-            ENT_QUOTES,
-            'UTF-8'
-        );
-
-        $receiptText =
-            $deliveryOrder['do_status'] === 'received'
-                ? 'Scan to view completed receipt'
-                : 'Secure scan to confirm receipt';
-
-        $html = "
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset='UTF-8'></head>
-        <body style='font-family:Arial,sans-serif;margin:0;padding:30px;color:#111827;'>
-            <div style='background:#1e2d4a;padding:24px;border-radius:8px;margin-bottom:30px;'>
-                <h1 style='color:#ffffff;font-size:22px;margin:0;font-weight:900;'>MANGA<span style='color:#ef4444;'>VAULT</span></h1>
-                <p style='color:rgba(255,255,255,0.7);font-size:12px;margin:4px 0 0;'>Delivery Order</p>
-            </div>
-            <div style='display:table;width:100%;margin-bottom:24px;'>
-                <div style='display:table-cell;width:55%;vertical-align:top;'>
-                    <h2 style='font-size:18px;color:#111827;margin:0 0 4px;'>$safeDoNumber</h2>
-                    <p style='font-size:12px;color:#6b7280;margin:0;'>For: $safePoNumber</p>
-                    <p style='font-size:12px;color:#6b7280;margin:2px 0 0;'>Delivery Date: " .
-                        date(
-                            'd F Y',
-                            strtotime(
-                                (string) $deliveryOrder[
-                                    'do_delivery_date'
-                                ]
-                            )
-                        ) .
-                    "</p>
-                    <p style='font-size:11px;color:$statusColour;margin:8px 0 0;font-weight:700;'>$deliveryStatus</p>
-                </div>
-                <div style='display:table-cell;width:45%;text-align:right;vertical-align:top;'>
-                    <img src='$qrBase64' style='width:86px;height:86px;margin-bottom:6px;'>
-                    <p style='font-size:9px;color:#9ca3af;margin:0;font-weight:700;'>$receiptText</p>
-                </div>
-            </div>
-            <div style='background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:24px;'>
-                <p style='font-size:11px;color:#9ca3af;margin:0 0 6px;text-transform:uppercase;font-weight:700;'>From (Supplier)</p>
-                <p style='font-size:14px;font-weight:700;margin:0 0 2px;'>$safeSupplierName</p>
-                <p style='font-size:12px;color:#6b7280;margin:0;'>$safeSupplierPhone</p>
-            </div>
-            <table style='width:100%;border-collapse:collapse;margin-bottom:24px;'>
-                <tr style='background:#1e2d4a;color:white;'>
-                    <td style='padding:10px 12px;font-size:11px;font-weight:700;'>Product</td>
-                    <td style='padding:10px 12px;font-size:11px;font-weight:700;text-align:center;'>Qty Delivered</td>
-                </tr>
-                $itemRows
-            </table>" .
-            ($safeNotes !== ''
-                ? "<div style='background:#f9fafb;border-radius:8px;padding:12px;margin-bottom:24px;'><p style='font-size:11px;color:#6b7280;margin:0;'>Notes: $safeNotes</p></div>"
-                : '') .
-            "<div style='border-top:2px solid #f3f4f6;padding-top:16px;margin-top:40px;'>
-                <p style='font-size:11px;color:#9ca3af;margin:0;'>The signed QR is bound to this delivery order. A completed delivery cannot be recorded again.</p>
-                <p style='font-size:11px;color:#9ca3af;margin:4px 0 0;'>Generated on " .
-                    date('d F Y, h:i A') .
-                "</p>
-            </div>
-        </body>
-        </html>";
-
-        $dompdf = new Dompdf();
-        $dompdf->loadHtml($html);
-        $dompdf->setPaper('A4', 'portrait');
-        $dompdf->render();
-        $dompdf->stream(
-            $deliveryOrder['do_number'] . '.pdf',
-            ['Attachment' => true]
-        );
-        exit;
     } catch (Throwable $e) {
         app_error_log(
             'Delivery order PDF generation failed: ' .
             $e->getMessage()
         );
-        $error =
-            $e instanceof RuntimeException
-                ? $e->getMessage()
-                : 'Unable to generate the delivery order PDF.';
+        $error = $e instanceof RuntimeException
+            ? $e->getMessage()
+            : 'The delivery order exists, but its PDF could not be generated. Use the history section to try the download again.';
     }
 }
 
@@ -378,6 +419,10 @@ if (
             );
         }
 
+        // A secure receipt secret is required before a DO can be created.
+        // PDF dependencies are checked only when the supplier downloads the PDF.
+        procurementReceiptSecret();
+
         $deliveryDateRaw = $_POST['delivery_date'] ?? null;
         $notesRaw = $_POST['notes'] ?? '';
         $quantitiesRaw = $_POST['delivery_qty'] ?? null;
@@ -388,11 +433,10 @@ if (
             );
         }
 
-        $deliveryDate =
-            DateTimeImmutable::createFromFormat(
-                '!Y-m-d',
-                $deliveryDateRaw
-            );
+        $deliveryDate = DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            $deliveryDateRaw
+        );
         $dateErrors = DateTimeImmutable::getLastErrors();
 
         if (
@@ -404,18 +448,22 @@ if (
                     $dateErrors['error_count'] > 0
                 )
             ) ||
-            $deliveryDate->format('Y-m-d') !==
-                $deliveryDateRaw
+            $deliveryDate->format('Y-m-d') !== $deliveryDateRaw
         ) {
             throw new RuntimeException(
                 'Please enter a valid delivery date.'
             );
         }
 
-        if (!is_string($notesRaw)) {
+        $today = new DateTimeImmutable('today');
+        if ($deliveryDate < $today) {
             throw new RuntimeException(
-                'Invalid delivery notes.'
+                'The delivery date cannot be earlier than today.'
             );
+        }
+
+        if (!is_string($notesRaw)) {
+            throw new RuntimeException('Invalid delivery notes.');
         }
 
         $notes = trim($notesRaw);
@@ -435,9 +483,6 @@ if (
             );
         }
 
-        // Fail before writing when the server-side QR secret is missing.
-        procurementReceiptSecret();
-
         $pdo->beginTransaction();
 
         $lockPo = $pdo->prepare("
@@ -450,10 +495,7 @@ if (
             AND po_status = 'confirmed'
             FOR UPDATE
         ");
-        $lockPo->execute([
-            $poId,
-            $supplierId,
-        ]);
+        $lockPo->execute([$poId, $supplierId]);
         $lockedPo = $lockPo->fetch(PDO::FETCH_ASSOC);
 
         if (!$lockedPo) {
@@ -481,9 +523,7 @@ if (
             FOR UPDATE
         ");
         $lockItems->execute([$poId]);
-        $lockedItems = $lockItems->fetchAll(
-            PDO::FETCH_ASSOC
-        );
+        $lockedItems = $lockItems->fetchAll(PDO::FETCH_ASSOC);
 
         if (!$lockedItems) {
             throw new RuntimeException(
@@ -493,20 +533,17 @@ if (
 
         $pendingStatement = $pdo->prepare("
             SELECT
-                doi.doi_po_item_id,
-                SUM(doi.doi_quantity) AS pending_quantity
-            FROM delivery_order_items doi
+                delivery_item.doi_po_item_id,
+                SUM(delivery_item.doi_quantity) AS pending_quantity
+            FROM delivery_order_items delivery_item
             JOIN delivery_orders delivery
-                ON delivery.do_id = doi.doi_do_id
+                ON delivery.do_id = delivery_item.doi_do_id
             WHERE delivery.do_po_id = ?
             AND delivery.do_supplier_id = ?
             AND delivery.do_status = 'issued'
-            GROUP BY doi.doi_po_item_id
+            GROUP BY delivery_item.doi_po_item_id
         ");
-        $pendingStatement->execute([
-            $poId,
-            $supplierId,
-        ]);
+        $pendingStatement->execute([$poId, $supplierId]);
 
         $pendingByPoItem = [];
         foreach (
@@ -519,27 +556,21 @@ if (
         }
 
         $validatedItems = [];
+
         foreach ($lockedItems as $lockedItem) {
             $poItemId = (int) $lockedItem['po_item_id'];
-            $ordered = (int) $lockedItem[
-                'po_item_quantity'
-            ];
+            $ordered = (int) $lockedItem['po_item_quantity'];
             $processed =
-                (int) $lockedItem[
-                    'po_item_received_quantity'
-                ] +
-                (int) $lockedItem[
-                    'po_item_rejected_quantity'
-                ];
+                (int) $lockedItem['po_item_received_quantity'] +
+                (int) $lockedItem['po_item_rejected_quantity'];
             $pending = $pendingByPoItem[$poItemId] ?? 0;
             $available = max(
                 0,
                 $ordered - $processed - $pending
             );
 
-            $rawQuantity = $quantitiesRaw[$poItemId] ?? 0;
             $quantity = filter_var(
-                $rawQuantity,
+                $quantitiesRaw[$poItemId] ?? 0,
                 FILTER_VALIDATE_INT,
                 [
                     'options' => [
@@ -559,9 +590,7 @@ if (
                 $validatedItems[] = [
                     'po_item_id' => $poItemId,
                     'product_id' =>
-                        (int) $lockedItem[
-                            'po_item_product_id'
-                        ],
+                        (int) $lockedItem['po_item_product_id'],
                     'quantity' => (int) $quantity,
                 ];
             }
@@ -569,12 +598,13 @@ if (
 
         if (!$validatedItems) {
             throw new RuntimeException(
-                'Enter at least one quantity to deliver.'
+                'No quantity is available for a new delivery order. Download the existing open delivery order from the history section.'
             );
         }
 
+        // Keep the temporary value within delivery_orders.do_number VARCHAR(20).
         $temporaryNumber =
-            'PENDING-' . bin2hex(random_bytes(8));
+            'TMP-' . bin2hex(random_bytes(6));
         $receiptNonce = procurementReceiptNonce();
 
         $insertDeliveryOrder = $pdo->prepare("
@@ -649,7 +679,7 @@ if (
 
         $_SESSION['supplier_do_success'] =
             $deliveryOrderNumber .
-            ' created. Download the signed delivery order PDF.';
+            ' was created successfully. Use Download PDF in the Delivery Order History below.';
 
         redirect_to(
             app_path('supplier/delivery_order.php') .
@@ -668,26 +698,32 @@ if (
                 $e->getMessage()
             );
             $error =
-                'Unable to create the delivery order.';
+                'Unable to create the delivery order. Please try again.';
         }
     }
 }
 
-$items = loadSupplierPoItems($pdo, $poId);
-$deliveryOrders = loadSupplierDeliveryOrders(
+$items = loadSupplierDeliveryItems($pdo, $poId);
+$deliveryOrders = loadSupplierDeliveryHistory(
     $pdo,
     $poId,
     $supplierId
 );
 $hasAvailableQuantity = false;
+$hasOpenDeliveryOrder = false;
+
+foreach ($deliveryOrders as $deliveryOrder) {
+    if ($deliveryOrder['do_status'] === 'issued') {
+        $hasOpenDeliveryOrder = true;
+        break;
+    }
+}
 
 foreach ($items as &$item) {
     $processed =
         (int) $item['po_item_received_quantity'] +
         (int) $item['po_item_rejected_quantity'];
-    $pending = (int) $item[
-        'pending_delivery_quantity'
-    ];
+    $pending = (int) $item['pending_delivery_quantity'];
     $available = max(
         0,
         (int) $item['po_item_quantity'] -
@@ -714,7 +750,7 @@ unset($item);
     >
     <title>
         Delivery Orders -
-        <?= htmlspecialchars($po['po_number']) ?>
+        <?= htmlspecialchars((string) $po['po_number']) ?>
     </title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
@@ -726,222 +762,144 @@ unset($item);
         <p class="text-sm text-gray-400 mb-6">
             <a
                 href="purchase_orders.php"
-                class="hover:text-blue-600 transition-colors"
-            >
-                Purchase Orders
-            </a>
+                class="hover:text-blue-600"
+            >Purchase Orders</a>
             <span class="mx-2">›</span>
             <span class="text-gray-600">
                 Delivery Orders —
-                <?= htmlspecialchars($po['po_number']) ?>
+                <?= htmlspecialchars((string) $po['po_number']) ?>
             </span>
         </p>
 
         <div class="mb-6">
             <h1 class="text-2xl font-black text-gray-800">
-                🚚 Delivery Orders
+                Delivery Orders
             </h1>
             <p class="text-gray-500 text-sm mt-1">
-                Declare each shipment separately. Quantities already
-                delivered or reserved by another open delivery order
-                cannot be shipped again.
+                Create one delivery order for each physical shipment.
+                An issued delivery order reserves its declared quantities
+                until the receipt is completed.
             </p>
         </div>
 
         <?php if ($success !== ''): ?>
-            <div
-                class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-6"
-            >
-                ✅ <?= htmlspecialchars($success) ?>
+            <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-6">
+                <?= htmlspecialchars($success) ?>
             </div>
         <?php endif; ?>
 
         <?php if ($error !== ''): ?>
-            <div
-                class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-6"
-            >
+            <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-6">
                 <?= htmlspecialchars($error) ?>
             </div>
         <?php endif; ?>
 
-        <div
-            class="bg-white rounded-2xl shadow-sm overflow-hidden mb-6"
-        >
-            <div class="px-6 py-4 border-b border-gray-100">
-                <h2 class="font-bold text-gray-800">
-                    Shipment Progress
-                </h2>
+        <?php if ($hasOpenDeliveryOrder): ?>
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+                <p class="font-semibold text-amber-800 text-sm">
+                    An issued delivery order is still awaiting receipt.
+                </p>
+                <p class="text-xs text-amber-700 mt-1">
+                    Its quantities cannot be placed on another delivery
+                    order. Download the existing document below instead
+                    of creating a duplicate.
+                </p>
             </div>
-            <table class="w-full">
-                <thead>
-                    <tr class="bg-gray-50">
-                        <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
-                            Product
-                        </th>
-                        <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                            Ordered
-                        </th>
-                        <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                            Processed
-                        </th>
-                        <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                            Pending DO
-                        </th>
-                        <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                            Available
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($items as $item): ?>
-                        <tr class="border-t border-gray-50">
-                            <td class="px-4 py-3 text-sm text-gray-700">
-                                <?= htmlspecialchars(
-                                    $item['product_title']
-                                ) ?>
-                                <?php if (
-                                    $item[
-                                        'product_volume_number'
-                                    ] !== null
-                                ): ?>
-                                    <span class="text-gray-400">
-                                        (Vol.<?= (int) $item[
-                                            'product_volume_number'
-                                        ] ?>)
-                                    </span>
-                                <?php endif; ?>
-                            </td>
-                            <td class="px-4 py-3 text-center text-sm">
-                                <?= (int) $item[
-                                    'po_item_quantity'
-                                ] ?>
-                            </td>
-                            <td class="px-4 py-3 text-center text-sm text-green-700">
-                                <?= (int) $item[
-                                    'processed_quantity'
-                                ] ?>
-                            </td>
-                            <td class="px-4 py-3 text-center text-sm text-amber-700">
-                                <?= (int) $item[
-                                    'pending_delivery_quantity'
-                                ] ?>
-                            </td>
-                            <td class="px-4 py-3 text-center text-sm font-bold text-blue-700">
-                                <?= (int) $item[
-                                    'available_delivery_quantity'
-                                ] ?>
-                            </td>
+        <?php endif; ?>
+
+        <div class="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
+            <div class="px-6 py-4 border-b border-gray-100">
+                <h2 class="font-bold text-gray-800">Shipment Progress</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Product</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Ordered</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Processed</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Open DO</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Available</th>
                         </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($items as $item): ?>
+                            <tr class="border-t border-gray-50">
+                                <td class="px-4 py-3 text-sm text-gray-700">
+                                    <?= htmlspecialchars((string) $item['product_title']) ?>
+                                    <?php if ($item['product_volume_number'] !== null): ?>
+                                        <span class="text-gray-400">
+                                            (Vol.<?= (int) $item['product_volume_number'] ?>)
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="px-4 py-3 text-center text-sm"><?= (int) $item['po_item_quantity'] ?></td>
+                                <td class="px-4 py-3 text-center text-sm text-green-700"><?= (int) $item['processed_quantity'] ?></td>
+                                <td class="px-4 py-3 text-center text-sm text-amber-700"><?= (int) $item['pending_delivery_quantity'] ?></td>
+                                <td class="px-4 py-3 text-center text-sm font-bold text-blue-700"><?= (int) $item['available_delivery_quantity'] ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <?php if ($deliveryOrders): ?>
-            <div
-                class="bg-white rounded-2xl shadow-sm overflow-hidden mb-6"
-            >
+            <div class="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
                 <div class="px-6 py-4 border-b border-gray-100">
                     <h2 class="font-bold text-gray-800">
                         Delivery Order History
                     </h2>
                 </div>
-                <table class="w-full">
-                    <thead>
-                        <tr class="bg-gray-50">
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
-                                DO Number
-                            </th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                                Quantity
-                            </th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                                Status
-                            </th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
-                                Receipt
-                            </th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                                Action
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach (
-                            $deliveryOrders as $deliveryOrder
-                        ): ?>
-                            <tr class="border-t border-gray-50">
-                                <td class="px-4 py-3">
-                                    <p class="font-semibold text-sm text-gray-800">
-                                        <?= htmlspecialchars(
-                                            $deliveryOrder[
-                                                'do_number'
-                                            ]
-                                        ) ?>
-                                    </p>
-                                    <p class="text-xs text-gray-400">
-                                        <?= date(
-                                            'd M Y',
-                                            strtotime(
-                                                $deliveryOrder[
-                                                    'do_delivery_date'
-                                                ]
-                                            )
-                                        ) ?>
-                                    </p>
-                                </td>
-                                <td class="px-4 py-3 text-center text-sm">
-                                    <?= (int) $deliveryOrder[
-                                        'total_quantity'
-                                    ] ?>
-                                </td>
-                                <td class="px-4 py-3 text-center">
-                                    <span
-                                        class="inline-flex rounded-full px-3 py-1 text-xs font-semibold <?= $deliveryOrder['do_status'] === 'received' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700' ?>"
-                                    >
-                                        <?= $deliveryOrder[
-                                            'do_status'
-                                        ] === 'received'
-                                            ? 'Received'
-                                            : 'Awaiting Receipt' ?>
-                                    </span>
-                                </td>
-                                <td class="px-4 py-3 text-sm text-gray-500">
-                                    <?php if (
-                                        $deliveryOrder[
-                                            'gr_number'
-                                        ]
-                                    ): ?>
-                                        <?= htmlspecialchars(
-                                            $deliveryOrder[
-                                                'gr_number'
-                                            ]
-                                        ) ?>
-                                        <p class="text-xs text-gray-400">
-                                            <?= htmlspecialchars(
-                                                (string) (
-                                                    $deliveryOrder[
-                                                        'received_by_name'
-                                                    ] ?: 'Admin'
-                                                )
-                                            ) ?>
-                                        </p>
-                                    <?php else: ?>
-                                        —
-                                    <?php endif; ?>
-                                </td>
-                                <td class="px-4 py-3 text-center">
-                                    <a
-                                        href="?po_id=<?= $poId ?>&download_pdf=<?= (int) $deliveryOrder['do_id'] ?>"
-                                        class="text-xs font-semibold text-blue-600 hover:underline"
-                                    >
-                                        Download PDF
-                                    </a>
-                                </td>
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="bg-gray-50">
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">DO Number</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Quantity</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Receipt</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Document</th>
                             </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($deliveryOrders as $deliveryOrder): ?>
+                                <tr class="border-t border-gray-50">
+                                    <td class="px-4 py-3">
+                                        <p class="font-semibold text-sm text-gray-800">
+                                            <?= htmlspecialchars((string) $deliveryOrder['do_number']) ?>
+                                        </p>
+                                        <p class="text-xs text-gray-400">
+                                            <?= date('d M Y', strtotime((string) $deliveryOrder['do_delivery_date'])) ?>
+                                        </p>
+                                    </td>
+                                    <td class="px-4 py-3 text-center text-sm"><?= (int) $deliveryOrder['total_quantity'] ?></td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="inline-flex rounded-full px-3 py-1 text-xs font-semibold <?= $deliveryOrder['do_status'] === 'received' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700' ?>">
+                                            <?= $deliveryOrder['do_status'] === 'received' ? 'Received' : 'Awaiting Receipt' ?>
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-500">
+                                        <?php if ($deliveryOrder['gr_number']): ?>
+                                            <?= htmlspecialchars((string) $deliveryOrder['gr_number']) ?>
+                                            <p class="text-xs text-gray-400">
+                                                <?= htmlspecialchars((string) ($deliveryOrder['received_by_name'] ?: 'Admin')) ?>
+                                            </p>
+                                        <?php else: ?>
+                                            Not received
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <a
+                                            href="?po_id=<?= $poId ?>&download_pdf=<?= (int) $deliveryOrder['do_id'] ?>"
+                                            class="text-xs font-semibold text-blue-600 hover:underline"
+                                        >Download PDF</a>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         <?php endif; ?>
 
@@ -951,76 +909,61 @@ unset($item);
         ): ?>
             <form method="POST">
                 <?php csrf_field(); ?>
-                <input
-                    type="hidden"
-                    name="create_do"
-                    value="1"
-                >
+                <input type="hidden" name="create_do" value="1">
 
-                <div
-                    class="bg-white rounded-2xl shadow-sm p-6 mb-6"
-                >
+                <div class="bg-white rounded-2xl shadow-sm p-6 mb-6">
                     <h2 class="font-bold text-gray-800 mb-4">
                         Create Next Shipment
                     </h2>
 
                     <div class="mb-5">
-                        <label
-                            class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide"
-                        >
+                        <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
                             Delivery Date *
                         </label>
                         <input
                             type="date"
                             name="delivery_date"
                             required
+                            min="<?= date('Y-m-d') ?>"
                             value="<?= date('Y-m-d') ?>"
                             class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-blue-400"
                         >
                     </div>
 
-                    <table class="w-full mb-5">
-                        <thead>
-                            <tr class="bg-gray-50">
-                                <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">
-                                    Product
-                                </th>
-                                <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">
-                                    Available
-                                </th>
-                                <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">
-                                    Delivering Now
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($items as $item): ?>
-                                <tr class="border-t border-gray-50">
-                                    <td class="px-3 py-3 text-sm text-gray-700">
-                                        <?= htmlspecialchars(
-                                            $item['product_title']
-                                        ) ?>
-                                    </td>
-                                    <td class="px-3 py-3 text-center text-sm text-gray-500">
-                                        <?= (int) $item[
-                                            'available_delivery_quantity'
-                                        ] ?>
-                                    </td>
-                                    <td class="px-3 py-3 text-center">
-                                        <input
-                                            type="number"
-                                            name="delivery_qty[<?= (int) $item['po_item_id'] ?>]"
-                                            value="0"
-                                            min="0"
-                                            max="<?= (int) $item['available_delivery_quantity'] ?>"
-                                            <?= (int) $item['available_delivery_quantity'] === 0 ? 'disabled' : '' ?>
-                                            class="w-24 px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm text-center focus:outline-none focus:border-blue-400 disabled:bg-gray-100"
-                                        >
-                                    </td>
+                    <div class="overflow-x-auto mb-5">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Product</th>
+                                    <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Available</th>
+                                    <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Delivering Now</th>
                                 </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($items as $item): ?>
+                                    <tr class="border-t border-gray-50">
+                                        <td class="px-3 py-3 text-sm text-gray-700">
+                                            <?= htmlspecialchars((string) $item['product_title']) ?>
+                                        </td>
+                                        <td class="px-3 py-3 text-center text-sm text-gray-500">
+                                            <?= (int) $item['available_delivery_quantity'] ?>
+                                        </td>
+                                        <td class="px-3 py-3 text-center">
+                                            <input
+                                                type="number"
+                                                name="delivery_qty[<?= (int) $item['po_item_id'] ?>]"
+                                                value="0"
+                                                min="0"
+                                                max="<?= (int) $item['available_delivery_quantity'] ?>"
+                                                <?= (int) $item['available_delivery_quantity'] === 0 ? 'disabled' : '' ?>
+                                                class="w-24 px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm text-center focus:outline-none focus:border-blue-400 disabled:bg-gray-100"
+                                            >
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
 
                     <textarea
                         name="notes"
@@ -1033,26 +976,26 @@ unset($item);
 
                 <button
                     type="submit"
-                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl text-sm"
                 >
-                    Generate Secure Delivery Order
+                    Create Delivery Order
                 </button>
             </form>
         <?php elseif ($po['po_status'] === 'completed'): ?>
-            <div
-                class="bg-green-50 border border-green-200 rounded-xl p-5"
-            >
+            <div class="bg-green-50 border border-green-200 rounded-xl p-5">
                 <p class="font-semibold text-green-700">
-                    ✅ This purchase order has been completed.
+                    This purchase order has been completed.
                 </p>
             </div>
         <?php else: ?>
-            <div
-                class="bg-blue-50 border border-blue-200 rounded-xl p-5"
-            >
+            <div class="bg-blue-50 border border-blue-200 rounded-xl p-5">
                 <p class="font-semibold text-blue-700">
-                    All remaining quantities are already covered by
-                    delivery orders or have been processed.
+                    No quantity is available for a new delivery order.
+                </p>
+                <p class="text-xs text-blue-600 mt-1">
+                    Existing issued delivery orders already reserve the
+                    remaining quantity, or all quantities have been
+                    processed.
                 </p>
             </div>
         <?php endif; ?>
