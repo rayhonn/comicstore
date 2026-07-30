@@ -1467,10 +1467,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                         id="dobInput"
                                         type="date"
                                         name="user_dob"
-                                        max="<?= date(
-                                            'Y-m-d',
-                                            strtotime('-13 years')
-                                        ) ?>"
+                                        
                                         autocomplete="bday"
                                         class="form-input"
                                         required
