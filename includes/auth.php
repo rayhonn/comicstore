@@ -13,7 +13,6 @@ start_secure_session();
  * require_customer();
  */
 
-
 function app_base_path(): string
 {
     if (!defined('APP_URL')) {
@@ -131,6 +130,7 @@ function safe_redirect_target(string $target, string $default): string
         'admin/index.php',
         'admin/dashboard.php',
         'admin/goods_received.php',
+        'admin/delivery_receipt.php',
 
         'staff/index.php',
         'staff/dashboard.php',
@@ -167,6 +167,46 @@ function safe_redirect_target(string $target, string $default): string
         }
 
         return app_path($path) . '?po_id=' . $poId;
+    }
+
+    /*
+     * Preserve only the strictly validated parameters required by a
+     * signed delivery receipt QR after an administrator logs in.
+     */
+    if ($path === 'admin/delivery_receipt.php') {
+        $query = parse_url($target, PHP_URL_QUERY);
+
+        if (!is_string($query)) {
+            return $default;
+        }
+
+        parse_str($query, $queryParameters);
+
+        $deliveryOrderId = filter_var(
+            $queryParameters['do'] ?? null,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]]
+        );
+        $nonce = strtolower(trim(
+            (string) ($queryParameters['nonce'] ?? '')
+        ));
+        $signature = strtolower(trim(
+            (string) ($queryParameters['sig'] ?? '')
+        ));
+
+        if (
+            $deliveryOrderId === false ||
+            !preg_match('/\A[a-f0-9]{32}\z/', $nonce) ||
+            !preg_match('/\A[a-f0-9]{64}\z/', $signature)
+        ) {
+            return $default;
+        }
+
+        return app_path($path) . '?' . http_build_query([
+            'do' => (int) $deliveryOrderId,
+            'nonce' => $nonce,
+            'sig' => $signature,
+        ]);
     }
 
     return app_path($path);
@@ -286,8 +326,7 @@ function destroy_session(): void
     $_SESSION = [];
 
     if (ini_get('session.use_cookies')) {
-        $parameters =
-            app_session_cookie_parameters();
+        $parameters = app_session_cookie_parameters();
 
         setcookie(
             session_name(),
