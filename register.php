@@ -1142,6 +1142,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 transition-duration: 0.001ms !important;
             }
         }
+
+        @keyframes authPageEnter {
+            from {
+                opacity: 0;
+                transform: translateY(10px) scale(0.995);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        body {
+            animation: authPageEnter 0.28s ease-out both;
+        }
+
+        body.auth-page-leaving {
+            opacity: 0;
+            transform: translateY(-8px) scale(0.995);
+            transition:
+                opacity 0.2s ease,
+                transform 0.2s ease;
+            pointer-events: none;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            body,
+            body.auth-page-leaving {
+                opacity: 1;
+                transform: none;
+                animation: none;
+                transition: none;
+            }
+        }
     </style>
 </head>
 
