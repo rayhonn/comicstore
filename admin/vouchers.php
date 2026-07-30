@@ -90,6 +90,140 @@ function normalizeVoucherType(mixed $value): string
     return $value;
 }
 
+
+function normalizeVoucherPurpose(mixed $value): string
+{
+    if (
+        !is_string($value) ||
+        !in_array(
+            $value,
+            [
+                'general',
+                'points',
+                'birthday_template',
+            ],
+            true
+        )
+    ) {
+        throw new InvalidArgumentException(
+            'Please select a valid voucher purpose.'
+        );
+    }
+
+    return $value;
+}
+
+function normalizeVoucherPointsRequired(
+    string $purpose,
+    mixed $value
+): int {
+    if ($purpose !== 'points') {
+        return 0;
+    }
+
+    $pointsRequired = filter_var(
+        $value,
+        FILTER_VALIDATE_INT,
+        [
+            'options' => [
+                'min_range' => 1,
+                'max_range' => 2147483647,
+            ],
+        ]
+    );
+
+    if ($pointsRequired === false) {
+        throw new InvalidArgumentException(
+            'Points required must be a positive whole number.'
+        );
+    }
+
+    return (int) $pointsRequired;
+}
+
+function voucherPurposeFromRow(array $voucher): string
+{
+    if (
+        (int) (
+            $voucher[
+                'voucher_is_birthday_template'
+            ] ?? 0
+        ) === 1
+    ) {
+        return 'birthday_template';
+    }
+
+    if (
+        (int) (
+            $voucher[
+                'voucher_is_points_redeem'
+            ] ?? 0
+        ) === 1
+    ) {
+        return 'points';
+    }
+
+    return 'general';
+}
+
+function voucherHasProtectedReferences(
+    PDO $pdo,
+    int $voucherId
+): bool {
+    $statement = $pdo->prepare("
+        SELECT
+            (
+                v.voucher_used_count > 0
+                OR EXISTS (
+                    SELECT 1
+                    FROM user_vouchers uv
+                    WHERE uv.uv_voucher_id = v.voucher_id
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM voucher_usage vu
+                    WHERE vu.usage_voucher_id = v.voucher_id
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM payment_drafts pd
+                    WHERE pd.payment_draft_voucher_id =
+                        v.voucher_id
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM vouchers child
+                    WHERE child.voucher_template_id =
+                        v.voucher_id
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM tier_config tc
+                    WHERE tc.tier_birthday_voucher_id =
+                        v.voucher_id
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM birthday_reward_awards bra
+                    WHERE
+                        bra.birthday_award_template_voucher_id =
+                            v.voucher_id
+                        OR
+                        bra.birthday_award_generated_voucher_id =
+                            v.voucher_id
+                )
+            ) AS has_references
+        FROM vouchers v
+        WHERE v.voucher_id = ?
+        LIMIT 1
+    ");
+    $statement->execute([
+        $voucherId,
+    ]);
+
+    return (int) $statement->fetchColumn() === 1;
+}
+
 function normalizeVoucherAmounts(
     array $input,
     string $type
@@ -268,6 +402,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_POST['voucher_id'] ?? null
             );
 
+            $pdo->beginTransaction();
+
             $voucherStatement = $pdo->prepare("
                 SELECT
                     voucher_id,
@@ -277,6 +413,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 WHERE voucher_id = ?
                 AND voucher_is_system_generated = 0
                 LIMIT 1
+                FOR UPDATE
             ");
             $voucherStatement->execute([
                 $voucherId,
@@ -291,9 +428,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
             }
 
-            $pdo->beginTransaction();
-
             if ($action === 'delete') {
+                if (
+                    voucherHasProtectedReferences(
+                        $pdo,
+                        $voucherId
+                    )
+                ) {
+                    throw new InvalidArgumentException(
+                        'This voucher has assignments, usage history or system references. Disable it instead of deleting it.'
+                    );
+                }
+
                 clearTierBirthdayVoucherReferences(
                     $pdo,
                     $voucherId
@@ -356,7 +502,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
         } else {
             $voucherId = null;
-            $isPointsVoucher = false;
+            $existingVoucher = null;
+            $existingPurpose = null;
+            $protectedUsageCount = 0;
+
+            $pdo->beginTransaction();
 
             if ($action === 'edit') {
                 $voucherId = requireVoucherId(
@@ -366,11 +516,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $existingStatement = $pdo->prepare("
                     SELECT
                         voucher_id,
-                        voucher_is_points_redeem
+                        voucher_is_points_redeem,
+                        voucher_is_birthday_template,
+                        voucher_used_count
                     FROM vouchers
                     WHERE voucher_id = ?
                     AND voucher_is_system_generated = 0
                     LIMIT 1
+                    FOR UPDATE
                 ");
                 $existingStatement->execute([
                     $voucherId,
@@ -386,14 +539,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                 }
 
-                $isPointsVoucher =
-                    (int) $existingVoucher[
-                        'voucher_is_points_redeem'
-                    ] === 1;
+                $existingPurpose =
+                    voucherPurposeFromRow(
+                        $existingVoucher
+                    );
+
+                $usageCountStatement =
+                    $pdo->prepare("
+                        SELECT COUNT(*)
+                        FROM voucher_usage
+                        WHERE usage_voucher_id = ?
+                    ");
+                $usageCountStatement->execute([
+                    $voucherId,
+                ]);
+
+                $protectedUsageCount = max(
+                    (int) (
+                        $existingVoucher[
+                            'voucher_used_count'
+                        ] ?? 0
+                    ),
+                    (int) $usageCountStatement
+                        ->fetchColumn()
+                );
             }
 
             $code = normalizeVoucherCode(
                 $_POST['voucher_code'] ?? null
+            );
+            $purpose = normalizeVoucherPurpose(
+                $_POST['voucher_purpose'] ?? null
             );
             $type = normalizeVoucherType(
                 $_POST['voucher_type'] ?? null
@@ -407,12 +583,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $type
             );
 
+            $pointsRequired =
+                normalizeVoucherPointsRequired(
+                    $purpose,
+                    $_POST[
+                        'voucher_points_required'
+                    ] ?? null
+                );
+
             $usageLimit =
                 normalizeVoucherUsageLimit(
                     $_POST[
                         'voucher_usage_limit'
                     ] ?? null
                 );
+
+            if ($purpose === 'birthday_template') {
+                $usageLimit = null;
+            }
+
+            if (
+                $usageLimit !== null &&
+                $usageLimit < $protectedUsageCount
+            ) {
+                throw new InvalidArgumentException(
+                    'Usage limit cannot be lower than the voucher usage already recorded.'
+                );
+            }
+
             $startDate = normalizeVoucherDate(
                 $_POST['voucher_start_date'] ?? null,
                 'start date'
@@ -424,13 +622,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $isActive = isset(
                 $_POST['voucher_is_active']
             ) ? 1 : 0;
+
+            $isPointsVoucher =
+                $purpose === 'points' ? 1 : 0;
             $isBirthdayTemplate =
-                !$isPointsVoucher &&
-                isset(
-                    $_POST[
-                        'voucher_is_birthday_template'
-                    ]
-                )
+                $purpose === 'birthday_template'
                     ? 1
                     : 0;
 
@@ -442,6 +638,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ) {
                 throw new InvalidArgumentException(
                     'End date cannot be earlier than start date.'
+                );
+            }
+
+            if (
+                $voucherId !== null &&
+                $existingPurpose !== null &&
+                $purpose !== $existingPurpose &&
+                voucherHasProtectedReferences(
+                    $pdo,
+                    $voucherId
+                )
+            ) {
+                throw new InvalidArgumentException(
+                    'Voucher purpose cannot be changed after assignment, use or system reference. Disable it and create a new voucher instead.'
                 );
             }
 
@@ -471,8 +681,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
             }
 
-            $pdo->beginTransaction();
-
             if ($action === 'add') {
                 $insertStatement = $pdo->prepare("
                     INSERT INTO vouchers (
@@ -485,9 +693,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         voucher_start_date,
                         voucher_end_date,
                         voucher_is_active,
+                        voucher_points_required,
+                        voucher_is_points_redeem,
                         voucher_is_birthday_template
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?
+                    )
                 ");
                 $insertStatement->execute([
                     $code,
@@ -499,6 +712,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $startDate,
                     $endDate,
                     $isActive,
+                    $pointsRequired,
+                    $isPointsVoucher,
                     $isBirthdayTemplate,
                 ]);
 
@@ -515,6 +730,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         voucher_start_date = ?,
                         voucher_end_date = ?,
                         voucher_is_active = ?,
+                        voucher_points_required = ?,
+                        voucher_is_points_redeem = ?,
                         voucher_is_birthday_template = ?
                     WHERE voucher_id = ?
                     AND voucher_is_system_generated = 0
@@ -529,6 +746,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $startDate,
                     $endDate,
                     $isActive,
+                    $pointsRequired,
+                    $isPointsVoucher,
                     $isBirthdayTemplate,
                     $voucherId,
                 ]);
@@ -578,7 +797,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $vouchers = $pdo->query("
     SELECT
         v.*,
-        COUNT(vu.usage_id) AS actual_usage
+        GREATEST(
+            COALESCE(v.voucher_used_count, 0),
+            COUNT(vu.usage_id)
+        ) AS actual_usage
     FROM vouchers v
     LEFT JOIN voucher_usage vu
         ON v.voucher_id = vu.usage_voucher_id
@@ -837,11 +1059,23 @@ $vouchers = $pdo->query("
                                     <?php elseif (
                                         $isPointsVoucher
                                     ): ?>
-                                        <span
-                                            class="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700"
-                                        >
-                                            ⭐ Points Redeem
-                                        </span>
+                                        <div>
+                                            <span
+                                                class="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700"
+                                            >
+                                                ⭐ Points Redeem
+                                            </span>
+                                            <p
+                                                class="mt-1 text-xs text-gray-400"
+                                            >
+                                                <?= number_format(
+                                                    (int) $voucher[
+                                                        'voucher_points_required'
+                                                    ]
+                                                ) ?>
+                                                points
+                                            </p>
+                                        </div>
                                     <?php else: ?>
                                         <span
                                             class="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700"
@@ -1140,6 +1374,80 @@ $vouchers = $pdo->query("
                     >
                 </div>
 
+
+                <div>
+                    <label
+                        class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500"
+                    >
+                        Voucher Purpose *
+                    </label>
+
+                    <select
+                        name="voucher_purpose"
+                        id="formPurpose"
+                        required
+                        onchange="togglePurposeFields()"
+                        class="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm focus:border-red-400 focus:bg-white focus:outline-none"
+                    >
+                        <option value="general">
+                            General Promotion
+                        </option>
+                        <option value="points">
+                            Points Redeem
+                        </option>
+                        <option value="birthday_template">
+                            Birthday Voucher Template
+                        </option>
+                    </select>
+
+                    <p
+                        id="purposeHelp"
+                        class="mt-1.5 text-xs leading-5 text-gray-400"
+                    ></p>
+                </div>
+
+                <div
+                    id="pointsRequiredDiv"
+                    class="hidden rounded-xl border border-amber-100 bg-amber-50 p-4"
+                >
+                    <label
+                        class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-amber-700"
+                    >
+                        Points Required *
+                    </label>
+
+                    <input
+                        type="number"
+                        name="voucher_points_required"
+                        id="formPointsRequired"
+                        min="1"
+                        max="2147483647"
+                        step="1"
+                        placeholder="e.g. 100"
+                        class="w-full rounded-xl border-2 border-amber-100 bg-white px-4 py-3 text-sm focus:border-amber-400 focus:outline-none"
+                    >
+
+                    <p class="mt-1.5 text-xs leading-5 text-amber-700">
+                        Customers must redeem this voucher with
+                        points before using it at checkout.
+                    </p>
+                </div>
+
+                <div
+                    id="birthdayPurposeInfo"
+                    class="hidden rounded-xl border border-pink-100 bg-pink-50 p-4"
+                >
+                    <p class="text-sm font-semibold text-gray-700">
+                        Birthday Voucher Template
+                    </p>
+                    <p class="mt-1 text-xs leading-5 text-gray-500">
+                        This voucher only appears in the Tier
+                        Management birthday voucher dropdown. The
+                        system creates a private one-use voucher for
+                        each eligible customer.
+                    </p>
+                </div>
+
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label
@@ -1275,33 +1583,6 @@ $vouchers = $pdo->query("
                 </div>
 
                 <label
-                    id="birthdayTemplateLabel"
-                    class="flex cursor-pointer items-start gap-3 rounded-xl border border-pink-100 bg-pink-50 p-4"
-                >
-                    <input
-                        type="checkbox"
-                        name="voucher_is_birthday_template"
-                        id="formBirthdayTemplate"
-                        class="mt-0.5 h-4 w-4 accent-pink-600"
-                    >
-
-                    <span>
-                        <span
-                            class="block text-sm font-semibold text-gray-700"
-                        >
-                            Birthday Voucher Template
-                        </span>
-
-                        <span
-                            class="mt-1 block text-xs leading-5 text-gray-500"
-                        >
-                            Only vouchers marked here appear in the
-                            Tier Management birthday voucher dropdown.
-                        </span>
-                    </span>
-                </label>
-
-                <label
                     class="flex cursor-pointer items-center gap-3"
                 >
                     <input
@@ -1344,13 +1625,29 @@ $vouchers = $pdo->query("
             document.getElementById(
                 'voucherModal'
             );
-        const birthdayTemplateLabel =
+        const purposeInput =
             document.getElementById(
-                'birthdayTemplateLabel'
+                'formPurpose'
             );
-        const birthdayTemplateInput =
+        const purposeHelp =
             document.getElementById(
-                'formBirthdayTemplate'
+                'purposeHelp'
+            );
+        const pointsRequiredDiv =
+            document.getElementById(
+                'pointsRequiredDiv'
+            );
+        const pointsRequiredInput =
+            document.getElementById(
+                'formPointsRequired'
+            );
+        const birthdayPurposeInfo =
+            document.getElementById(
+                'birthdayPurposeInfo'
+            );
+        const usageLimitInput =
+            document.getElementById(
+                'formUsageLimit'
             );
 
         function resetVoucherForm() {
@@ -1372,12 +1669,11 @@ $vouchers = $pdo->query("
             document.getElementById(
                 'formActive'
             ).checked = true;
-            birthdayTemplateInput.checked = false;
-            birthdayTemplateInput.disabled = false;
-            birthdayTemplateLabel.classList.remove(
-                'hidden'
-            );
+            purposeInput.value = 'general';
+            pointsRequiredInput.value = '';
+            usageLimitInput.disabled = false;
             toggleMaxDiscount();
+            togglePurposeFields();
         }
 
         function openAddModal() {
@@ -1446,26 +1742,68 @@ $vouchers = $pdo->query("
                     voucher.voucher_is_active
                 ) === 1;
 
+            const isBirthdayTemplate =
+                Number(
+                    voucher.voucher_is_birthday_template
+                ) === 1;
             const isPointsVoucher =
                 Number(
                     voucher.voucher_is_points_redeem
                 ) === 1;
 
-            birthdayTemplateInput.checked =
-                !isPointsVoucher &&
-                Number(
-                    voucher.voucher_is_birthday_template
-                ) === 1;
-            birthdayTemplateInput.disabled =
-                isPointsVoucher;
-
-            birthdayTemplateLabel.classList.toggle(
-                'hidden',
+            purposeInput.value =
+                isBirthdayTemplate
+                    ? 'birthday_template'
+                    : (
+                        isPointsVoucher
+                            ? 'points'
+                            : 'general'
+                    );
+            pointsRequiredInput.value =
                 isPointsVoucher
-            );
+                    ? (
+                        voucher.voucher_points_required ||
+                        ''
+                    )
+                    : '';
 
             toggleMaxDiscount();
+            togglePurposeFields();
             voucherModal.classList.add('active');
+        }
+
+        function togglePurposeFields() {
+            const purpose = purposeInput.value;
+            const isPoints =
+                purpose === 'points';
+            const isBirthday =
+                purpose === 'birthday_template';
+
+            pointsRequiredDiv.classList.toggle(
+                'hidden',
+                !isPoints
+            );
+            pointsRequiredInput.required = isPoints;
+            pointsRequiredInput.disabled = !isPoints;
+
+            birthdayPurposeInfo.classList.toggle(
+                'hidden',
+                !isBirthday
+            );
+
+            usageLimitInput.disabled = isBirthday;
+
+            if (isBirthday) {
+                usageLimitInput.value = '';
+                purposeHelp.textContent =
+                    'Used only as a reusable template for automatic birthday rewards.';
+            } else if (isPoints) {
+                purposeHelp.textContent =
+                    'Customers exchange points to claim this voucher before checkout.';
+            } else {
+                purposeHelp.textContent =
+                    'A standard promotion code managed by the voucher system.';
+            }
         }
 
         function closeModal() {
