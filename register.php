@@ -298,227 +298,1572 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - MangaVault</title>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <title>Create Account - MangaVault</title>
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        :root {
+            color-scheme: light;
+            --paper: #f2eee6;
+            --paper-deep: #e7dfd2;
+            --ink: #172033;
+            --muted: #6f7480;
+            --red: #cf2f38;
+            --red-dark: #8f1f28;
+            --gold: #b78a3a;
+            --line: rgba(23, 32, 51, 0.13);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            min-height: 100%;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            min-height: 100svh;
+            color: var(--ink);
+            background:
+                linear-gradient(
+                    rgba(23, 32, 51, 0.035) 1px,
+                    transparent 1px
+                ),
+                linear-gradient(
+                    90deg,
+                    rgba(23, 32, 51, 0.035) 1px,
+                    transparent 1px
+                ),
+                radial-gradient(
+                    circle at 8% 5%,
+                    rgba(207, 47, 56, 0.12),
+                    transparent 23rem
+                ),
+                radial-gradient(
+                    circle at 95% 92%,
+                    rgba(183, 138, 58, 0.12),
+                    transparent 25rem
+                ),
+                var(--paper);
+            background-size:
+                28px 28px,
+                28px 28px,
+                auto,
+                auto,
+                auto;
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        .registration-shell {
+            position: relative;
+            width: min(1380px, calc(100% - 2rem));
+            min-height: 100vh;
+            min-height: 100svh;
+            margin: 0 auto;
+            /* padding: 1rem 0; */
+            display: grid;
+            place-items: center;
+        }
+
+        .registration-card {
+            position: relative;
+            width: 100%;
+            min-height: min(780px, calc(100svh - 2rem));
+            display: grid;
+            grid-template-columns:
+                minmax(310px, 0.72fr)
+                minmax(620px, 1.28fr);
+            overflow: hidden;
+            border: 1px solid rgba(23, 32, 51, 0.15);
+            border-radius: 30px;
+            background: rgba(255, 253, 248, 0.9);
+            box-shadow:
+                0 36px 90px rgba(23, 32, 51, 0.16),
+                inset 0 1px 0 rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(14px);
+        }
+
+        .identity-panel {
+            position: relative;
+            overflow: hidden;
+            padding: clamp(2rem, 4vw, 3.6rem);
+            color: white;
+            background:
+                linear-gradient(
+                    152deg,
+                    #30151b 0%,
+                    #7a2028 48%,
+                    #161d2c 100%
+                );
+        }
+
+        .identity-panel::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            opacity: 0.13;
+            background:
+                repeating-linear-gradient(
+                    -24deg,
+                    rgba(255, 255, 255, 0.22) 0 1px,
+                    transparent 1px 13px
+                );
+        }
+
+        .identity-panel::after {
+            content: "MEMBER";
+            position: absolute;
+            right: -1.6rem;
+            bottom: -1.8rem;
+            color: rgba(255, 255, 255, 0.06);
+            font-size: clamp(5rem, 11vw, 10rem);
+            font-weight: 1000;
+            letter-spacing: -0.08em;
+            transform: rotate(-90deg);
+            transform-origin: right bottom;
+            pointer-events: none;
+        }
+
+        .identity-content {
+            position: relative;
+            z-index: 2;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .wordmark {
+            width: fit-content;
+            color: white;
+            font-size: 1.05rem;
+            font-weight: 1000;
+            letter-spacing: 0.12em;
+        }
+
+        .wordmark span {
+            color: #ff646c;
+        }
+
+        .dossier-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.55rem;
+            width: fit-content;
+            margin-top: clamp(2.2rem, 6vh, 4.6rem);
+            padding: 0.45rem 0.7rem;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.72);
+            font-size: 0.68rem;
+            font-weight: 900;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        .dossier-label::before {
+            content: "";
+            width: 0.45rem;
+            height: 0.45rem;
+            border-radius: 50%;
+            background: #ff646c;
+            box-shadow:
+                0 0 0 6px rgba(255, 100, 108, 0.1);
+        }
+
+        .identity-title {
+            margin-top: 1.1rem;
+            max-width: 28rem;
+            font-size: clamp(2.5rem, 5vw, 4.7rem);
+            font-weight: 1000;
+            line-height: 0.92;
+            letter-spacing: -0.055em;
+        }
+
+        .identity-title em {
+            color: #ff777e;
+            font-style: normal;
+        }
+
+        .identity-copy {
+            max-width: 27rem;
+            margin-top: 1.3rem;
+            color: rgba(255, 255, 255, 0.62);
+            font-size: 0.88rem;
+            line-height: 1.75;
+        }
+
+        .member-pass {
+            position: relative;
+            width: min(100%, 410px);
+            margin-top: auto;
+            padding: 1.25rem;
+            border: 1px solid rgba(255, 255, 255, 0.17);
+            border-radius: 22px;
+            background:
+                linear-gradient(
+                    145deg,
+                    rgba(255, 255, 255, 0.15),
+                    rgba(255, 255, 255, 0.05)
+                );
+            box-shadow:
+                0 24px 50px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(14px);
+            transform-style: preserve-3d;
+            transition: transform 0.18s ease;
+        }
+
+        .pass-topline {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            color: rgba(255, 255, 255, 0.58);
+            font-size: 0.62rem;
+            font-weight: 900;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        .pass-avatar {
+            width: 3.8rem;
+            height: 3.8rem;
+            margin-top: 1.2rem;
+            display: grid;
+            place-items: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.09);
+            color: rgba(255, 255, 255, 0.78);
+            font-size: 1.2rem;
+            font-weight: 1000;
+        }
+
+        .pass-name {
+            margin-top: 0.85rem;
+            color: white;
+            font-size: 1.1rem;
+            font-weight: 900;
+            letter-spacing: 0.02em;
+        }
+
+        .pass-subline {
+            margin-top: 0.15rem;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.7rem;
+        }
+
+        .pass-code {
+            position: absolute;
+            right: 1.2rem;
+            bottom: 1.15rem;
+            display: grid;
+            grid-template-columns: repeat(5, 4px);
+            gap: 3px;
+            opacity: 0.68;
+        }
+
+        .pass-code span {
+            height: 28px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.8);
+        }
+
+        .pass-code span:nth-child(2),
+        .pass-code span:nth-child(5) {
+            height: 18px;
+            align-self: end;
+        }
+
+        .application-panel {
+            position: relative;
+            padding:
+                clamp(1.4rem, 3vw, 2.5rem)
+                clamp(1.4rem, 4vw, 3.75rem);
+            background:
+                linear-gradient(
+                    180deg,
+                    rgba(255, 253, 248, 0.96),
+                    rgba(250, 247, 240, 0.93)
+                );
+        }
+
+        .application-panel::before {
+            content: "";
+            position: absolute;
+            top: 1.1rem;
+            right: 1.1rem;
+            bottom: 1.1rem;
+            left: 1.1rem;
+            border: 1px dashed rgba(23, 32, 51, 0.1);
+            border-radius: 22px;
+            pointer-events: none;
+        }
+
+        .application-content {
+            position: relative;
+            z-index: 2;
+            width: min(100%, 860px);
+            margin: 0 auto;
+        }
+
+        .application-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1.5rem;
+        }
+
+        .eyebrow {
+            color: var(--red);
+            font-size: 0.68rem;
+            font-weight: 1000;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        .application-title {
+            margin-top: 0.35rem;
+            color: var(--ink);
+            font-size: clamp(1.8rem, 3vw, 2.65rem);
+            font-weight: 1000;
+            line-height: 1;
+            letter-spacing: -0.04em;
+        }
+
+        .application-description {
+            margin-top: 0.65rem;
+            color: var(--muted);
+            font-size: 0.8rem;
+            line-height: 1.55;
+        }
+
+        .approval-stamp {
+            flex: 0 0 auto;
+            width: 5.2rem;
+            height: 5.2rem;
+            display: grid;
+            place-items: center;
+            border: 2px solid rgba(207, 47, 56, 0.6);
+            border-radius: 50%;
+            color: rgba(207, 47, 56, 0.78);
+            font-size: 0.61rem;
+            font-weight: 1000;
+            letter-spacing: 0.1em;
+            line-height: 1.2;
+            text-align: center;
+            text-transform: uppercase;
+            transform: rotate(8deg);
+            animation: stamp-breathe 3.2s ease-in-out infinite;
+        }
+
+        @keyframes stamp-breathe {
+            0%,
+            100% {
+                transform: rotate(8deg) scale(1);
+                opacity: 0.7;
+            }
+            50% {
+                transform: rotate(5deg) scale(1.04);
+                opacity: 0.92;
+            }
+        }
+
+        .notice {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.7rem;
+            margin-top: 1rem;
+            padding: 0.8rem 0.9rem;
+            border-radius: 14px;
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+
+        .notice-error {
+            border: 1px solid rgba(207, 47, 56, 0.18);
+            background: rgba(254, 242, 242, 0.92);
+            color: #a6222b;
+        }
+
+        .notice-success {
+            border: 1px solid rgba(21, 128, 61, 0.18);
+            background: rgba(240, 253, 244, 0.92);
+            color: #15703a;
+        }
+
+        .registration-form {
+            margin-top: 1.2rem;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.85rem 1rem;
+        }
+
+        .field-group {
+            min-width: 0;
+        }
+
+        .field-span-2 {
+            grid-column: span 2;
+        }
+
+        .form-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.4rem;
+            color: #3c4352;
+            font-size: 0.72rem;
+            font-weight: 850;
+            letter-spacing: 0.015em;
+        }
+
+        .field-note {
+            color: #9b6e22;
+            font-size: 0.62rem;
+            font-weight: 800;
+        }
+
+        .field-wrap {
+            position: relative;
+        }
+
+        .field-prefix {
+            position: absolute;
+            z-index: 3;
+            top: 50%;
+            left: 0.85rem;
+            transform: translateY(-50%);
+            color: #9ca0aa;
+            font-size: 0.78rem;
+            font-weight: 1000;
+            pointer-events: none;
+        }
+
+        .form-input {
+            width: 100%;
+            min-height: 2.85rem;
+            border: 1px solid rgba(23, 32, 51, 0.13);
+            border-radius: 13px;
+            background: rgba(255, 255, 255, 0.82);
+            padding: 0.72rem 0.85rem 0.72rem 2.6rem;
+            color: var(--ink);
+            font-size: 0.8rem;
+            outline: none;
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.95);
+            transition:
+                border-color 0.2s ease,
+                box-shadow 0.2s ease,
+                transform 0.2s ease,
+                background 0.2s ease;
+        }
+
+        .form-input::placeholder {
+            color: #a5a8af;
+        }
+
+        .form-input:focus {
+            border-color: rgba(207, 47, 56, 0.58);
+            background: white;
+            box-shadow:
+                0 0 0 4px rgba(207, 47, 56, 0.08),
+                0 10px 24px rgba(23, 32, 51, 0.06);
+            transform: translateY(-1px);
+        }
+
+        input[type="date"].form-input {
+            color-scheme: light;
+        }
+
+        .helper-text {
+            margin-top: 0.3rem;
+            color: #9296a0;
+            font-size: 0.62rem;
+            line-height: 1.35;
+        }
+
+        .password-checks {
+            grid-column: span 2;
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 0.45rem;
+            margin-top: -0.15rem;
+            padding: 0.65rem;
+            border: 1px solid rgba(23, 32, 51, 0.08);
+            border-radius: 13px;
+            background: rgba(255, 255, 255, 0.58);
+        }
+
+        .password-check-item {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            min-width: 0;
+            color: #9ca0aa;
+            font-size: 0.61rem;
+            font-weight: 750;
+            line-height: 1.25;
+        }
+
+        .check-icon {
+            flex: 0 0 auto;
+            width: 1rem;
+            height: 1rem;
+            display: grid;
+            place-items: center;
+            border: 1px solid rgba(23, 32, 51, 0.12);
+            border-radius: 50%;
+            font-size: 0.55rem;
+            font-weight: 1000;
+        }
+
+        .password-check-item.is-valid {
+            color: #15803d;
+        }
+
+        .password-check-item.is-valid .check-icon {
+            border-color: rgba(21, 128, 61, 0.24);
+            background: rgba(220, 252, 231, 0.9);
+        }
+
+        .confirm-message {
+            margin-top: 0.28rem;
+            font-size: 0.63rem;
+            font-weight: 800;
+        }
+
+        .form-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-top: 1.05rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(23, 32, 51, 0.09);
+        }
+
+        .signin-copy {
+            color: #7f8490;
+            font-size: 0.74rem;
+        }
+
+        .signin-link {
+            color: var(--red);
+            font-weight: 900;
+        }
+
+        .submit-button {
+            position: relative;
+            isolation: isolate;
+            min-width: 13rem;
+            min-height: 3rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            overflow: hidden;
+            border: 0;
+            border-radius: 14px;
+            background:
+                linear-gradient(
+                    135deg,
+                    #e1434b 0%,
+                    #c92d36 50%,
+                    #92202a 100%
+                );
+            color: white;
+            font-size: 0.78rem;
+            font-weight: 950;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            box-shadow:
+                0 14px 28px rgba(207, 47, 56, 0.22);
+            transition:
+                transform 0.2s ease,
+                box-shadow 0.2s ease;
+        }
+
+        .submit-button::before {
+            content: "";
+            position: absolute;
+            inset: -30% auto -30% -35%;
+            z-index: -1;
+            width: 24%;
+            transform: skewX(-18deg);
+            background:
+                linear-gradient(
+                    to right,
+                    transparent,
+                    rgba(255, 255, 255, 0.45),
+                    transparent
+                );
+            transition: left 0.55s ease;
+        }
+
+        .submit-button:hover {
+            transform: translateY(-2px);
+            box-shadow:
+                0 18px 34px rgba(207, 47, 56, 0.29);
+        }
+
+        .submit-button:hover::before {
+            left: 125%;
+        }
+
+        .submit-button:disabled {
+            opacity: 0.72;
+            cursor: wait;
+            transform: none;
+        }
+
+        .copyright {
+            margin-top: 0.85rem;
+            color: #a0a3aa;
+            font-size: 0.61rem;
+            font-weight: 650;
+            text-align: center;
+            letter-spacing: 0.035em;
+        }
+
+        @media (max-width: 1080px) {
+            .registration-card {
+                grid-template-columns:
+                    minmax(260px, 0.58fr)
+                    minmax(570px, 1.42fr);
+            }
+
+            .identity-panel {
+                padding: 2rem;
+            }
+
+            .identity-title {
+                font-size: 3rem;
+            }
+
+            .identity-copy {
+                font-size: 0.78rem;
+            }
+        }
+
+        @media (max-width: 880px) {
+            body {
+                overflow-y: auto;
+            }
+
+            .registration-shell {
+                width: min(720px, calc(100% - 1rem));
+                padding: 0.5rem 0;
+            }
+
+            .registration-card {
+                min-height: auto;
+                grid-template-columns: 1fr;
+                border-radius: 24px;
+            }
+
+            .identity-panel {
+                min-height: 250px;
+                padding: 1.6rem;
+            }
+
+            .dossier-label {
+                margin-top: 1.5rem;
+            }
+
+            .identity-title {
+                max-width: 22rem;
+                font-size: 2.5rem;
+            }
+
+            .identity-copy {
+                max-width: 31rem;
+                margin-top: 0.75rem;
+            }
+
+            .member-pass {
+                position: absolute;
+                right: 1.5rem;
+                bottom: 1.5rem;
+                width: 250px;
+                margin-top: 0;
+                transform: rotate(3deg);
+            }
+
+            .pass-avatar,
+            .pass-subline {
+                display: none;
+            }
+
+            .pass-name {
+                margin-top: 0.7rem;
+            }
+
+            .application-panel {
+                padding: 1.5rem;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .registration-shell {
+                display: block;
+            }
+
+            .identity-panel {
+                min-height: 210px;
+            }
+
+            .identity-copy {
+                max-width: 19rem;
+            }
+
+            .member-pass {
+                display: none;
+            }
+
+            .application-header {
+                display: block;
+            }
+
+            .approval-stamp {
+                display: none;
+            }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .field-span-2,
+            .password-checks {
+                grid-column: span 1;
+            }
+
+            .password-checks {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .form-actions {
+                align-items: stretch;
+                flex-direction: column-reverse;
+            }
+
+            .submit-button {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .signin-copy {
+                text-align: center;
+            }
+        }
+
+        @media (max-height: 760px) and (min-width: 881px) {
+            .registration-card {
+                min-height: calc(100svh - 1rem);
+            }
+
+            .identity-panel {
+                padding-top: 1.7rem;
+                padding-bottom: 1.7rem;
+            }
+
+            .dossier-label {
+                margin-top: 2rem;
+            }
+
+            .identity-title {
+                font-size: 3.2rem;
+            }
+
+            .identity-copy {
+                margin-top: 0.8rem;
+                line-height: 1.5;
+            }
+
+            .application-panel {
+                padding-top: 1.2rem;
+                padding-bottom: 1.2rem;
+            }
+
+            .application-description {
+                margin-top: 0.4rem;
+            }
+
+            .registration-form {
+                margin-top: 0.8rem;
+            }
+
+            .form-grid {
+                gap: 0.62rem 0.9rem;
+            }
+
+            .form-input {
+                min-height: 2.58rem;
+                padding-top: 0.58rem;
+                padding-bottom: 0.58rem;
+            }
+
+            .password-checks {
+                padding: 0.48rem 0.55rem;
+            }
+
+            .form-actions {
+                margin-top: 0.75rem;
+                padding-top: 0.75rem;
+            }
+
+            .copyright {
+                margin-top: 0.55rem;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+                scroll-behavior: auto !important;
+                transition-duration: 0.001ms !important;
+            }
+        }
+    </style>
 </head>
-<body class="flex h-screen overflow-hidden">
 
-    <!-- Left Panel -->
-    <div class="hidden md:flex lg:w-3/5 md:w-1/2 bg-[#1e2d4a] flex-col justify-center px-16 relative overflow-hidden">
-        <div class="absolute -top-24 -right-24 w-80 h-80 bg-white opacity-5 rounded-full"></div>
-        <div class="text-white text-xl font-bold mb-12">
-            Manga<span class="text-red-600">Vault</span>
-        </div>
-        <h1 class="text-4xl font-bold text-white leading-tight mb-5">
-            Your manga<br>journey <em class="text-red-500 not-italic">starts</em><br>here.
-        </h1>
-        <p class="text-white/60 text-sm leading-relaxed mb-10">
-            Browse thousands of manga volumes and e-books. Track your collection. Never miss a new volume.
-        </p>
-        <ul class="space-y-3">
-            <?php foreach(['Filter by series, genre, author', 'Instant e-book downloads', 'Collection tracker & wishlist', 'Order history & return requests'] as $feature): ?>
-            <li class="flex items-center gap-3 text-white/80 text-sm">
-                <span class="w-5 h-5 bg-red-600 rounded-full flex items-center justify-center text-white text-xs flex-shrink-0">✓</span>
-                <?= $feature ?>
-            </li>
-            <?php endforeach; ?>
-        </ul>
-    </div>
+<body>
+    <main class="registration-shell">
+        <section class="registration-card">
+            <aside class="identity-panel" id="identityPanel">
+                <div class="identity-content">
+                    <a href="index.php" class="wordmark">
+                        MANGA<span>VAULT</span>
+                    </a>
 
-    <!-- Right Panel -->
-    <div class="w-full md:w-1/2 lg:w-2/5 bg-white flex flex-col justify-center px-8 md:px-12 overflow-hidden py-4">
-        <h2 class="text-2xl font-bold text-gray-900 mb-1">Create account</h2>
-        <p class="text-sm text-gray-400 mb-6">
-            Already have one? <a href="login.php" class="text-red-600 font-medium hover:underline">Sign in</a>
-        </p>
-
-        <?php if ($error): ?>
-            <div class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-lg mb-4">
-                <?= htmlspecialchars($error) ?>
-            </div>
-        <?php endif; ?>
-        <?php if ($success): ?>
-            <div class="bg-green-50 border border-green-200 text-green-600 text-sm px-4 py-3 rounded-lg mb-4">
-                <?= htmlspecialchars($success) ?> <a href="login.php" class="font-medium underline">Login here</a>
-            </div>
-        <?php endif; ?>
-
-        <form method="POST" class="space-y-3" id="registerForm">
-            <?php csrf_field(); ?>
-            <div class="flex gap-3">
-                <div class="flex-1">
-                    <label class="block text-sm font-medium text-gray-600 mb-1">First Name <span class="text-red-500">*</span></label>
-                    <input type="text" name="user_first_name" maxlength="50"
-                           class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
-                           placeholder="John" required>
-                </div>
-                <div class="flex-1">
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Last Name</label>
-                    <input type="text" name="user_last_name" maxlength="50"
-                           class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
-                           placeholder="Doe">
-                </div>
-            </div>
-
-            <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">Username <span class="text-red-500">*</span></label>
-                <input type="text" name="user_name" maxlength="50"
-                       class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
-                       placeholder="mangalover91" required>
-                <p class="text-xs text-gray-400 mt-1">Used to identify your account publicly</p>
-            </div>
-
-            <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">Email Address <span class="text-red-500">*</span></label>
-                <input type="email" name="user_gmail" maxlength="100"
-                       class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
-                       placeholder="you@example.com" required>
-            </div>
-
-            <!-- Date of Birth -->
-            <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">Date of Birth <span class="text-red-500">*</span>
-                    <span class="text-yellow-600 text-xs font-medium ml-1">
-                        ⚠️ Can only be changed once！
-                    </span>
-                </label>
-                <input type="date" name="user_dob" id="dobInput"
-                       max="<?= date('Y-m-d', strtotime('-13 years')) ?>"
-                       class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
-                       required>
-            </div>
-
-            <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">Phone (optional)</label>
-                <input type="text" name="user_phone" id="phoneInput"
-                       class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
-                       placeholder="01234567890" maxlength="11">
-                <p class="text-xs text-gray-400 mt-1">Malaysian format e.g. 01234567890</p>
-            </div>
-
-            <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">Password <span class="text-red-500">*</span></label>
-                <input type="password" name="password" id="passwordInput" minlength="8" maxlength="72"
-                       class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
-                       placeholder="Min 8 chars, uppercase, number & symbol" required>
-                <div id="passwordStrength" class="mt-2 space-y-1 hidden">
-                    <div id="check_length" class="flex items-center gap-2 text-xs text-gray-400">
-                        <span class="check-icon">○</span><span>At least 8 characters</span>
+                    <div class="dossier-label">
+                        New Reader Dossier
                     </div>
-                    <div id="check_upper" class="flex items-center gap-2 text-xs text-gray-400">
-                        <span class="check-icon">○</span><span>One uppercase letter (A-Z)</span>
-                    </div>
-                    <div id="check_lower" class="flex items-center gap-2 text-xs text-gray-400">
-                        <span class="check-icon">○</span><span>One lowercase letter (a-z)</span>
-                    </div>
-                    <div id="check_number" class="flex items-center gap-2 text-xs text-gray-400">
-                        <span class="check-icon">○</span><span>One number (0-9)</span>
-                    </div>
-                    <div id="check_symbol" class="flex items-center gap-2 text-xs text-gray-400">
-                        <span class="check-icon">○</span><span>One symbol (!@#$...)</span>
+
+                    <h1 class="identity-title">
+                        Build your
+                        <br>
+                        <em>reader identity.</em>
+                    </h1>
+
+                    <p class="identity-copy">
+                        Create one account for your physical manga,
+                        e-books, rewards, orders, wishlist and
+                        collection history.
+                    </p>
+
+                    <div class="member-pass" id="memberPass">
+                        <div class="pass-topline">
+                            <span>MangaVault Access Pass</span>
+                            <span>MV-2026</span>
+                        </div>
+
+                        <div class="pass-avatar">
+                            MV
+                        </div>
+
+                        <p class="pass-name" id="passDisplayName">
+                            Future Member
+                        </p>
+
+                        <p class="pass-subline" id="passDisplayHandle">
+                            @your-reader-name
+                        </p>
+
+                        <div class="pass-code" aria-hidden="true">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </aside>
 
-            <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">Confirm Password <span class="text-red-500">*</span></label>
-                <input type="password" name="confirm_password" id="confirmInput" minlength="8" maxlength="72"
-                       class="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
-                       placeholder="Repeat password" required>
-                <p id="confirmMsg" class="text-xs mt-1 hidden"></p>
-            </div>
+            <section class="application-panel">
+                <div class="application-content">
+                    <header class="application-header">
+                        <div>
+                            <p class="eyebrow">
+                                Membership Application
+                            </p>
 
-            <button type="submit"
-                    class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors duration-200 mt-2">
-                Create Account
-            </button>
-        </form>
+                            <h2 class="application-title">
+                                Create your account
+                            </h2>
 
-        <p class="text-center text-sm text-gray-400 mt-4">
-            ← <a href="login.php" class="text-red-600 font-medium hover:underline">Back to sign in</a>
-        </p>
-    </div>
-    
-    <script src="assets/js/password-toggle.js" defer></script>
-<script>
-const phoneInput = document.getElementById('phoneInput');
-phoneInput.addEventListener('input', function() {
-    this.value = this.value.replace(/[^0-9]/g, '');
-});
+                            <p class="application-description">
+                                Complete the details below to open your
+                                MangaVault reader profile.
+                            </p>
+                        </div>
 
-const passwordInput = document.getElementById('passwordInput');
-const strengthDiv = document.getElementById('passwordStrength');
+                        <div
+                            class="approval-stamp"
+                            aria-hidden="true"
+                        >
+                            Reader
+                            <br>
+                            Entry
+                            <br>
+                            2026
+                        </div>
+                    </header>
 
-function updateCheck(id, passed) {
-    const el = document.getElementById(id);
-    const icon = el.querySelector('.check-icon');
-    if (passed) {
-        el.className = 'flex items-center gap-2 text-xs text-green-600';
-        icon.textContent = '✓';
-    } else {
-        el.className = 'flex items-center gap-2 text-xs text-gray-400';
-        icon.textContent = '○';
-    }
-}
+                    <?php if ($error): ?>
+                    <div
+                        class="notice notice-error"
+                        role="alert"
+                        aria-live="polite"
+                    >
+                        <span aria-hidden="true">!</span>
+                        <span>
+                            <?= htmlspecialchars(
+                                $error,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>
+                        </span>
+                    </div>
+                    <?php endif; ?>
 
-passwordInput.addEventListener('input', function() {
-    const val = this.value;
-    if (val.length > 0) {
-        strengthDiv.classList.remove('hidden');
-    } else {
-        strengthDiv.classList.add('hidden');
-    }
-    updateCheck('check_length', val.length >= 8);
-    updateCheck('check_upper', /[A-Z]/.test(val));
-    updateCheck('check_lower', /[a-z]/.test(val));
-    updateCheck('check_number', /[0-9]/.test(val));
-    updateCheck('check_symbol', /[!@#$%^&*(),.?":{}|<>]/.test(val));
-});
+                    <?php if ($success): ?>
+                    <div
+                        class="notice notice-success"
+                        role="status"
+                        aria-live="polite"
+                    >
+                        <span aria-hidden="true">✓</span>
+                        <span>
+                            <?= htmlspecialchars(
+                                $success,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>
+                            <a
+                                href="login.php"
+                                class="font-black underline"
+                            >
+                                Login here
+                            </a>
+                        </span>
+                    </div>
+                    <?php endif; ?>
 
-const confirmInput = document.getElementById('confirmInput');
-const confirmMsg = document.getElementById('confirmMsg');
+                    <form
+                        method="POST"
+                        class="registration-form"
+                        id="registerForm"
+                    >
+                        <?php csrf_field(); ?>
 
-confirmInput.addEventListener('input', function() {
-    if (this.value === passwordInput.value) {
-        confirmMsg.textContent = '✓ Passwords match';
-        confirmMsg.className = 'text-xs mt-1 text-green-600';
-    } else {
-        confirmMsg.textContent = '✗ Passwords do not match';
-        confirmMsg.className = 'text-xs mt-1 text-red-500';
-    }
-    confirmMsg.classList.remove('hidden');
-});
+                        <div class="form-grid">
+                            <div class="field-group">
+                                <label
+                                    for="firstNameInput"
+                                    class="form-label"
+                                >
+                                    <span>
+                                        First Name
+                                        <span class="text-red-600">*</span>
+                                    </span>
+                                </label>
 
-document.getElementById('registerForm').addEventListener('submit', function(e) {
-    const phone = phoneInput.value;
-    const password = passwordInput.value;
-    const dob = document.getElementById('dobInput').value;
+                                <div class="field-wrap">
+                                    <span
+                                        class="field-prefix"
+                                        aria-hidden="true"
+                                    >
+                                        FN
+                                    </span>
 
-    if (!dob) {
-        e.preventDefault();
-        alert('Please enter your date of birth.');
-        return;
-    }
+                                    <input
+                                        id="firstNameInput"
+                                        type="text"
+                                        name="user_first_name"
+                                        maxlength="50"
+                                        autocomplete="given-name"
+                                        class="form-input"
+                                        placeholder="John"
+                                        required
+                                    >
+                                </div>
+                            </div>
 
-    if (phone && !/^01[0-9]{8,9}$/.test(phone)) {
-        e.preventDefault();
-        alert('Please enter a valid Malaysian phone number (e.g. 01234567890)');
-        return;
-    }
+                            <div class="field-group">
+                                <label
+                                    for="lastNameInput"
+                                    class="form-label"
+                                >
+                                    Last Name
+                                </label>
 
-    const allGood = password.length >= 8 &&
-        /[A-Z]/.test(password) &&
-        /[a-z]/.test(password) &&
-        /[0-9]/.test(password) &&
-        /[!@#$%^&*(),.?":{}|<>]/.test(password);
+                                <div class="field-wrap">
+                                    <span
+                                        class="field-prefix"
+                                        aria-hidden="true"
+                                    >
+                                        LN
+                                    </span>
 
-    if (!allGood) {
-        e.preventDefault();
-        alert('Password must be at least 8 characters with uppercase, lowercase, number and symbol!');
-        return;
-    }
-});
-</script>
+                                    <input
+                                        id="lastNameInput"
+                                        type="text"
+                                        name="user_last_name"
+                                        maxlength="50"
+                                        autocomplete="family-name"
+                                        class="form-input"
+                                        placeholder="Doe"
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="field-group">
+                                <label
+                                    for="usernameInput"
+                                    class="form-label"
+                                >
+                                    <span>
+                                        Username
+                                        <span class="text-red-600">*</span>
+                                    </span>
+                                </label>
+
+                                <div class="field-wrap">
+                                    <span
+                                        class="field-prefix"
+                                        aria-hidden="true"
+                                    >
+                                        @
+                                    </span>
+
+                                    <input
+                                        id="usernameInput"
+                                        type="text"
+                                        name="user_name"
+                                        maxlength="50"
+                                        autocomplete="username"
+                                        class="form-input"
+                                        placeholder="mangalover91"
+                                        required
+                                    >
+                                </div>
+
+                                <p class="helper-text">
+                                    Used to identify your account publicly.
+                                </p>
+                            </div>
+
+                            <div class="field-group">
+                                <label
+                                    for="emailInput"
+                                    class="form-label"
+                                >
+                                    <span>
+                                        Email Address
+                                        <span class="text-red-600">*</span>
+                                    </span>
+                                </label>
+
+                                <div class="field-wrap">
+                                    <span
+                                        class="field-prefix"
+                                        aria-hidden="true"
+                                    >
+                                        EM
+                                    </span>
+
+                                    <input
+                                        id="emailInput"
+                                        type="email"
+                                        name="user_gmail"
+                                        maxlength="100"
+                                        autocomplete="email"
+                                        class="form-input"
+                                        placeholder="you@example.com"
+                                        required
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="field-group">
+                                <label
+                                    for="dobInput"
+                                    class="form-label"
+                                >
+                                    <span>
+                                        Date of Birth
+                                        <span class="text-red-600">*</span>
+                                    </span>
+
+                                    <span class="field-note">
+                                        Can only be changed once
+                                    </span>
+                                </label>
+
+                                <div class="field-wrap">
+                                    <span
+                                        class="field-prefix"
+                                        aria-hidden="true"
+                                    >
+                                        DOB
+                                    </span>
+
+                                    <input
+                                        id="dobInput"
+                                        type="date"
+                                        name="user_dob"
+                                        max="<?= date(
+                                            'Y-m-d',
+                                            strtotime('-13 years')
+                                        ) ?>"
+                                        autocomplete="bday"
+                                        class="form-input"
+                                        required
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="field-group">
+                                <label
+                                    for="phoneInput"
+                                    class="form-label"
+                                >
+                                    Phone
+                                    <span class="text-gray-400">
+                                        Optional
+                                    </span>
+                                </label>
+
+                                <div class="field-wrap">
+                                    <span
+                                        class="field-prefix"
+                                        aria-hidden="true"
+                                    >
+                                        +60
+                                    </span>
+
+                                    <input
+                                        id="phoneInput"
+                                        type="text"
+                                        name="user_phone"
+                                        maxlength="11"
+                                        inputmode="numeric"
+                                        autocomplete="tel"
+                                        class="form-input"
+                                        placeholder="01234567890"
+                                    >
+                                </div>
+
+                                <p class="helper-text">
+                                    Malaysian format, for example
+                                    01234567890.
+                                </p>
+                            </div>
+
+                            <div class="field-group">
+                                <label
+                                    for="passwordInput"
+                                    class="form-label"
+                                >
+                                    <span>
+                                        Password
+                                        <span class="text-red-600">*</span>
+                                    </span>
+                                </label>
+
+                                <div class="field-wrap">
+                                    <span
+                                        class="field-prefix"
+                                        aria-hidden="true"
+                                    >
+                                        PW
+                                    </span>
+
+                                    <input
+                                        id="passwordInput"
+                                        type="password"
+                                        name="password"
+                                        minlength="8"
+                                        maxlength="72"
+                                        autocomplete="new-password"
+                                        class="form-input"
+                                        placeholder="Create a strong password"
+                                        required
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="field-group">
+                                <label
+                                    for="confirmInput"
+                                    class="form-label"
+                                >
+                                    <span>
+                                        Confirm Password
+                                        <span class="text-red-600">*</span>
+                                    </span>
+                                </label>
+
+                                <div class="field-wrap">
+                                    <span
+                                        class="field-prefix"
+                                        aria-hidden="true"
+                                    >
+                                        OK
+                                    </span>
+
+                                    <input
+                                        id="confirmInput"
+                                        type="password"
+                                        name="confirm_password"
+                                        minlength="8"
+                                        maxlength="72"
+                                        autocomplete="new-password"
+                                        class="form-input"
+                                        placeholder="Repeat your password"
+                                        required
+                                    >
+                                </div>
+
+                                <p
+                                    id="confirmMsg"
+                                    class="confirm-message hidden"
+                                ></p>
+                            </div>
+
+                            <div
+                                id="passwordStrength"
+                                class="password-checks hidden"
+                                aria-live="polite"
+                            >
+                                <div
+                                    id="check_length"
+                                    class="password-check-item"
+                                >
+                                    <span class="check-icon">○</span>
+                                    <span>8+ characters</span>
+                                </div>
+
+                                <div
+                                    id="check_upper"
+                                    class="password-check-item"
+                                >
+                                    <span class="check-icon">○</span>
+                                    <span>Uppercase</span>
+                                </div>
+
+                                <div
+                                    id="check_lower"
+                                    class="password-check-item"
+                                >
+                                    <span class="check-icon">○</span>
+                                    <span>Lowercase</span>
+                                </div>
+
+                                <div
+                                    id="check_number"
+                                    class="password-check-item"
+                                >
+                                    <span class="check-icon">○</span>
+                                    <span>Number</span>
+                                </div>
+
+                                <div
+                                    id="check_symbol"
+                                    class="password-check-item"
+                                >
+                                    <span class="check-icon">○</span>
+                                    <span>Symbol</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <p class="signin-copy">
+                                Already have an account?
+                                <a
+                                    href="login.php"
+                                    class="signin-link"
+                                >
+                                    Sign in
+                                </a>
+                            </p>
+
+                            <button
+                                type="submit"
+                                class="submit-button"
+                                id="createAccountButton"
+                            >
+                                <span id="createAccountButtonText">
+                                    Create Account
+                                </span>
+                                <span aria-hidden="true">→</span>
+                            </button>
+                        </div>
+                    </form>
+
+                    <p class="copyright">
+                        © 2026 MangaVault. Your reader identity starts here.
+                    </p>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <script
+        src="assets/js/password-toggle.js"
+        defer
+    ></script>
+
+    <script>
+        (() => {
+            'use strict';
+
+            const phoneInput =
+                document.getElementById('phoneInput');
+            const passwordInput =
+                document.getElementById('passwordInput');
+            const strengthDiv =
+                document.getElementById('passwordStrength');
+            const confirmInput =
+                document.getElementById('confirmInput');
+            const confirmMsg =
+                document.getElementById('confirmMsg');
+            const registerForm =
+                document.getElementById('registerForm');
+            const dobInput =
+                document.getElementById('dobInput');
+            const usernameInput =
+                document.getElementById('usernameInput');
+            const firstNameInput =
+                document.getElementById('firstNameInput');
+            const passDisplayName =
+                document.getElementById('passDisplayName');
+            const passDisplayHandle =
+                document.getElementById('passDisplayHandle');
+            const memberPass =
+                document.getElementById('memberPass');
+            const identityPanel =
+                document.getElementById('identityPanel');
+            const submitButton =
+                document.getElementById('createAccountButton');
+            const submitButtonText =
+                document.getElementById(
+                    'createAccountButtonText'
+                );
+
+            function updateCheck(id, passed) {
+                const element = document.getElementById(id);
+                const icon =
+                    element.querySelector('.check-icon');
+
+                element.classList.toggle(
+                    'is-valid',
+                    passed
+                );
+                icon.textContent = passed ? '✓' : '○';
+            }
+
+            function updateConfirmation() {
+                if (!confirmInput.value) {
+                    confirmMsg.classList.add('hidden');
+                    return;
+                }
+
+                const matches =
+                    confirmInput.value === passwordInput.value;
+
+                confirmMsg.textContent = matches
+                    ? '✓ Passwords match'
+                    : '✗ Passwords do not match';
+
+                confirmMsg.className = matches
+                    ? 'confirm-message text-green-700'
+                    : 'confirm-message text-red-600';
+            }
+
+            phoneInput.addEventListener('input', function () {
+                this.value =
+                    this.value.replace(/[^0-9]/g, '');
+            });
+
+            passwordInput.addEventListener(
+                'input',
+                function () {
+                    const value = this.value;
+
+                    strengthDiv.classList.toggle(
+                        'hidden',
+                        value.length === 0
+                    );
+
+                    updateCheck(
+                        'check_length',
+                        value.length >= 8
+                    );
+                    updateCheck(
+                        'check_upper',
+                        /[A-Z]/.test(value)
+                    );
+                    updateCheck(
+                        'check_lower',
+                        /[a-z]/.test(value)
+                    );
+                    updateCheck(
+                        'check_number',
+                        /[0-9]/.test(value)
+                    );
+                    updateCheck(
+                        'check_symbol',
+                        /[!@#$%^&*(),.?":{}|<>]/.test(value)
+                    );
+
+                    updateConfirmation();
+                }
+            );
+
+            confirmInput.addEventListener(
+                'input',
+                updateConfirmation
+            );
+
+            firstNameInput.addEventListener(
+                'input',
+                () => {
+                    const name =
+                        firstNameInput.value.trim();
+
+                    passDisplayName.textContent =
+                        name || 'Future Member';
+                }
+            );
+
+            usernameInput.addEventListener(
+                'input',
+                () => {
+                    const handle =
+                        usernameInput.value.trim();
+
+                    passDisplayHandle.textContent =
+                        handle
+                            ? `@${handle}`
+                            : '@your-reader-name';
+                }
+            );
+
+            registerForm.addEventListener(
+                'submit',
+                function (event) {
+                    const phone = phoneInput.value;
+                    const password = passwordInput.value;
+                    const dob = dobInput.value;
+
+                    if (!dob) {
+                        event.preventDefault();
+                        alert(
+                            'Please enter your date of birth.'
+                        );
+                        return;
+                    }
+
+                    if (
+                        phone &&
+                        !/^01[0-9]{8,9}$/.test(phone)
+                    ) {
+                        event.preventDefault();
+                        alert(
+                            'Please enter a valid Malaysian ' +
+                            'phone number (e.g. 01234567890)'
+                        );
+                        return;
+                    }
+
+                    const allGood =
+                        password.length >= 8 &&
+                        /[A-Z]/.test(password) &&
+                        /[a-z]/.test(password) &&
+                        /[0-9]/.test(password) &&
+                        /[!@#$%^&*(),.?":{}|<>]/.test(
+                            password
+                        );
+
+                    if (!allGood) {
+                        event.preventDefault();
+                        alert(
+                            'Password must be at least 8 ' +
+                            'characters with uppercase, ' +
+                            'lowercase, number and symbol!'
+                        );
+                        return;
+                    }
+
+                    submitButton.disabled = true;
+                    submitButtonText.textContent =
+                        'Creating your account...';
+                }
+            );
+
+            if (
+                memberPass &&
+                identityPanel &&
+                !window.matchMedia(
+                    '(prefers-reduced-motion: reduce)'
+                ).matches
+            ) {
+                identityPanel.addEventListener(
+                    'pointermove',
+                    (event) => {
+                        const rect =
+                            identityPanel.getBoundingClientRect();
+                        const x =
+                            (
+                                event.clientX -
+                                rect.left
+                            ) / rect.width - 0.5;
+                        const y =
+                            (
+                                event.clientY -
+                                rect.top
+                            ) / rect.height - 0.5;
+
+                        memberPass.style.transform =
+                            `rotateY(${x * 7}deg) ` +
+                            `rotateX(${-y * 7}deg) ` +
+                            `translate3d(${x * 6}px, ` +
+                            `${y * 6}px, 0)`;
+                    }
+                );
+
+                identityPanel.addEventListener(
+                    'pointerleave',
+                    () => {
+                        memberPass.style.transform =
+                            'rotateY(0deg) rotateX(0deg) ' +
+                            'translate3d(0, 0, 0)';
+                    }
+                );
+            }
+        })();
+    </script>
 </body>
 </html>
