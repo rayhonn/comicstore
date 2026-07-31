@@ -585,7 +585,15 @@ function storeValidatedEbookUpload(array $file): array
         );
     }
 
-    $metadata = inspectEbookFile($temporaryPath);
+    if ($originalExtension === 'pdf') {
+        $metadata = validatePdfEbookFile(
+            $temporaryPath
+        );
+    } else {
+        $metadata = validateEpubEbookFile(
+            $temporaryPath
+        );
+    }
 
     if ($metadata['extension'] !== $originalExtension) {
         throw new RuntimeException(

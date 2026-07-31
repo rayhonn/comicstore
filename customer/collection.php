@@ -158,16 +158,42 @@ $total_physical = count($owned_ids);
                         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                             <?php foreach ($collection as $item): ?>
                             <div class="bg-white rounded-2xl shadow-sm overflow-hidden hover:-translate-y-1 hover:shadow-md transition-all duration-300 group">
-                                <div class="relative overflow-hidden">
+                                <div
+                                    class="relative h-64 overflow-hidden bg-gray-100 flex items-center justify-center"
+                                >
                                     <?php if (!empty($item['product_cover_image'])): ?>
-                                        <img src="../assets/images/<?= htmlspecialchars($item['product_cover_image']) ?>"
-                                             class="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300">
+                                        <img
+                                            src="../assets/images/<?= htmlspecialchars(
+                                                $item['product_cover_image'],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>"
+                                            alt="<?= htmlspecialchars(
+                                                $item['product_title'],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?> cover"
+                                            class="max-h-[240px] w-auto max-w-[78%] object-contain group-hover:scale-105 transition-transform duration-300"
+                                        >
                                     <?php else: ?>
-                                        <div class="w-full h-48 bg-gray-100 flex items-center justify-center text-2xl font-bold text-gray-400">
-                                            <?= strtoupper(substr($item['product_title'], 0, 2)) ?>
+                                        <div
+                                            class="h-full w-[78%] bg-gray-100 flex items-center justify-center text-2xl font-bold text-gray-400"
+                                        >
+                                            <?= strtoupper(
+                                                substr(
+                                                    $item['product_title'],
+                                                    0,
+                                                    2
+                                                )
+                                            ) ?>
                                         </div>
                                     <?php endif; ?>
-                                    <span class="absolute top-2 left-2 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-semibold">E-Book</span>
+
+                                    <span
+                                        class="absolute top-2 left-2 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-semibold"
+                                    >
+                                        E-Book
+                                    </span>
                                 </div>
                                 <div class="p-3">
                                     <h3 class="font-semibold text-sm text-gray-800 line-clamp-2 mb-1"><?= htmlspecialchars($item['product_title']) ?></h3>
