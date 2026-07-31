@@ -31,45 +31,96 @@ $collection = $collection->fetchAll(PDO::FETCH_ASSOC);
 $owned_stmt = $pdo->prepare("
     SELECT DISTINCT p.product_id
     FROM order_items oi
-    JOIN orders o ON oi.order_item_order_id = o.order_id
-    JOIN products p ON oi.order_item_product_id = p.product_id
+    JOIN orders o
+        ON oi.order_item_order_id = o.order_id
+    JOIN products p
+        ON oi.order_item_product_id = p.product_id
     WHERE o.order_user_id = ?
     AND oi.order_item_type = 'physical'
     AND o.order_payment_status = 'confirmed'
 ");
 $owned_stmt->execute([$user_id]);
-$owned_ids = array_column($owned_stmt->fetchAll(PDO::FETCH_ASSOC), 'product_id');
+$owned_ids = array_map(
+    'intval',
+    array_column(
+        $owned_stmt->fetchAll(PDO::FETCH_ASSOC),
+        'product_id'
+    )
+);
 
-// Get all physical series
-$series_stmt = $pdo->query("
-    SELECT DISTINCT product_series, product_author, product_cover_image
-    FROM products
-    WHERE product_type = 'physical'
-    AND product_is_available = 1
-    AND product_series IS NOT NULL
-    AND product_series != ''
-    ORDER BY product_series
+// Get physical series already owned by the customer
+$series_stmt = $pdo->prepare("
+    SELECT
+        p.product_series,
+        MAX(p.product_author) AS product_author,
+        MAX(p.product_cover_image) AS product_cover_image
+    FROM order_items oi
+    JOIN orders o
+        ON oi.order_item_order_id = o.order_id
+    JOIN products p
+        ON oi.order_item_product_id = p.product_id
+    WHERE o.order_user_id = ?
+    AND oi.order_item_type = 'physical'
+    AND o.order_payment_status = 'confirmed'
+    AND p.product_type = 'physical'
+    AND p.product_series IS NOT NULL
+    AND p.product_series != ''
+    GROUP BY p.product_series
+    ORDER BY p.product_series
 ");
+$series_stmt->execute([$user_id]);
 $all_series = $series_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// For each series, get all volumes
+// Show available volumes and any hidden volumes already owned
 $series_data = [];
+
 foreach ($all_series as $s) {
     $vols = $pdo->prepare("
-        SELECT product_id, product_title, product_volume_number, product_cover_image, product_price
-        FROM products
-        WHERE product_series = ? AND product_type = 'physical' AND product_is_available = 1
-        ORDER BY product_volume_number ASC
+        SELECT
+            p.product_id,
+            p.product_title,
+            p.product_volume_number,
+            p.product_cover_image,
+            p.product_price
+        FROM products p
+        WHERE p.product_series = ?
+        AND p.product_type = 'physical'
+        AND (
+            p.product_is_available = 1
+            OR EXISTS (
+                SELECT 1
+                FROM order_items owned_oi
+                JOIN orders owned_o
+                    ON owned_oi.order_item_order_id =
+                        owned_o.order_id
+                WHERE owned_o.order_user_id = ?
+                AND owned_oi.order_item_product_id =
+                    p.product_id
+                AND owned_oi.order_item_type = 'physical'
+                AND owned_o.order_payment_status =
+                    'confirmed'
+            )
+        )
+        ORDER BY p.product_volume_number ASC
     ");
-    $vols->execute([$s['product_series']]);
+    $vols->execute([
+        $s['product_series'],
+        $user_id,
+    ]);
     $volumes = $vols->fetchAll(PDO::FETCH_ASSOC);
 
     $owned_count = 0;
+
     foreach ($volumes as $v) {
-        if (in_array($v['product_id'], $owned_ids)) $owned_count++;
+        if (in_array(
+            (int) $v['product_id'],
+            $owned_ids,
+            true
+        )) {
+            $owned_count++;
+        }
     }
 
-    // Only show series where user owns at least 1
     if ($owned_count > 0) {
         $series_data[] = [
             'series' => $s['product_series'],
