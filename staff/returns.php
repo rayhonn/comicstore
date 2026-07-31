@@ -5,6 +5,7 @@ require_once '../includes/auth.php';
 require_once '../includes/csrf.php';
 require_once '../includes/money_helper.php';
 require_once '../includes/notifications.php';
+require_once '../includes/customer_return_helper.php';
 
 require_staff();
 
@@ -71,13 +72,17 @@ if (
         exit('Invalid return action.');
     }
 
+    $return_effects = null;
+
     try {
         $pdo->beginTransaction();
 
         $return_stmt = $pdo->prepare("
             SELECT
                 rr.return_status,
+                rr.return_order_id AS order_id,
                 o.order_user_id,
+                oi.order_item_id,
                 oi.order_item_product_id,
                 oi.order_item_product_title
                     AS product_title,
@@ -159,6 +164,19 @@ if (
                     'Unable to restore product stock.'
                 );
             }
+
+            $return_effects =
+                reconcileApprovedCustomerReturn(
+                    $pdo,
+                    $return_id,
+                    (int) $return_data['order_id'],
+                    (int) $return_data[
+                        'order_item_id'
+                    ],
+                    (int) $return_data[
+                        'order_user_id'
+                    ]
+                );
         }
 
         $pdo->commit();
@@ -194,34 +212,54 @@ if (
 
     try {
         if ($action === 'approved') {
-            $refund_quantity = (int) $return_data[
-                'order_item_quantity'
-            ];
-
-            $refund_unit_price_sen =
-                moneyDecimalToSen(
-                    (string) $return_data[
-                        'order_item_price'
-                    ]
-                );
-
-            if (
-                $refund_quantity <= 0 ||
-                $refund_unit_price_sen >
-                    intdiv(
-                        9999999999,
-                        $refund_quantity
-                    )
-            ) {
+            if (!is_array($return_effects)) {
                 throw new RuntimeException(
-                    'Return refund amount is invalid.'
+                    'Return reconciliation result is missing.'
                 );
             }
 
             $refund_amount = moneyFormatSen(
-                $refund_unit_price_sen *
-                $refund_quantity
+                (int) $return_effects[
+                    'refund_amount_sen'
+                ]
             );
+
+            $adjustment_parts = [];
+
+            $points_reversed = max(
+                0,
+                (int) (
+                    $return_effects[
+                        'points_reversed'
+                    ] ?? 0
+                )
+            );
+
+            if ($points_reversed > 0) {
+                $adjustment_parts[] =
+                    number_format($points_reversed) .
+                    ' reward points were reversed.';
+            }
+
+            if (
+                !empty(
+                    $return_effects[
+                        'voucher_restored'
+                    ]
+                )
+            ) {
+                $adjustment_parts[] =
+                    'The voucher used for this order ' .
+                    'is available for use again.';
+            }
+
+            $adjustment_message =
+                $adjustment_parts === []
+                    ? ''
+                    : ' ' . implode(
+                        ' ',
+                        $adjustment_parts
+                    );
 
             sendNotification(
                 $pdo,
@@ -234,7 +272,8 @@ if (
                 "\" has been approved. A refund of RM " .
                 $refund_amount .
                 ' will be processed to your original ' .
-                'payment method within 5-7 working days.',
+                'payment method within 5-7 working days.' .
+                $adjustment_message,
                 'return'
             );
         } else {

@@ -193,7 +193,11 @@ $reason_options = [
                 <?php if ($existing['return_status'] === 'pending'): ?>
                     <p class="text-sm <?= $sc['text'] ?> opacity-80">Please wait up to <strong>3 working days</strong> for our team to review your request.</p>
                 <?php elseif ($existing['return_status'] === 'approved'): ?>
-                    <p class="text-sm <?= $sc['text'] ?> opacity-80">Your return has been approved. A refund of <strong>RM <?= moneyFormatSen($return_amount_sen) ?></strong> will be processed to your original payment method within <strong>5-7 working days</strong>.</p>
+                    Your return has been approved. The final refund amount
+                    has been calculated after any voucher discount and will
+                    be processed to your original payment method within
+                    <strong>5-7 working days</strong>. Please check your
+                    notification for the confirmed refund amount.
                 <?php elseif ($existing['return_status'] === 'rejected'): ?>
                     <p class="text-sm <?= $sc['text'] ?> opacity-80">Your return request was not approved.</p>
                 <?php endif; ?>

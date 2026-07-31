@@ -80,6 +80,27 @@ function restoreOrderVoucherUsage(
 
     $voucher_id = (int) $voucher_id;
 
+    $user_voucher_stmt = $pdo->prepare("
+        SELECT
+            uv_id,
+            uv_is_used,
+            uv_status
+        FROM user_vouchers
+        WHERE uv_voucher_id = ?
+        AND uv_user_id = ?
+        LIMIT 1
+        FOR UPDATE
+    ");
+
+    $user_voucher_stmt->execute([
+        $voucher_id,
+        $user_id,
+    ]);
+
+    $user_voucher = $user_voucher_stmt->fetch(
+        PDO::FETCH_ASSOC
+    );
+
     $delete_usage = $pdo->prepare("
         DELETE FROM voucher_usage
         WHERE usage_order_id = ?
@@ -93,8 +114,17 @@ function restoreOrderVoucherUsage(
         $voucher_id,
     ]);
 
+    $deleted_usage_count =
+        $delete_usage->rowCount();
+
+    if ($deleted_usage_count > 1) {
+        throw new RuntimeException(
+            'Multiple voucher usage records were found.'
+        );
+    }
+
     $usage_deleted =
-        $delete_usage->rowCount() === 1;
+        $deleted_usage_count === 1;
 
     if ($usage_deleted) {
         $reduce_count = $pdo->prepare("
@@ -116,24 +146,52 @@ function restoreOrderVoucherUsage(
         }
     }
 
-    $restore_voucher = $pdo->prepare("
-        UPDATE user_vouchers
-        SET uv_is_used = 0,
-            uv_status = 'available',
-            uv_pending_at = NULL,
-            uv_used_at = NULL
-        WHERE uv_voucher_id = ?
-        AND uv_user_id = ?
-        AND uv_is_used = 0
-        AND uv_status = 'pending'
-    ");
+    $voucher_restored = false;
 
-    $restore_voucher->execute([
-        $voucher_id,
-        $user_id,
-    ]);
+    if ($user_voucher) {
+        $is_already_available =
+            (int) $user_voucher['uv_is_used'] === 0 &&
+            $user_voucher['uv_status'] ===
+                'available';
 
-    return
-        $usage_deleted ||
-        $restore_voucher->rowCount() === 1;
+        if ($is_already_available) {
+            $voucher_restored = true;
+        } else {
+            $restore_voucher = $pdo->prepare("
+                UPDATE user_vouchers
+                SET uv_is_used = 0,
+                    uv_status = 'available',
+                    uv_pending_at = NULL,
+                    uv_used_at = NULL
+                WHERE uv_id = ?
+                AND (
+                    (
+                        uv_is_used = 0
+                        AND uv_status = 'pending'
+                    )
+                    OR
+                    (
+                        uv_is_used = 1
+                        AND uv_status = 'used'
+                    )
+                )
+            ");
+
+            $restore_voucher->execute([
+                (int) $user_voucher['uv_id'],
+            ]);
+
+            if (
+                $restore_voucher->rowCount() !== 1
+            ) {
+                throw new RuntimeException(
+                    'Unable to restore the customer voucher.'
+                );
+            }
+
+            $voucher_restored = true;
+        }
+    }
+
+    return $usage_deleted || $voucher_restored;
 }
