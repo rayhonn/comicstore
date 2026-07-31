@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 $user_id = current_user_id();
 
@@ -22,6 +23,8 @@ if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['redeem_voucher'])
 ) {
+    csrf_verify();
+
     $voucher_id = filter_var(
         $_POST['voucher_id'] ?? null,
         FILTER_VALIDATE_INT,
@@ -55,7 +58,13 @@ if (
                     voucher_end_date IS NULL
                     OR voucher_end_date >= NOW()
                 )
+                AND (
+                    voucher_usage_limit IS NULL
+                    OR voucher_used_count <
+                        voucher_usage_limit
+                )
                 LIMIT 1
+                FOR UPDATE
             ");
 
             $voucher_stmt->execute([$voucher_id]);
@@ -214,14 +223,33 @@ if (
     }
 }
 
+
 // Get available points vouchers
 $points_vouchers = $pdo->query("
-    SELECT v.*, 
-    (SELECT uv_id FROM user_vouchers WHERE uv_user_id = $user_id AND uv_voucher_id = v.voucher_id) as already_claimed
+    SELECT
+        v.*,
+        (
+            SELECT uv_id
+            FROM user_vouchers
+            WHERE uv_user_id = $user_id
+            AND uv_voucher_id = v.voucher_id
+        ) AS already_claimed
     FROM vouchers v
-    WHERE v.voucher_is_active = 1 
+    WHERE v.voucher_is_active = 1
     AND v.voucher_is_points_redeem = 1
-    AND (v.voucher_end_date IS NULL OR v.voucher_end_date >= NOW())
+    AND (
+        v.voucher_start_date IS NULL
+        OR v.voucher_start_date <= NOW()
+    )
+    AND (
+        v.voucher_end_date IS NULL
+        OR v.voucher_end_date >= NOW()
+    )
+    AND (
+        v.voucher_usage_limit IS NULL
+        OR v.voucher_used_count <
+            v.voucher_usage_limit
+    )
     ORDER BY v.voucher_points_required ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -478,6 +506,13 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                                         <span class="bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-xl">Claimed ✓</span>
                                         <?php elseif ($can_redeem): ?>
                                         <form method="POST">
+                                            <?php csrf_field(); ?>
+
+                                            <input
+                                                type="hidden"
+                                                name="redeem_voucher"
+                                                value="1"
+                                            >
                                             <input type="hidden" name="redeem_voucher" value="1">
                                             <input type="hidden" name="voucher_id" value="<?= $v['voucher_id'] ?>">
                                             <button type="submit"
