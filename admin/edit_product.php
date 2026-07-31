@@ -507,9 +507,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">ISBN</label>
-                                    <input type="text" name="product_isbn" value="<?= htmlspecialchars($product['product_isbn'] ?? '') ?>"
-                                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white transition-colors">
+                                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
+                                        ISBN
+                                    </label>
+                                    <input
+                                        type="text"
+                                        name="product_isbn"
+                                        minlength="10"
+                                        maxlength="20"
+                                        pattern="[0-9Xx -]+"
+                                        inputmode="text"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        placeholder="e.g. 978-1-9747-1546-6"
+                                        title="Enter a valid ISBN-10 or ISBN-13. Spaces and hyphens are allowed."
+                                        value="<?= htmlspecialchars(
+                                            (string) (
+                                                $product['product_isbn'] ?? ''
+                                            ),
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white transition-colors"
+                                    >
                                 </div>
                                 <div>
                                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Price (RM) *</label>
@@ -592,7 +612,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                                 </div>
                             </div>
-                            <div class="grid grid-cols-2 gap-4">
+                            <!-- <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Weight (kg)</label>
                                     <input type="number" name="physical_weight" step="0.01" min="0" value="<?= $product['physical_weight'] ?? '' ?>"
@@ -603,7 +623,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     <input type="text" name="physical_dimensions" value="<?= htmlspecialchars($product['physical_dimensions'] ?? '') ?>"
                                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                                 </div>
-                            </div>
+                            </div> -->
                         </div>
 
                         <!-- Ebook -->

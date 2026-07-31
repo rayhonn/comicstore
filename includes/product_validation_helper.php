@@ -66,6 +66,128 @@ function validateProductText(
     return $value;
 }
 
+function validateProductIsbn(array $input): string
+{
+    $value = productInputScalar(
+        $input,
+        'product_isbn',
+        'ISBN'
+    );
+
+    if ($value === '') {
+        return '';
+    }
+
+    if (productInputLength($value) > 20) {
+        throw new ProductInputValidationException(
+            'ISBN must not exceed 20 characters.'
+        );
+    }
+
+    if (
+        preg_match(
+            '/\A[0-9Xx -]+\z/',
+            $value
+        ) !== 1
+    ) {
+        throw new ProductInputValidationException(
+            'ISBN may contain only digits, spaces and hyphens. ' .
+            'X is allowed only as the final ISBN-10 character.'
+        );
+    }
+
+    $normalized = strtoupper(
+        str_replace(
+            [
+                ' ',
+                '-',
+            ],
+            '',
+            $value
+        )
+    );
+
+    $length = strlen($normalized);
+
+    if ($length === 10) {
+        if (
+            preg_match(
+                '/\A[0-9]{9}[0-9X]\z/',
+                $normalized
+            ) !== 1
+        ) {
+            throw new ProductInputValidationException(
+                'ISBN-10 must contain nine digits followed by a digit or X.'
+            );
+        }
+
+        $checksum = 0;
+
+        for ($index = 0; $index < 10; $index++) {
+            $character = $normalized[$index];
+
+            $digit = $character === 'X'
+                ? 10
+                : (int) $character;
+
+            $checksum +=
+                $digit * (10 - $index);
+        }
+
+        if ($checksum % 11 !== 0) {
+            throw new ProductInputValidationException(
+                'ISBN checksum is invalid.'
+            );
+        }
+
+        return $normalized;
+    }
+
+    if ($length === 13) {
+        if (
+            preg_match(
+                '/\A97[89][0-9]{10}\z/',
+                $normalized
+            ) !== 1
+        ) {
+            throw new ProductInputValidationException(
+                'ISBN-13 must contain 13 digits and start with 978 or 979.'
+            );
+        }
+
+        $checksum = 0;
+
+        for ($index = 0; $index < 12; $index++) {
+            $digit = (int) $normalized[$index];
+
+            $checksum += $digit * (
+                $index % 2 === 0
+                    ? 1
+                    : 3
+            );
+        }
+
+        $expectedCheckDigit = (
+            10 - ($checksum % 10)
+        ) % 10;
+
+        if (
+            $expectedCheckDigit !==
+            (int) $normalized[12]
+        ) {
+            throw new ProductInputValidationException(
+                'ISBN checksum is invalid.'
+            );
+        }
+
+        return $normalized;
+    }
+
+    throw new ProductInputValidationException(
+        'ISBN must be a valid ISBN-10 or ISBN-13.'
+    );
+}
+
 function validateProductIntegerValue(
     mixed $value,
     string $label,
@@ -264,11 +386,8 @@ function validateProductFormInput(
         255
     );
 
-    $isbn = validateProductText(
-        $input,
-        'product_isbn',
-        'ISBN',
-        20
+    $isbn = validateProductIsbn(
+        $input
     );
 
     $description = validateProductText(
