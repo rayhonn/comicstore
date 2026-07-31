@@ -516,73 +516,66 @@ $genre_visuals = [
 <body class="mobile-index-page text-gray-900 antialiased">
 
     <!-- Navbar -->
-    <nav
-        class="sticky top-0 z-50 border-b border-white/70 bg-white/90 shadow-sm backdrop-blur-xl"
-    >
+    <nav class="sticky top-0 z-50 bg-white shadow-sm">
         <div
-            class="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-6"
+            class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4"
         >
             <a
                 href="index.php"
-                class="group flex items-center gap-3"
+                class="text-xl font-black tracking-wide text-gray-900"
                 aria-label="MangaVault home"
             >
-
-                <span
-                    class="text-xl font-black tracking-[0.08em] text-gray-950"
-                >
-                    MANGA<span class="text-red-600">VAULT</span>
-                </span>
+                MANGA<span class="text-red-600">VAULT</span>
             </a>
 
             <div
-                class="hidden items-center gap-8 text-sm font-semibold lg:flex"
+                class="hidden items-center gap-8 text-sm font-medium lg:flex"
             >
                 <a
                     href="index.php"
-                    class="nav-link active text-red-600"
+                    class="text-gray-600 transition-colors hover:text-red-600"
                 >
                     Home
                 </a>
 
                 <a
                     href="customer/home.php"
-                    class="nav-link text-gray-600 hover:text-red-600"
+                    class="text-gray-600 transition-colors hover:text-red-600"
                 >
                     Catalog
                 </a>
 
                 <a
                     href="#rankings"
-                    class="nav-link text-gray-600 hover:text-red-600"
+                    class="text-gray-600 transition-colors hover:text-red-600"
                 >
                     Rankings
                 </a>
 
                 <a
                     href="#new-releases"
-                    class="nav-link text-gray-600 hover:text-red-600"
+                    class="text-gray-600 transition-colors hover:text-red-600"
                 >
                     New Releases
                 </a>
 
                 <a
                     href="tier.php"
-                    class="nav-link text-gray-600 hover:text-red-600"
+                    class="text-gray-600 transition-colors hover:text-red-600"
                 >
                     Membership
                 </a>
             </div>
 
-            <div class="flex items-center gap-3 text-sm">
+            <div class="flex items-center gap-4 text-sm">
                 <?php if (isset($_SESSION['user_id'])): ?>
                     <a
                         href="customer/notifications.php"
-                        class="relative flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                        class="relative text-gray-600 transition-colors hover:text-red-600"
                         aria-label="Notifications"
                     >
                         <svg
-                            class="h-5 w-5 <?= $notif_count > 0
+                            class="h-6 w-6 <?= $notif_count > 0
                                 ? 'bell-ring'
                                 : '' ?>"
                             fill="none"
@@ -600,7 +593,7 @@ $genre_visuals = [
 
                         <?php if ($notif_count > 0): ?>
                             <span
-                                class="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-black text-white"
+                                class="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs text-white"
                             >
                                 <?= $notif_count > 99
                                     ? '99+'
@@ -611,11 +604,11 @@ $genre_visuals = [
 
                     <a
                         href="customer/cart.php"
-                        class="relative flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                        class="relative text-gray-600 transition-colors hover:text-red-600"
                         aria-label="Shopping cart"
                     >
                         <svg
-                            class="h-5 w-5"
+                            class="h-6 w-6"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -631,7 +624,7 @@ $genre_visuals = [
 
                         <?php if ($cart_count > 0): ?>
                             <span
-                                class="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-black text-white"
+                                class="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs text-white"
                             >
                                 <?= $cart_count > 99
                                     ? '99+'
@@ -642,33 +635,30 @@ $genre_visuals = [
 
                     <a
                         href="customer/profile.php"
-                        class="hidden items-center gap-2 rounded-xl bg-gray-950 px-4 py-2.5 font-bold text-white transition hover:bg-red-600 lg:flex"
+                        class="hidden font-medium text-gray-600 transition-colors hover:text-red-600 lg:block"
                     >
-                        <span class="text-white/60">
-                            Hi,
-                        </span>
-
+                        Hi,
                         <?= htmlspecialchars(
                             (string) (
                                 $_SESSION['user_first_name'] ??
                                 $_SESSION['user_name'] ??
-                                'Reader'
+                                'Customer'
                             ),
                             ENT_QUOTES,
                             'UTF-8'
-                        ) ?>
+                        ) ?>!
                     </a>
                 <?php else: ?>
                     <a
                         href="login.php"
-                        class="hidden font-semibold text-gray-600 transition hover:text-red-600 lg:block"
+                        class="hidden font-medium text-gray-600 transition-colors hover:text-red-600 lg:block"
                     >
                         Login
                     </a>
 
                     <a
                         href="register.php"
-                        class="hidden rounded-xl bg-red-600 px-5 py-2.5 font-bold text-white shadow-lg shadow-red-100 transition hover:-translate-y-0.5 hover:bg-red-700 lg:block"
+                        class="hidden rounded-lg bg-red-600 px-4 py-2 font-semibold text-white transition-colors hover:bg-red-700 lg:block"
                     >
                         Create account
                     </a>
@@ -677,19 +667,19 @@ $genre_visuals = [
                 <button
                     id="menuBtn"
                     type="button"
-                    class="flex h-10 w-10 flex-col items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white lg:hidden"
+                    class="flex flex-col gap-1.5 p-1 focus:outline-none lg:hidden"
                     aria-label="Open navigation menu"
                     aria-expanded="false"
                     aria-controls="mobileMenu"
                 >
                     <span
-                        class="hamburger-line h-0.5 w-5 rounded bg-gray-800 transition-all duration-300"
+                        class="hamburger-line h-0.5 w-6 rounded bg-gray-700 transition-all duration-300"
                     ></span>
                     <span
-                        class="hamburger-line h-0.5 w-5 rounded bg-gray-800 transition-all duration-300"
+                        class="hamburger-line h-0.5 w-6 rounded bg-gray-700 transition-all duration-300"
                     ></span>
                     <span
-                        class="hamburger-line h-0.5 w-5 rounded bg-gray-800 transition-all duration-300"
+                        class="hamburger-line h-0.5 w-6 rounded bg-gray-700 transition-all duration-300"
                     ></span>
                 </button>
             </div>
@@ -699,24 +689,24 @@ $genre_visuals = [
             id="mobileMenu"
             class="border-t border-gray-100 bg-white lg:hidden"
         >
-            <div class="space-y-1 px-5 py-4 sm:px-6">
+            <div class="space-y-2 px-6 py-4">
                 <a
                     href="index.php"
-                    class="block rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600"
+                    class="block py-2 text-sm text-gray-600 hover:text-red-600"
                 >
                     Home
                 </a>
 
                 <a
                     href="customer/home.php"
-                    class="block rounded-xl px-4 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-red-600"
+                    class="block py-2 text-sm text-gray-600 hover:text-red-600"
                 >
                     Catalog
                 </a>
 
                 <a
                     href="#rankings"
-                    class="block rounded-xl px-4 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-red-600"
+                    class="block py-2 text-sm text-gray-600 hover:text-red-600"
                     data-close-menu
                 >
                     Rankings
@@ -724,7 +714,7 @@ $genre_visuals = [
 
                 <a
                     href="#new-releases"
-                    class="block rounded-xl px-4 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-red-600"
+                    class="block py-2 text-sm text-gray-600 hover:text-red-600"
                     data-close-menu
                 >
                     New Releases
@@ -732,51 +722,49 @@ $genre_visuals = [
 
                 <a
                     href="tier.php"
-                    class="block rounded-xl px-4 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-red-600"
+                    class="block py-2 text-sm text-gray-600 hover:text-red-600"
                 >
                     Membership
                 </a>
 
-                <div class="mt-3 border-t border-gray-100 pt-3">
-                    <?php if (isset($_SESSION['user_id'])): ?>
-                        <a
-                            href="customer/profile.php"
-                            class="block rounded-xl px-4 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-red-600"
-                        >
-                            My account
-                        </a>
+                <?php if (isset($_SESSION['user_id'])): ?>
+                    <a
+                        href="customer/profile.php"
+                        class="block py-2 text-sm text-gray-600 hover:text-red-600"
+                    >
+                        My Account
+                    </a>
 
-                        <a
-                            href="customer/cart.php"
-                            class="block rounded-xl px-4 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-red-600"
-                        >
-                            Cart<?= $cart_count > 0
-                                ? ' (' . $cart_count . ')'
-                                : '' ?>
-                        </a>
-                    <?php else: ?>
-                        <a
-                            href="login.php"
-                            class="block rounded-xl px-4 py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-red-600"
-                        >
-                            Login
-                        </a>
+                    <a
+                        href="customer/cart.php"
+                        class="block py-2 text-sm text-gray-600 hover:text-red-600"
+                    >
+                        Cart<?= $cart_count > 0
+                            ? ' (' . $cart_count . ')'
+                            : '' ?>
+                    </a>
+                <?php else: ?>
+                    <a
+                        href="login.php"
+                        class="block py-2 text-sm text-gray-600 hover:text-red-600"
+                    >
+                        Login
+                    </a>
 
-                        <a
-                            href="register.php"
-                            class="mt-2 block rounded-xl bg-red-600 px-4 py-3 text-center text-sm font-bold text-white"
-                        >
-                            Create account
-                        </a>
-                    <?php endif; ?>
-                </div>
+                    <a
+                        href="register.php"
+                        class="block py-2 text-sm font-semibold text-red-600 hover:text-red-700"
+                    >
+                        Create account
+                    </a>
+                <?php endif; ?>
             </div>
         </div>
     </nav>
 
     <div
         id="mobileOverlay"
-        class="fixed inset-0 z-40 hidden bg-black/40 backdrop-blur-sm lg:hidden"
+        class="fixed inset-0 z-40 hidden bg-black/30 lg:hidden"
     ></div>
 
     <!-- Hero -->
@@ -2082,170 +2070,148 @@ $genre_visuals = [
     </section>
 
     <!-- Footer -->
-    <footer class="bg-[#0d1424] text-white">
-        <div class="mx-auto max-w-7xl px-5 py-14 sm:px-6">
+    <footer
+        class="border-t border-gray-200 bg-[#F5F0EB] py-12 text-gray-800"
+    >
+        <div class="mx-auto max-w-7xl px-6">
             <div
-                class="grid gap-10 border-b border-white/10 pb-12 sm:grid-cols-2 lg:grid-cols-[1.2fr_0.8fr_0.8fr_1fr]"
+                class="mb-10 grid grid-cols-2 gap-8 md:grid-cols-4"
             >
-                <div>
-                    <a
-                        href="index.php"
-                        class="inline-flex items-center gap-3"
-                    >
-                        <span
-                            class="flex h-10 w-10 items-center justify-center rounded-xl bg-red-600 text-sm font-black text-white"
-                        >
-                            MV
-                        </span>
-
-                        <span
-                            class="text-xl font-black tracking-[0.08em]"
-                        >
-                            MANGA<span class="text-red-500">VAULT</span>
-                        </span>
-                    </a>
+                <div class="col-span-2 md:col-span-1">
+                    <h3 class="mb-4 text-lg font-black">
+                        MANGA<span class="text-red-600">VAULT</span>
+                    </h3>
 
                     <p
-                        class="mt-5 max-w-sm text-sm leading-6 text-white/45"
+                        class="text-sm leading-relaxed text-gray-600"
                     >
-                        A Malaysian online destination for physical manga,
-                        e-books, secure checkout and reader rewards.
+                        Malaysia's ultimate destination for manga and
+                        comic book lovers.
                     </p>
                 </div>
 
                 <div>
-                    <h3
-                        class="text-xs font-black uppercase tracking-[0.2em] text-white/35"
+                    <h4
+                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
                     >
                         Shop
-                    </h3>
+                    </h4>
 
-                    <ul class="mt-5 space-y-3 text-sm text-white/60">
+                    <ul class="space-y-2 text-sm text-gray-600">
                         <li>
                             <a
                                 href="customer/home.php"
-                                class="transition hover:text-white"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
                             >
-                                All manga
+                                All Manga
                             </a>
                         </li>
+
                         <li>
                             <a
                                 href="customer/home.php?type=physical"
-                                class="transition hover:text-white"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
                             >
-                                Physical books
+                                Physical Books
                             </a>
                         </li>
+
                         <li>
                             <a
                                 href="customer/home.php?type=ebook"
-                                class="transition hover:text-white"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
                             >
-                                E-books
-                            </a>
-                        </li>
-                        <li>
-                            <a
-                                href="#new-releases"
-                                class="transition hover:text-white"
-                            >
-                                New releases
+                                E-Books
                             </a>
                         </li>
                     </ul>
                 </div>
 
                 <div>
-                    <h3
-                        class="text-xs font-black uppercase tracking-[0.2em] text-white/35"
+                    <h4
+                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
                     >
-                        Support
-                    </h3>
+                        Help
+                    </h4>
 
-                    <ul class="mt-5 space-y-3 text-sm text-white/60">
+                    <ul class="space-y-2 text-sm text-gray-600">
                         <li>
                             <a
                                 href="customer/orders.php"
-                                class="transition hover:text-white"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
                             >
-                                My orders
+                                My Orders
                             </a>
                         </li>
+
                         <li>
                             <a
                                 href="customer/profile.php"
-                                class="transition hover:text-white"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
                             >
-                                My account
+                                My Account
                             </a>
                         </li>
+
                         <li>
                             <a
                                 href="customer/faq.php"
-                                class="transition hover:text-white"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
                             >
                                 FAQ
                             </a>
                         </li>
+
                         <li>
                             <a
                                 href="customer/about.php"
-                                class="transition hover:text-white"
+                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
                             >
-                                About MangaVault
+                                About Us
                             </a>
                         </li>
                     </ul>
                 </div>
 
                 <div>
-                    <h3
-                        class="text-xs font-black uppercase tracking-[0.2em] text-white/35"
+                    <h4
+                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
                     >
-                        Shopping with confidence
-                    </h3>
+                        Follow Us
+                    </h4>
 
-                    <div class="mt-5 space-y-4">
-                        <div
-                            class="rounded-2xl border border-white/10 bg-white/[0.04] p-4"
+                    <div class="flex gap-3">
+                        <a
+                            href="#"
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
+                            aria-label="Facebook"
                         >
-                            <p class="text-sm font-black text-white">
-                                Secure card payment
-                            </p>
-                            <p
-                                class="mt-1 text-xs leading-5 text-white/40"
-                            >
-                                Checkout is processed through Stripe.
-                            </p>
-                        </div>
+                            f
+                        </a>
 
-                        <div
-                            class="rounded-2xl border border-white/10 bg-white/[0.04] p-4"
+                        <a
+                            href="#"
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
+                            aria-label="Twitter"
                         >
-                            <p class="text-sm font-black text-white">
-                                Customer support
-                            </p>
-                            <p
-                                class="mt-1 text-xs leading-5 text-white/40"
-                            >
-                                Use FAQ or MangaBot after signing in.
-                            </p>
-                        </div>
+                            t
+                        </a>
+
+                        <a
+                            href="#"
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
+                            aria-label="LinkedIn"
+                        >
+                            in
+                        </a>
                     </div>
                 </div>
             </div>
 
             <div
-                class="flex flex-col gap-3 pt-7 text-xs text-white/35 sm:flex-row sm:items-center sm:justify-between"
+                class="border-t border-gray-300 pt-6 text-center text-xs text-gray-500"
             >
-                <p>
-                    © 2026 MangaVault. All rights reserved.
-                </p>
-
-                <p>
-                    Physical manga · E-books · Membership rewards
-                </p>
+                © 2026 MangaVault. All rights reserved.
             </div>
         </div>
     </footer>
