@@ -1,10 +1,12 @@
 <?php
+
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
-$user_id = $_SESSION['user_id'];
+$user_id = current_user_id();
 
 // Get ebooks
 $collection = $pdo->prepare("
@@ -171,22 +173,45 @@ $total_physical = count($owned_ids);
                                     <h3 class="font-semibold text-sm text-gray-800 line-clamp-2 mb-1"><?= htmlspecialchars($item['product_title']) ?></h3>
                                     <p class="text-xs text-gray-400 mb-1"><?= htmlspecialchars($item['product_author'] ?? '') ?></p>
                                     <p class="text-xs text-gray-400 mb-3">Purchased <?= date('d M Y', strtotime($item['purchased_at'])) ?></p>
-                                    <?php $downloads_left = $item['ebook_download_limit'] - $item['order_item_download_count']; ?>
+                                    <?php
+                                    $download_limit = max(
+                                        0,
+                                        (int) $item['ebook_download_limit']
+                                    );
+                                    $download_count = max(
+                                        0,
+                                        (int) $item['order_item_download_count']
+                                    );
+                                    $downloads_left = max(
+                                        0,
+                                        $download_limit - $download_count
+                                    );
+                                    ?>
                                     <div class="mb-3">
                                         <div class="flex justify-between text-xs text-gray-400 mb-1">
                                             <span>Downloads</span>
-                                            <span><?= $item['order_item_download_count'] ?>/<?= $item['ebook_download_limit'] ?></span>
+                                            <span><?= $download_count ?>/<?= $download_limit ?></span>
                                         </div>
                                         <div class="w-full bg-gray-100 rounded-full h-1.5">
                                             <div class="bg-red-500 h-1.5 rounded-full"
-                                                 style="width: <?= min(100, ($item['order_item_download_count'] / $item['ebook_download_limit']) * 100) ?>%"></div>
+                                                 style="width: <?= $download_limit > 0 ? min(100, ($download_count / $download_limit) * 100) : 100 ?>%"></div>
                                         </div>
                                     </div>
                                     <?php if ($downloads_left > 0): ?>
-                                        <a href="download.php?item_id=<?= $item['order_item_id'] ?>"
-                                           class="block text-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors">
-                                            ↓ Download (<?= $downloads_left ?> left)
-                                        </a>
+                                        <form method="POST" action="download.php">
+                                            <?php csrf_field(); ?>
+                                            <input
+                                                type="hidden"
+                                                name="item_id"
+                                                value="<?= (int) $item['order_item_id'] ?>"
+                                            >
+                                            <button
+                                                type="submit"
+                                                class="block w-full text-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors"
+                                            >
+                                                ↓ Download (<?= (int) $downloads_left ?> left)
+                                            </button>
+                                        </form>
                                     <?php else: ?>
                                         <button disabled class="w-full bg-gray-100 text-gray-400 text-xs font-semibold py-2 rounded-lg cursor-not-allowed">
                                             Download Limit Reached

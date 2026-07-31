@@ -5,6 +5,7 @@ require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/ebook_helper.php';
 
 $user_id = current_user_id();
 
@@ -34,13 +35,14 @@ $stmt = $pdo->prepare("
         pe.ebook_download_limit
     FROM products p
     LEFT JOIN categories c
-        ON p.product_category_id = c.category_id
+        ON c.category_id = p.product_category_id
     LEFT JOIN product_physical pp
-        ON p.product_id = pp.physical_product_id
+        ON pp.physical_product_id = p.product_id
     LEFT JOIN product_ebook pe
-        ON p.product_id = pe.ebook_product_id
+        ON pe.ebook_product_id = p.product_id
     WHERE p.product_id = ?
     AND p.product_is_available = 1
+    LIMIT 1
 ");
 $stmt->execute([$id]);
 $product = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -54,25 +56,45 @@ $genres_stmt = $pdo->prepare("
     SELECT g.genre_name
     FROM product_genres pg
     JOIN genres g
-        ON pg.product_genres_genre_id = g.genre_id
+        ON g.genre_id = pg.product_genres_genre_id
     WHERE pg.product_genres_product_id = ?
 ");
 $genres_stmt->execute([$id]);
 $genres = $genres_stmt->fetchAll(PDO::FETCH_COLUMN);
 
-$in_wishlist = $pdo->prepare("
+$in_wishlist_stmt = $pdo->prepare("
     SELECT wishlist_id
     FROM wishlist
     WHERE wishlist_user_id = ?
     AND wishlist_product_id = ?
     LIMIT 1
 ");
-$in_wishlist->execute([
+$in_wishlist_stmt->execute([
     $user_id,
     $id,
 ]);
 $in_wishlist =
-    $in_wishlist->fetchColumn() !== false;
+    $in_wishlist_stmt->fetchColumn() !== false;
+
+$owns_ebook = false;
+$ebook_ready = true;
+$ebook_error = '';
+
+if ($product['product_type'] === 'ebook') {
+    $owns_ebook = customerOwnsEbook(
+        $pdo,
+        $user_id,
+        $id
+    );
+
+    try {
+        loadPurchasableEbook($pdo, $id);
+    } catch (RuntimeException $exception) {
+        $ebook_ready = false;
+        $ebook_error =
+            'This e-book is temporarily unavailable. Please contact support.';
+    }
+}
 
 $reviews = $pdo->prepare("
     SELECT
@@ -81,7 +103,7 @@ $reviews = $pdo->prepare("
         u.user_last_name
     FROM product_reviews r
     JOIN users u
-        ON r.review_user_id = u.user_id
+        ON u.user_id = r.review_user_id
     WHERE r.review_product_id = ?
     AND r.review_status = 'approved'
     ORDER BY r.review_created_at DESC
@@ -103,43 +125,45 @@ $avg_rating->execute([$id]);
 $avg = round($avg ?? 0, 1);
 $review_count = (int) $review_count;
 
-$can_review = false;
-$existing_review = null;
-
 $eligible_order = $pdo->prepare("
     SELECT o.order_id
     FROM order_items oi
     JOIN orders o
-        ON oi.order_item_order_id = o.order_id
+        ON o.order_id = oi.order_item_order_id
     WHERE o.order_user_id = ?
     AND oi.order_item_product_id = ?
-    AND o.order_status = 'delivered'
     AND o.order_payment_status = 'confirmed'
+    AND (
+        oi.order_item_type = 'ebook'
+        OR (
+            oi.order_item_type = 'physical'
+            AND o.order_status = 'delivered'
+        )
+    )
     LIMIT 1
 ");
 $eligible_order->execute([
     $user_id,
     $id,
 ]);
-$eligible_order =
-    $eligible_order->fetch(PDO::FETCH_ASSOC);
+$eligible_order = $eligible_order->fetch(PDO::FETCH_ASSOC);
 
-if ($eligible_order) {
-    $existing_stmt = $pdo->prepare("
-        SELECT *
-        FROM product_reviews
-        WHERE review_user_id = ?
-        AND review_product_id = ?
-        LIMIT 1
-    ");
-    $existing_stmt->execute([
-        $user_id,
-        $id,
-    ]);
-    $existing_review =
-        $existing_stmt->fetch(PDO::FETCH_ASSOC);
-    $can_review = !$existing_review;
-}
+$existing_review_stmt = $pdo->prepare("
+    SELECT *
+    FROM product_reviews
+    WHERE review_user_id = ?
+    AND review_product_id = ?
+    LIMIT 1
+");
+$existing_review_stmt->execute([
+    $user_id,
+    $id,
+]);
+$existing_review =
+    $existing_review_stmt->fetch(PDO::FETCH_ASSOC);
+$can_review =
+    $eligible_order !== false &&
+    $existing_review === false;
 
 $review_success = '';
 $review_error = '';
@@ -148,12 +172,8 @@ if (
     isset($_SESSION['product_review_success']) &&
     is_string($_SESSION['product_review_success'])
 ) {
-    $review_success =
-        $_SESSION['product_review_success'];
-
-    unset(
-        $_SESSION['product_review_success']
-    );
+    $review_success = $_SESSION['product_review_success'];
+    unset($_SESSION['product_review_success']);
 }
 
 if (
@@ -172,31 +192,31 @@ if (
             ],
         ]
     );
-    $comment_raw = $_POST['comment'] ?? null;
+    $commentInput = $_POST['comment'] ?? null;
 
     if ($rating === false || $rating === null) {
         $review_error = 'Please select a rating.';
-    } elseif (!is_string($comment_raw)) {
+    } elseif (!is_string($commentInput)) {
         $review_error = 'Please write a valid comment.';
     } else {
-        $comment = trim($comment_raw);
-        $comment_length = function_exists('mb_strlen')
+        $comment = trim($commentInput);
+        $commentLength = function_exists('mb_strlen')
             ? mb_strlen($comment, 'UTF-8')
             : strlen($comment);
 
         if ($comment === '') {
             $review_error = 'Please write a comment.';
-        } elseif ($comment_length > 2000) {
+        } elseif ($commentLength > 2000) {
             $review_error =
                 'Review comment cannot exceed 2000 characters.';
         } elseif (!$eligible_order) {
             $review_error =
-                'You can only review products you have purchased and received.';
+                'You can only review purchased products. Physical products must be delivered first.';
         } elseif ($existing_review) {
             $review_error =
                 'You have already reviewed this product.';
         } else {
-            $insert_review = $pdo->prepare("
+            $insertReview = $pdo->prepare("
                 INSERT INTO product_reviews (
                     review_user_id,
                     review_product_id,
@@ -207,7 +227,7 @@ if (
                 )
                 VALUES (?, ?, ?, ?, ?, 'approved')
             ");
-            $insert_review->execute([
+            $insertReview->execute([
                 $user_id,
                 $id,
                 (int) $eligible_order['order_id'],
@@ -234,7 +254,7 @@ $related = $pdo->prepare("
         pp.physical_stock_quantity
     FROM products p
     LEFT JOIN product_physical pp
-        ON p.product_id = pp.physical_product_id
+        ON pp.physical_product_id = p.product_id
     WHERE p.product_series = ?
     AND p.product_id != ?
     AND p.product_is_available = 1
@@ -246,6 +266,17 @@ $related->execute([
     $id,
 ]);
 $related = $related->fetchAll(PDO::FETCH_ASSOC);
+
+$ebook_status = $_GET['ebook_status'] ?? '';
+$ebook_status_message = '';
+
+if ($ebook_status === 'owned') {
+    $ebook_status_message =
+        'You already own this e-book. Open My Collection to download it.';
+} elseif ($ebook_status === 'unavailable') {
+    $ebook_status_message =
+        'This e-book is currently unavailable and was not added to your cart.';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -422,6 +453,16 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             <span class="text-gray-600"><?= htmlspecialchars($product['product_title']) ?></span>
         </p>
 
+        <?php if ($ebook_status_message !== ''): ?>
+        <div class="bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-3 rounded-xl mb-6">
+            <?= htmlspecialchars(
+                $ebook_status_message,
+                ENT_QUOTES,
+                'UTF-8'
+            ) ?>
+        </div>
+        <?php endif; ?>
+
         <!-- Product Detail -->
         <div class="product-detail-main-card bg-white rounded-2xl shadow-sm overflow-hidden mb-8">
             <div class="product-detail-main-row flex flex-col lg:flex-row gap-0">
@@ -562,7 +603,33 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
 
                     <!-- Actions -->
                     <div class="product-actions-row flex gap-3 flex-wrap">
-                        <?php if ($product['product_type'] === 'physical' && $product['physical_stock_quantity'] <= 0): ?>
+                        <?php if (
+                            $product['product_type'] === 'ebook' &&
+                            $owns_ebook
+                        ): ?>
+                            <a
+                                href="collection.php"
+                                class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-center font-bold py-3 px-6 rounded-xl transition-colors"
+                            >
+                                📚 Open My Collection
+                            </a>
+                        <?php elseif (
+                            $product['product_type'] === 'ebook' &&
+                            !$ebook_ready
+                        ): ?>
+                            <button
+                                type="button"
+                                disabled
+                                title="<?= htmlspecialchars(
+                                    $ebook_error,
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>"
+                                class="flex-1 bg-gray-200 text-gray-400 font-bold py-3 px-6 rounded-xl cursor-not-allowed"
+                            >
+                                E-Book Unavailable
+                            </button>
+                        <?php elseif ($product['product_type'] === 'physical' && $product['physical_stock_quantity'] <= 0): ?>
                             <button disabled class="flex-1 bg-gray-200 text-gray-400 font-bold py-3 px-6 rounded-xl cursor-not-allowed">
                                 Out of Stock
                             </button>
@@ -572,7 +639,7 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                                 <input type="hidden" name="action" value="add">
                                 <input type="hidden" name="product_id" value="<?= (int) $id ?>">
                                 <?php if ($product['product_type'] === 'physical'): ?>
-                                                                        <div
+                                    <div
                                         class="product-quantity-stepper"
                                         aria-label="Product quantity"
                                     >
@@ -793,7 +860,6 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                     </button>
                 </form>
             </div>
-            
             <?php endif; ?>
 
             <!-- Reviews List -->
@@ -833,7 +899,6 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         <div class="bg-white rounded-2xl shadow-sm p-6 mb-8" id="also-like-section">
             <div class="text-center mb-5">
                 <h3 class="font-bold text-gray-800 text-lg">✨ You Might Also Like</h3>
-                <!-- <p class="text-xs text-gray-400 mt-0.5">Powered by Claude AI</p> -->
             </div>
             <div id="also-like-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <?php for ($i = 0; $i < 3; $i++): ?>
@@ -860,352 +925,107 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
                     <h3 class="mb-4 text-lg font-black">
                         MANGA<span class="text-red-600">VAULT</span>
                     </h3>
-
-                    <p
-                        class="text-sm leading-relaxed text-gray-600"
-                    >
+                    <p class="text-sm leading-relaxed text-gray-600">
                         Malaysia's ultimate destination for manga
                         and comic book lovers.
                     </p>
                 </div>
-
                 <div>
-                    <h4
-                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
-                    >
-                        Shop
-                    </h4>
-
+                    <h4 class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800">Shop</h4>
                     <ul class="space-y-2 text-sm text-gray-600">
-                        <li>
-                            <a
-                                href="home.php"
-                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
-                            >
-                                All Manga
-                            </a>
-                        </li>
-
-                        <li>
-                            <a
-                                href="home.php?type=physical"
-                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
-                            >
-                                Physical Books
-                            </a>
-                        </li>
-
-                        <li>
-                            <a
-                                href="home.php?type=ebook"
-                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
-                            >
-                                E-Books
-                            </a>
-                        </li>
+                        <li><a href="home.php" class="inline-block transition-all hover:translate-x-1 hover:text-red-600">All Manga</a></li>
+                        <li><a href="home.php?type=physical" class="inline-block transition-all hover:translate-x-1 hover:text-red-600">Physical Books</a></li>
+                        <li><a href="home.php?type=ebook" class="inline-block transition-all hover:translate-x-1 hover:text-red-600">E-Books</a></li>
                     </ul>
                 </div>
-
                 <div>
-                    <h4
-                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
-                    >
-                        Help
-                    </h4>
-
+                    <h4 class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800">Help</h4>
                     <ul class="space-y-2 text-sm text-gray-600">
-                        <li>
-                            <a
-                                href="orders.php"
-                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
-                            >
-                                My Orders
-                            </a>
-                        </li>
-
-                        <li>
-                            <a
-                                href="profile.php"
-                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
-                            >
-                                My Account
-                            </a>
-                        </li>
-
-                        <li>
-                            <a
-                                href="faq.php"
-                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
-                            >
-                                FAQ
-                            </a>
-                        </li>
-
-                        <li>
-                            <a
-                                href="about.php"
-                                class="inline-block transition-all hover:translate-x-1 hover:text-red-600"
-                            >
-                                About Us
-                            </a>
-                        </li>
+                        <li><a href="orders.php" class="inline-block transition-all hover:translate-x-1 hover:text-red-600">My Orders</a></li>
+                        <li><a href="profile.php" class="inline-block transition-all hover:translate-x-1 hover:text-red-600">My Account</a></li>
+                        <li><a href="faq.php" class="inline-block transition-all hover:translate-x-1 hover:text-red-600">FAQ</a></li>
+                        <li><a href="about.php" class="inline-block transition-all hover:translate-x-1 hover:text-red-600">About Us</a></li>
                     </ul>
                 </div>
-
                 <div>
-                    <h4
-                        class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800"
-                    >
-                        Follow Us
-                    </h4>
-
+                    <h4 class="mb-4 text-sm font-bold uppercase tracking-wide text-gray-800">Follow Us</h4>
                     <div class="flex gap-3">
-                        <a
-                            href="#"
-                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
-                            aria-label="Facebook"
-                        >
-                            f
-                        </a>
-
-                        <a
-                            href="#"
-                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
-                            aria-label="Twitter"
-                        >
-                            t
-                        </a>
-
-                        <a
-                            href="#"
-                            class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white"
-                            aria-label="LinkedIn"
-                        >
-                            in
-                        </a>
+                        <a href="#" class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white" aria-label="Facebook">f</a>
+                        <a href="#" class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white" aria-label="Twitter">t</a>
+                        <a href="#" class="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-sm font-bold text-gray-600 transition-all hover:bg-red-600 hover:text-white" aria-label="LinkedIn">in</a>
                     </div>
                 </div>
             </div>
-
-            <div
-                class="border-t border-gray-300 pt-6 text-center text-xs text-gray-500"
-            >
+            <div class="border-t border-gray-300 pt-6 text-center text-xs text-gray-500">
                 © 2026 MangaVault. All rights reserved.
             </div>
         </div>
     </footer>
 
     <script>
-    const wishlistForm =
-        document.getElementById(
-            'productWishlistForm'
-        );
-    
-    const wishlistAjaxUrl =
-        wishlistForm?.dataset.ajaxUrl ?? '';
-
-    const wishlistButton =
-        document.getElementById(
-            'productWishlistButton'
-        );
-
-    const wishlistAction =
-        document.getElementById(
-            'productWishlistAction'
-        );
-
-    const wishlistIcon =
-        document.getElementById(
-            'productWishlistIcon'
-        );
-
-    const wishlistLabel =
-        document.getElementById(
-            'productWishlistLabel'
-        );
-
-    const wishlistToast =
-        document.getElementById(
-            'productWishlistToast'
-        );
-
+    const wishlistForm = document.getElementById('productWishlistForm');
+    const wishlistAjaxUrl = wishlistForm?.dataset.ajaxUrl ?? '';
+    const wishlistButton = document.getElementById('productWishlistButton');
+    const wishlistAction = document.getElementById('productWishlistAction');
+    const wishlistIcon = document.getElementById('productWishlistIcon');
+    const wishlistLabel = document.getElementById('productWishlistLabel');
+    const wishlistToast = document.getElementById('productWishlistToast');
     let wishlistToastTimer = null;
 
-    function showWishlistToast(
-        message,
-        isError = false
-    ) {
-        if (!wishlistToast) {
-            return;
-        }
-
-        wishlistToast.textContent =
-            message;
-
-        wishlistToast.classList.toggle(
-            'is-error',
-            isError
-        );
-
-        wishlistToast.classList.add(
-            'is-visible'
-        );
-
-        window.clearTimeout(
-            wishlistToastTimer
-        );
-
-        wishlistToastTimer =
-            window.setTimeout(
-                () => {
-                    wishlistToast.classList.remove(
-                        'is-visible'
-                    );
-                },
-                2200
-            );
+    function showWishlistToast(message, isError = false) {
+        if (!wishlistToast) return;
+        wishlistToast.textContent = message;
+        wishlistToast.classList.toggle('is-error', isError);
+        wishlistToast.classList.add('is-visible');
+        window.clearTimeout(wishlistToastTimer);
+        wishlistToastTimer = window.setTimeout(() => {
+            wishlistToast.classList.remove('is-visible');
+        }, 2200);
     }
 
-    if (
-        wishlistForm &&
-        wishlistAjaxUrl !== '' &&
-        wishlistButton &&
-        wishlistAction &&
-        wishlistIcon &&
-        wishlistLabel
-    ) {
-        wishlistForm.addEventListener(
-            'submit',
-            async event => {
-                event.preventDefault();
-
-                if (wishlistButton.disabled) {
-                    return;
+    if (wishlistForm && wishlistAjaxUrl !== '' && wishlistButton && wishlistAction && wishlistIcon && wishlistLabel) {
+        wishlistForm.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (wishlistButton.disabled) return;
+            const previousIcon = wishlistIcon.textContent;
+            wishlistButton.disabled = true;
+            wishlistButton.classList.add('is-loading');
+            wishlistIcon.textContent = '…';
+            try {
+                const response = await fetch(wishlistAjaxUrl, {
+                    method: 'POST',
+                    body: new FormData(wishlistForm),
+                    headers: {
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    credentials: 'same-origin',
+                });
+                const data = await response.json().catch(() => null);
+                if (!response.ok || !data || data.success !== true) {
+                    throw new Error(data?.message || 'Unable to update your wishlist.');
                 }
-
-                const previousIcon =
-                    wishlistIcon.textContent;
-
-                wishlistButton.disabled = true;
-
-                wishlistButton.classList.add(
-                    'is-loading'
-                );
-
-                wishlistIcon.textContent = '…';
-
-                try {
-                    const response = await fetch(
-                        wishlistAjaxUrl,
-                        {
-                            method: 'POST',
-                            body: new FormData(
-                                wishlistForm
-                            ),
-                            headers: {
-                                Accept:
-                                    'application/json',
-                                'X-Requested-With':
-                                    'XMLHttpRequest',
-                            },
-                            credentials:
-                                'same-origin',
-                        }
-                    );
-
-                    const data =
-                        await response
-                            .json()
-                            .catch(
-                                () => null
-                            );
-
-                    if (
-                        !response.ok ||
-                        !data ||
-                        data.success !== true
-                    ) {
-                        throw new Error(
-                            data?.message ||
-                            'Unable to update your wishlist.'
-                        );
-                    }
-
-                    const isActive =
-                        data.in_wishlist === true;
-
-                    wishlistAction.value =
-                        data.next_action;
-
-                    wishlistButton.classList.toggle(
-                        'is-active',
-                        isActive
-                    );
-
-                    wishlistButton.setAttribute(
-                        'aria-pressed',
-                        isActive
-                            ? 'true'
-                            : 'false'
-                    );
-
-                    wishlistButton.setAttribute(
-                        'aria-label',
-                        isActive
-                            ? 'Remove from wishlist'
-                            : 'Add to wishlist'
-                    );
-
-                    wishlistIcon.textContent =
-                        isActive
-                            ? '♥'
-                            : '♡';
-
-                    wishlistLabel.textContent =
-                        isActive
-                            ? 'Remove from wishlist'
-                            : 'Add to wishlist';
-
-                    wishlistButton.classList.add(
-                        'is-success'
-                    );
-
-                    window.setTimeout(
-                        () => {
-                            wishlistButton.classList.remove(
-                                'is-success'
-                            );
-                        },
-                        350
-                    );
-
-                    showWishlistToast(
-                        data.message
-                    );
-                } catch (error) {
-                    wishlistIcon.textContent =
-                        previousIcon;
-
-                    showWishlistToast(
-                        error instanceof Error
-                            ? error.message
-                            : 'Unable to update your wishlist.',
-                        true
-                    );
-                } finally {
-                    wishlistButton.disabled =
-                        false;
-
-                    wishlistButton.classList.remove(
-                        'is-loading'
-                    );
-                }
+                const isActive = data.in_wishlist === true;
+                wishlistAction.value = data.next_action;
+                wishlistButton.classList.toggle('is-active', isActive);
+                wishlistButton.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                wishlistButton.setAttribute('aria-label', isActive ? 'Remove from wishlist' : 'Add to wishlist');
+                wishlistIcon.textContent = isActive ? '♥' : '♡';
+                wishlistLabel.textContent = isActive ? 'Remove from wishlist' : 'Add to wishlist';
+                wishlistButton.classList.add('is-success');
+                window.setTimeout(() => wishlistButton.classList.remove('is-success'), 350);
+                showWishlistToast(data.message);
+            } catch (error) {
+                wishlistIcon.textContent = previousIcon;
+                showWishlistToast(error instanceof Error ? error.message : 'Unable to update your wishlist.', true);
+            } finally {
+                wishlistButton.disabled = false;
+                wishlistButton.classList.remove('is-loading');
             }
-        );
+        });
     }
 
     let currentRating = 0;
-
     function setRating(rating) {
         currentRating = rating;
         document.getElementById('ratingInput').value = rating;
@@ -1215,7 +1035,6 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         }
     }
 
-    // Hover effect
     for (let i = 1; i <= 5; i++) {
         const star = document.getElementById('star-' + i);
         if (!star) continue;
@@ -1231,7 +1050,6 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
         });
     }
 
-    // Load AI "You Might Also Like"
     const recommendationUrl = <?= json_encode(app_path('customer/get_recommendations.php')) ?>;
     const productDetailUrl = <?= json_encode(app_path('customer/product_detail.php')) ?>;
     const imageBaseUrl = <?= json_encode(app_path('assets/images/')) ?>;
@@ -1249,60 +1067,16 @@ $related = $related->fetchAll(PDO::FETCH_ASSOC);
             return;
         }
         grid.innerHTML = data.products.map(p => `
-            <a
-                href="${productDetailUrl}?id=${p.product_id}"
-                class="group bg-white border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col"
-            >
-                <div
-                    class="relative h-72 bg-[#F5F0EB] flex items-center justify-center overflow-hidden"
-                >
+            <a href="${productDetailUrl}?id=${p.product_id}" class="group bg-white border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-all duration-200 hover:-translate-y-1 flex flex-col">
+                <div class="relative h-72 bg-[#F5F0EB] flex items-center justify-center overflow-hidden">
                     ${p.product_cover_image
-                        ? `
-                            <img
-                                src="${imageBaseUrl}${p.product_cover_image}"
-                                alt=""
-                                aria-hidden="true"
-                                class="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-25"
-                            >
-
-                            <img
-                                src="${imageBaseUrl}${p.product_cover_image}"
-                                alt="Recommended product cover"
-                                class="relative z-10 w-full h-full object-contain p-4 group-hover:scale-105 transition-transform duration-300"
-                            >
-                        `
-                        : `
-                            <div
-                                class="w-full h-full flex items-center justify-center text-gray-400 text-xs"
-                            >
-                                No Image
-                            </div>
-                        `
-                    }
+                        ? `<img src="${imageBaseUrl}${p.product_cover_image}" alt="" aria-hidden="true" class="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-25"><img src="${imageBaseUrl}${p.product_cover_image}" alt="Recommended product cover" class="relative z-10 w-full h-full object-contain p-4 group-hover:scale-105 transition-transform duration-300">`
+                        : `<div class="w-full h-full flex items-center justify-center text-gray-400 text-xs">No Image</div>`}
                 </div>
-
-                <div
-                    class="p-4 border-t border-gray-100 bg-white mt-auto"
-                >
-                    <p
-                        class="font-bold text-sm text-gray-800 truncate mb-1"
-                    >
-                        ${p.product_title}
-                    </p>
-
-                    <p
-                        class="text-xs text-gray-400 truncate mb-2"
-                    >
-                        ${p.genres || ''}
-                    </p>
-
-                    <p
-                        class="font-black text-red-600 text-base"
-                    >
-                        RM ${parseFloat(
-                            p.product_price
-                        ).toFixed(2)}
-                    </p>
+                <div class="p-4 border-t border-gray-100 bg-white mt-auto">
+                    <p class="font-bold text-sm text-gray-800 truncate mb-1">${p.product_title}</p>
+                    <p class="text-xs text-gray-400 truncate mb-2">${p.genres || ''}</p>
+                    <p class="font-black text-red-600 text-base">RM ${parseFloat(p.product_price).toFixed(2)}</p>
                 </div>
             </a>`
         ).join('');

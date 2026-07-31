@@ -4,6 +4,7 @@ require_once dirname(__DIR__) . '/vendor/autoload.php';
 require_once __DIR__ . '/stripe_config.php';
 require_once __DIR__ . '/money_helper.php';
 require_once __DIR__ . '/payment_draft_helper.php';
+require_once __DIR__ . '/ebook_helper.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/notifications.php';
 require_once __DIR__ . '/mail_config.php';
@@ -557,6 +558,50 @@ function finalizePaidPaymentDraft(
             throw new PaymentFinalizationException(
                 'The payment draft contains no items.'
             );
+        }
+
+        /*
+         * Revalidate every e-book inside the same transaction that creates
+         * the order. The product row lock serializes concurrent purchases,
+         * while the ownership check blocks repeat purchases from stale carts
+         * or multiple Stripe Checkout sessions.
+         */
+        foreach ($items as $item) {
+            if (
+                (string) $item[
+                    'payment_draft_item_type'
+                ] !== 'ebook'
+            ) {
+                continue;
+            }
+
+            $ebookProductId = (int) $item[
+                'payment_draft_item_product_id'
+            ];
+            $ebookQuantity = (int) $item[
+                'payment_draft_item_quantity'
+            ];
+
+            if ($ebookProductId < 1 || $ebookQuantity !== 1) {
+                throw new PaymentFinalizationException(
+                    'Each e-book must have a quantity of exactly one.'
+                );
+            }
+
+            try {
+                assertCustomerCanPurchaseEbook(
+                    $pdo,
+                    $userId,
+                    $ebookProductId,
+                    true
+                );
+            } catch (RuntimeException $exception) {
+                throw new PaymentFinalizationException(
+                    $exception->getMessage(),
+                    0,
+                    $exception
+                );
+            }
         }
 
         $hasPhysical =

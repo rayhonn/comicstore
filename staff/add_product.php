@@ -2,20 +2,27 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ .
-    '/../includes/upload_helper.php';
-require_once __DIR__ .
-    '/../includes/product_validation_helper.php';
-require_once __DIR__ .
-    '/../includes/notifications.php';
+require_once __DIR__ . '/../includes/upload_helper.php';
+require_once __DIR__ . '/../includes/product_validation_helper.php';
+require_once __DIR__ . '/../includes/notifications.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_staff();
 
 $error = '';
-$categories = $pdo->query("SELECT * FROM categories ORDER BY category_name")->fetchAll(PDO::FETCH_ASSOC);
-$genres = $pdo->query("SELECT * FROM genres ORDER BY genre_name")->fetchAll(PDO::FETCH_ASSOC);
+$categories = $pdo->query(
+    "SELECT * FROM categories ORDER BY category_name"
+)->fetchAll(PDO::FETCH_ASSOC);
+$genres = $pdo->query(
+    "SELECT * FROM genres ORDER BY genre_name"
+)->fetchAll(PDO::FETCH_ASSOC);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_verify();
+
+    $newCoverImage = '';
+    $newEbookFile = '';
+
     try {
         $validated = validateProductFormInput(
             $_POST,
@@ -31,71 +38,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $isbn = $validated['isbn'];
         $description = $validated['description'];
         $price = $validated['price'];
-        $category_id = $validated['category_id'];
+        $categoryId = $validated['category_id'];
         $type = $validated['type'];
-        $selected_genres =
-            $validated['selected_genres'];
-        $is_available = isset(
+        $selectedGenres = $validated['selected_genres'];
+        $isAvailable = isset(
             $_POST['product_is_available']
         ) ? 1 : 0;
 
-        $cover_image = '';
-        $cover_upload =
-            $_FILES['product_cover_image'] ?? null;
+        $coverUpload = $_FILES['product_cover_image'] ?? null;
 
-        if (is_array($cover_upload)) {
-            $cover_image = uploadProductImage(
-                $cover_upload,
+        if ($coverUpload !== null) {
+            if (!is_array($coverUpload)) {
+                throw new ProductInputValidationException(
+                    'Product image upload is invalid.'
+                );
+            }
+
+            $newCoverImage = uploadProductImage(
+                $coverUpload,
                 '../assets/images/'
             );
         }
 
-        $ebook_file = '';
+        $ebookMetadata = null;
 
         if ($type === 'ebook') {
-            $ebook_upload =
-                $_FILES['ebook_file'] ?? null;
+            $ebookUpload = $_FILES['ebook_file'] ?? null;
 
-            if (
-                !is_array($ebook_upload) ||
-                !isset($ebook_upload['error']) ||
-                is_array($ebook_upload['error']) ||
-                $ebook_upload['error'] ===
-                    UPLOAD_ERR_NO_FILE ||
-                trim(
-                    (string) (
-                        $ebook_upload['name'] ?? ''
-                    )
-                ) === ''
-            ) {
+            if (!is_array($ebookUpload)) {
                 throw new ProductInputValidationException(
                     'An e-book file is required.'
                 );
             }
 
-            $submitted_format = strtoupper(
-                pathinfo(
-                    (string) $ebook_upload['name'],
-                    PATHINFO_EXTENSION
-                )
+            $ebookMetadata = storeValidatedEbookUpload(
+                $ebookUpload
             );
+            $newEbookFile = (string) $ebookMetadata['file_name'];
 
             if (
-                $submitted_format !==
+                $ebookMetadata['format'] !==
                 $validated['file_format']
             ) {
                 throw new ProductInputValidationException(
-                    'The selected e-book format does not match the uploaded file.'
+                    'The selected e-book format does not match the validated file content.'
                 );
             }
-
-            $ebook_file = uploadEbookFile(
-                $ebook_upload,
-                '../assets/ebooks/'
-            );
         }
 
-        $stmt = $pdo->prepare("
+        $pdo->beginTransaction();
+
+        $productInsert = $pdo->prepare("
             INSERT INTO products (
                 product_title,
                 product_series,
@@ -112,8 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
-
-        $stmt->execute([
+        $productInsert->execute([
             $title,
             $series,
             $volume,
@@ -122,17 +114,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $isbn,
             $description,
             $price,
-            $cover_image,
-            $category_id,
+            $newCoverImage,
+            $categoryId,
             $type,
-            $is_available,
+            $isAvailable,
         ]);
 
-        $product_id =
-            (int) $pdo->lastInsertId();
+        $productId = (int) $pdo->lastInsertId();
 
         if ($type === 'physical') {
-            $pdo->prepare("
+            $physicalInsert = $pdo->prepare("
                 INSERT INTO product_physical (
                     physical_product_id,
                     physical_stock_quantity,
@@ -141,28 +132,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     physical_dimensions
                 )
                 VALUES (?, ?, ?, ?, ?)
-            ")->execute([
-                $product_id,
+            ");
+            $physicalInsert->execute([
+                $productId,
                 $validated['stock'],
                 $validated['threshold'],
                 $validated['weight'],
                 $validated['dimensions'],
             ]);
         } else {
-            $file_size = 0;
-            $ebook_path =
-                '../assets/ebooks/' .
-                $ebook_file;
-
-            if (file_exists($ebook_path)) {
-                $file_size = round(
-                    filesize($ebook_path) /
-                        1048576,
-                    2
+            if (!is_array($ebookMetadata)) {
+                throw new RuntimeException(
+                    'Validated e-book metadata is missing.'
                 );
             }
 
-            $pdo->prepare("
+            $ebookInsert = $pdo->prepare("
                 INSERT INTO product_ebook (
                     ebook_product_id,
                     ebook_file_path,
@@ -171,31 +156,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ebook_download_limit
                 )
                 VALUES (?, ?, ?, ?, ?)
-            ")->execute([
-                $product_id,
-                $ebook_file,
-                $validated['file_format'],
-                $file_size,
+            ");
+            $ebookInsert->execute([
+                $productId,
+                $ebookMetadata['file_name'],
+                $ebookMetadata['format'],
+                $ebookMetadata['size_mb'],
                 $validated['download_limit'],
             ]);
         }
 
-        foreach (
-            $selected_genres as $genre_id
-        ) {
-            $pdo->prepare("
-                INSERT INTO product_genres (
-                    product_genres_product_id,
-                    product_genres_genre_id
-                )
-                VALUES (?, ?)
-            ")->execute([
-                $product_id,
-                $genre_id,
+        $genreInsert = $pdo->prepare("
+            INSERT INTO product_genres (
+                product_genres_product_id,
+                product_genres_genre_id
+            )
+            VALUES (?, ?)
+        ");
+
+        foreach ($selectedGenres as $genreId) {
+            $genreInsert->execute([
+                $productId,
+                $genreId,
             ]);
         }
 
-        $pdo->prepare("
+        $logInsert = $pdo->prepare("
             INSERT INTO admin_logs (
                 log_admin_id,
                 log_action,
@@ -203,56 +189,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 log_target_id,
                 log_details
             )
-            VALUES (
-                ?,
-                'add_product',
-                'product',
-                ?,
-                ?
-            )
-        ")->execute([
+            VALUES (?, 'add_product', 'product', ?, ?)
+        ");
+        $logInsert->execute([
             $_SESSION['user_id'],
-            $product_id,
-            "Added product: $title",
+            $productId,
+            'Added product: ' . $title,
         ]);
 
-        if ($is_available) {
-            $type_label =
-                $type === 'ebook'
-                    ? 'E-Book'
-                    : 'Physical';
-
-            $notif_msg =
-                "New $type_label added: \"$title\"" .
-                (
-                    $series
-                        ? " ($series" .
-                            (
-                                $volume
-                                    ? " Vol.$volume"
-                                    : ''
-                            ) .
-                            ')'
-                        : ''
-                ) .
-                ' — RM ' .
-                number_format($price, 2) .
+        if ($isAvailable === 1) {
+            $typeLabel = $type === 'ebook'
+                ? 'E-Book'
+                : 'Physical';
+            $notificationMessage =
+                'New ' . $typeLabel . ' added: "' .
+                $title . '"' .
+                ($series !== ''
+                    ? ' (' . $series .
+                        ($volume !== null
+                            ? ' Vol.' . $volume
+                            : '') .
+                        ')'
+                    : '') .
+                ' — RM ' . number_format((float) $price, 2) .
                 '. Check it out now!';
 
             sendNotificationAll(
                 $pdo,
                 '🆕 New Release!',
-                $notif_msg,
+                $notificationMessage,
                 'promo'
             );
         }
 
-        header(
-            'Location: products.php?success=1'
-        );
+        $pdo->commit();
+
+        header('Location: products.php?success=1');
         exit;
-    } catch (Exception $e) {
-        $error = $e->getMessage();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        if ($newEbookFile !== '') {
+            deleteStoredEbookFile($newEbookFile);
+        }
+
+        if ($newCoverImage !== '') {
+            deleteUploadedProductImage(
+                '../assets/images/',
+                $newCoverImage
+            );
+        }
+
+        if ($exception instanceof PDOException) {
+            app_error_log(
+                'Product creation database error: ' .
+                $exception->getMessage()
+            );
+            $error = 'Unable to add the product. Please try again.';
+        } else {
+            $error = $exception->getMessage();
+        }
     }
 }
 ?>
@@ -286,6 +284,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
 
         <form method="POST" enctype="multipart/form-data" id="productForm">
+            <?php csrf_field(); ?>
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
