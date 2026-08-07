@@ -57,7 +57,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 OR user_gmail = ?
             )
             AND user_role = 'customer'
-            AND user_is_active = 1
             LIMIT 1
         ");
         $stmt->execute([
@@ -73,29 +72,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $user['user_password_hash']
             )
         ) {
-            session_regenerate_id(true);
+            if (
+                (int) $user['user_is_active'] !== 1
+            ) {
+                $error =
+                    'Your account has been deactivated. Please contact an administrator for assistance.';
+            } else {
+                session_regenerate_id(true);
 
-            $_SESSION['user_id'] =
-                (int) $user['user_id'];
-            $_SESSION['user_name'] =
-                $user['user_name'];
-            $_SESSION['user_first_name'] =
-                $user['user_first_name'];
-            $_SESSION['role'] = 'customer';
+                $_SESSION['user_id'] =
+                    (int) $user['user_id'];
+                $_SESSION['user_name'] =
+                    $user['user_name'];
+                $_SESSION['user_first_name'] =
+                    $user['user_first_name'];
+                $_SESSION['role'] = 'customer';
 
-            $update_login = $pdo->prepare("
-                UPDATE users
-                SET user_last_login = NOW()
-                WHERE user_id = ?
-            ");
-            $update_login->execute([
-                (int) $user['user_id'],
-            ]);
+                $update_login = $pdo->prepare("
+                    UPDATE users
+                    SET user_last_login = NOW()
+                    WHERE user_id = ?
+                ");
+                $update_login->execute([
+                    (int) $user['user_id'],
+                ]);
 
-            redirect_to(app_path('index.php'));
+                redirect_to(
+                    app_path('index.php')
+                );
+            }
+        } else {
+            $error =
+                'Invalid username or password.';
         }
-
-        $error = 'Invalid username or password.';
     }
 }
 ?>
