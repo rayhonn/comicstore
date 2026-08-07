@@ -847,7 +847,9 @@ if (
                                         MangaVault administrators will review your
                                         account deletion request within 3–5 working
                                         days. Your account remains active until the
-                                        request is approved.
+                                        request is approved or rejected. The final
+                                        decision will be sent to your registered
+                                        email address.
                                     </p>
 
                                     <p

@@ -27,6 +27,20 @@ $pending_reviews_count = (int) $pdo->query("
     WHERE review_status = 'pending'
 ")->fetchColumn();
 
+$pending_account_deletions_count = 0;
+
+if (is_senior_admin()) {
+    $pending_account_deletions_count =
+        (int) $pdo->query("
+            SELECT COUNT(*)
+            FROM
+                account_deletion_requests
+            WHERE
+                deletion_request_status =
+                    'pending'
+        ")->fetchColumn();
+}
+
 $low_stock_count = (int) $pdo->query("
     SELECT COUNT(*)
     FROM product_physical
@@ -76,6 +90,10 @@ $review_pages = [
 
 $user_pages = [
     'users.php',
+];
+
+$account_deletion_pages = [
+    'account_deletion_requests.php',
 ];
 
 $report_pages = [
@@ -368,6 +386,40 @@ $admin_access_label =
             <span class="w-6 text-center">♙</span>
             Customers
         </a>
+
+        <?php if (
+            is_senior_admin()
+        ): ?>
+        <a
+            href="account_deletion_requests.php"
+            class="<?= adminSidebarLinkClass(
+                in_array(
+                    $admin_current,
+                    $account_deletion_pages,
+                    true
+                )
+            ) ?> mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-sm"
+        >
+            <span
+                class="w-6 text-center"
+            >
+                ⊘
+            </span>
+
+            Deletion Requests
+
+            <?php if (
+                $pending_account_deletions_count >
+                0
+            ): ?>
+            <span
+                class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center"
+            >
+                <?= $pending_account_deletions_count ?>
+            </span>
+            <?php endif; ?>
+        </a>
+        <?php endif; ?>
 
         <p
             class="px-3 mt-6 mb-2 text-[10px] uppercase tracking-[0.18em] font-bold text-white/30"

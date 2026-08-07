@@ -79,6 +79,17 @@ $pending_reviews = (int) $pdo->query("
     WHERE review_status = 'pending'
 ")->fetchColumn();
 
+$pending_account_deletions = 0;
+
+if (is_senior_admin()) {
+    $pending_account_deletions =
+        (int) $pdo->query("
+            SELECT COUNT(*)
+            FROM account_deletion_requests
+            WHERE deletion_request_status = 'pending'
+        ")->fetchColumn();
+}
+
 $pending_supplier_returns = (int) $pdo->query("
     SELECT COUNT(*)
     FROM supplier_returns
@@ -228,7 +239,8 @@ $task_count =
     $pending_returns +
     $pending_reviews +
     $pending_supplier_returns +
-    $pending_pr;
+    $pending_pr +
+    $pending_account_deletions;
 
 $admin_name =
     $_SESSION['user_first_name'] ??
@@ -408,6 +420,33 @@ $admin_access_label =
                 Customers
             </a>
 
+            <?php if (
+                is_senior_admin()
+            ): ?>
+            <a
+                href="account_deletion_requests.php"
+                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >
+                <span
+                    class="w-6 text-center"
+                >
+                    ⊘
+                </span>
+
+                Deletion Requests
+
+                <?php if (
+                    $pending_account_deletions >
+                    0
+                ): ?>
+                <span
+                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center"
+                >
+                    <?= $pending_account_deletions ?>
+                </span>
+                <?php endif; ?>
+            </a>
+            <?php endif; ?>
             <p
                 class="px-3 mt-6 mb-2 text-[10px] uppercase tracking-[0.18em] font-bold text-white/30"
             >
