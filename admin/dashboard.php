@@ -234,6 +234,11 @@ $admin_name =
     $_SESSION['user_first_name'] ??
     $_SESSION['user_name'] ??
     'Admin';
+
+$admin_access_label =
+    is_senior_admin()
+        ? 'Super Admin'
+        : 'Admin';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -517,6 +522,14 @@ $admin_name =
                     >
                         Staff Accounts
                     </a>
+                    <?php if (is_senior_admin()): ?>
+                    <a
+                        href="admins.php"
+                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
+                    >
+                        Admin Accounts
+                    </a>
+                    <?php endif; ?>
                     <a
                         href="faq.php"
                         class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
@@ -548,11 +561,7 @@ $admin_name =
                 </p>
                 <p class="text-[10px] text-white/35 mt-0.5">
                     <?= htmlspecialchars(
-                        ucfirst(
-                            (string) (
-                                $_SESSION['role'] ?? 'admin'
-                            )
-                        ),
+                        $admin_access_label,
                         ENT_QUOTES,
                         'UTF-8'
                     ) ?>
