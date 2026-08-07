@@ -130,6 +130,7 @@ function safe_redirect_target(string $target, string $default): string
         'admin/index.php',
         'admin/dashboard.php',
         'admin/admins.php',
+        'admin/account_deletion_requests.php',
         'admin/goods_received.php',
         'admin/delivery_receipt.php',
 
@@ -222,11 +223,81 @@ function require_customer(): void
         empty($_SESSION['user_id']) ||
         ($_SESSION['role'] ?? '') !== 'customer'
     ) {
-        $currentPage = $_SERVER['REQUEST_URI'] ?? '';
-        $redirect = urlencode($currentPage);
+        $currentPage =
+            $_SERVER['REQUEST_URI'] ?? '';
 
-        // Customer login is located in the project root.
-        redirect_to(app_path('login.php') . '?redirect=' . $redirect);
+        $redirect =
+            urlencode($currentPage);
+
+        redirect_to(
+            app_path('login.php') .
+            '?redirect=' .
+            $redirect
+        );
+    }
+
+    /*
+     * Revalidate the customer account against the database
+     * on every protected customer request.
+     *
+     * This immediately invalidates an existing session after
+     * an administrator deactivates the account or a Super Admin
+     * approves an account deletion request.
+     */
+    global $pdo;
+
+    if (
+        !isset($pdo) ||
+        !($pdo instanceof PDO)
+    ) {
+        require_once __DIR__ .
+            '/db.php';
+    }
+
+    $accountStatement =
+        $pdo->prepare("
+            SELECT
+                user_is_active,
+                user_deleted_at
+            FROM users
+            WHERE user_id = ?
+            AND user_role = 'customer'
+            LIMIT 1
+        ");
+
+    $accountStatement->execute([
+        (int) $_SESSION['user_id'],
+    ]);
+
+    $account =
+        $accountStatement->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+    if (
+        !$account ||
+        (int) $account[
+            'user_is_active'
+        ] !== 1
+    ) {
+        $wasDeleted =
+            $account &&
+            !empty(
+                $account[
+                    'user_deleted_at'
+                ]
+            );
+
+        destroy_session();
+
+        redirect_to(
+            app_path('login.php') .
+            (
+                $wasDeleted
+                    ? '?account=closed'
+                    : '?account=deactivated'
+            )
+        );
     }
 }
 

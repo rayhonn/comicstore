@@ -95,6 +95,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'Customer account deactivated';
         } else {
             if (
+                $wasDeletedByCustomer &&
+                !is_senior_admin()
+            ) {
+                throw new RuntimeException(
+                    'Only a Super Admin can restore a customer account that was closed through the account deletion process.'
+                );
+            }
+
+            if (
                 (int) $customer[
                     'user_is_active'
                 ] === 1 &&
@@ -374,7 +383,27 @@ $active_users = (int) $pdo->query("
                             <?php endif; ?>
                         </td>
                         <td class="px-4 py-3">
-                            <form method="POST" class="inline">
+                            <?php if (
+                                !empty(
+                                    $user[
+                                        'user_deleted_at'
+                                    ]
+                                ) &&
+                                !is_senior_admin()
+                            ): ?>
+
+                            <span
+                                class="text-xs px-3 py-1.5 bg-gray-100 text-gray-500 rounded-lg font-semibold"
+                            >
+                                Super Admin Required
+                            </span>
+
+                            <?php else: ?>
+
+                            <form
+                                method="POST"
+                                class="inline"
+                            >
                                 <?php csrf_field(); ?>
 
                                 <input
@@ -414,7 +443,7 @@ $active_users = (int) $pdo->query("
                                 <button
                                     type="submit"
                                     onclick="return confirm('<?= !empty($user['user_deleted_at'])
-                                        ? 'Restore this customer account?'
+                                        ? 'Restore this deleted customer account?'
                                         : 'Activate this customer account?' ?>')"
                                     class="text-xs px-3 py-1.5 border border-green-200 text-green-600 rounded-lg hover:bg-green-50 transition-colors"
                                 >
@@ -423,12 +452,14 @@ $active_users = (int) $pdo->query("
                                             'user_deleted_at'
                                         ]
                                     )
-                                        ? 'Restore'
+                                        ? 'Restore Account'
                                         : 'Activate' ?>
                                 </button>
 
                                 <?php endif; ?>
                             </form>
+
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>

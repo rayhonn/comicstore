@@ -171,6 +171,16 @@ if (
                     );
                 }
 
+                if (
+                    (int) $request[
+                        'user_is_active'
+                    ] !== 1
+                ) {
+                    throw new RuntimeException(
+                        'Approval blocked because the customer account is currently inactive. Resolve the account status before processing this deletion request.'
+                    );
+                }
+
                 $paymentDraftCheck =
                     $pdo->prepare("
                         SELECT
@@ -289,6 +299,8 @@ if (
                         AND
                             user_role =
                                 'customer'
+                        AND
+                            user_is_active = 1
                         AND
                             user_deleted_at
                                 IS NULL

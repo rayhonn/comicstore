@@ -22,6 +22,16 @@ $account_deleted_notice =
     is_string($account_status) &&
     $account_status === 'deleted';
 
+$account_closed_notice =
+    $_SERVER['REQUEST_METHOD'] === 'GET' &&
+    is_string($account_status) &&
+    $account_status === 'closed';
+
+$account_deactivated_notice =
+    $_SERVER['REQUEST_METHOD'] === 'GET' &&
+    is_string($account_status) &&
+    $account_status === 'deactivated';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
@@ -843,6 +853,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         role="status"
                     >
                         Your account has been deleted successfully. Please contact an administrator if you need the account restored.
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if (
+                        $account_closed_notice
+                    ): ?>
+                    <div
+                        class="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                        role="alert"
+                    >
+                        Your account has been closed following approval of your account deletion request. Please contact a Super Admin if you need the account restored.
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if (
+                        $account_deactivated_notice
+                    ): ?>
+                    <div
+                        class="mb-5 rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-700"
+                        role="alert"
+                    >
+                        Your account has been deactivated. Please contact an administrator for assistance.
                     </div>
                     <?php endif; ?>
                     
