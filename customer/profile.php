@@ -14,6 +14,9 @@ $user = $stmt->fetch(PDO::FETCH_ASSOC);
 $error = '';
 $success = '';
 
+$deletionAgreementVersion =
+    '2026-08-08-v1';
+
 function profileInput(mixed $value, string $label, int $maxLength): string
 {
     if (!is_string($value)) {
@@ -100,41 +103,89 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([password_hash($new, PASSWORD_DEFAULT), $user_id]);
             $success = "Password changed successfully!";
         }
-    } elseif ($action === 'delete_account') {
-        $delete_password =
-            $_POST['delete_password'] ?? null;
+    } elseif (
+        $action ===
+        'request_account_deletion'
+    ) {
+        $deletePassword =
+            $_POST['delete_password']
+            ?? null;
 
-        $delete_confirmation =
-            $_POST['delete_confirmation'] ?? null;
+        $deleteConfirmation =
+            $_POST['delete_confirmation']
+            ?? null;
+
+        $agreementAccepted =
+            $_POST['deletion_agreement']
+            ?? null;
+
+        try {
+            $deletionReason =
+                profileInput(
+                    $_POST[
+                        'deletion_reason'
+                    ] ?? '',
+                    'Deletion reason',
+                    500
+                );
+        } catch (RuntimeException $e) {
+            $error = $e->getMessage();
+            $deletionReason = '';
+        }
 
         if (
-            !is_string($delete_password) ||
-            $delete_password === '' ||
-            strlen($delete_password) > 72 ||
-            !is_string($delete_confirmation)
+            $error === '' &&
+            (
+                !is_string(
+                    $deletePassword
+                ) ||
+                $deletePassword === '' ||
+                strlen(
+                    $deletePassword
+                ) > 72
+            )
         ) {
             $error =
-                'Delete account confirmation is invalid.';
+                'Please enter your current password.';
         } elseif (
-            $delete_confirmation !== 'DELETE'
+            $error === '' &&
+            (
+                !is_string(
+                    $deleteConfirmation
+                ) ||
+                $deleteConfirmation !==
+                    'DELETE'
+            )
         ) {
             $error =
-                'Type DELETE exactly to confirm account deletion.';
-        } else {
+                'Type DELETE exactly to confirm the deletion request.';
+        } elseif (
+            $error === '' &&
+            $agreementAccepted !== '1'
+        ) {
+            $error =
+                'You must read and accept the Account Deletion Agreement before submitting your request.';
+        }
+
+        if ($error === '') {
             try {
                 $pdo->beginTransaction();
 
-                $accountLock = $pdo->prepare("
-                    SELECT
-                        user_password_hash,
-                        user_gmail,
-                        user_is_active,
-                        user_deleted_at
-                    FROM users
-                    WHERE user_id = ?
-                    AND user_role = 'customer'
-                    FOR UPDATE
-                ");
+                $accountLock =
+                    $pdo->prepare("
+                        SELECT
+                            user_password_hash,
+                            user_gmail,
+                            user_phone,
+                            user_is_active,
+                            user_deleted_at
+                        FROM users
+                        WHERE user_id = ?
+                        AND user_role =
+                            'customer'
+                        FOR UPDATE
+                    ");
+
                 $accountLock->execute([
                     $user_id,
                 ]);
@@ -154,13 +205,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ] !== null
                 ) {
                     throw new RuntimeException(
-                        'Your account is not available for deletion.'
+                        'Your account is not available for an account deletion request.'
                     );
                 }
 
                 if (
                     !password_verify(
-                        $delete_password,
+                        $deletePassword,
                         $lockedAccount[
                             'user_password_hash'
                         ]
@@ -171,28 +222,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                 }
 
-                $paymentDraftCheck =
+                $existingRequest =
                     $pdo->prepare("
-                        SELECT payment_draft_id
-                        FROM payment_drafts
-                        WHERE payment_draft_user_id = ?
-                        AND payment_draft_status IN (
-                            'pending',
-                            'checkout_open'
-                        )
+                        SELECT
+                            deletion_request_id
+                        FROM
+                            account_deletion_requests
+                        WHERE
+                            deletion_request_user_id = ?
+                        AND
+                            deletion_request_status =
+                            'pending'
                         LIMIT 1
                         FOR UPDATE
                     ");
-                $paymentDraftCheck->execute([
+
+                $existingRequest->execute([
                     $user_id,
                 ]);
 
                 if (
-                    $paymentDraftCheck->fetchColumn()
-                    !== false
+                    $existingRequest
+                        ->fetchColumn() !== false
                 ) {
                     throw new RuntimeException(
-                        'You cannot delete your account while you have a pending checkout. Cancel or complete the checkout first.'
+                        'You already have an account deletion request under review.'
+                    );
+                }
+
+                $paymentDraftCheck =
+                    $pdo->prepare("
+                        SELECT
+                            payment_draft_id
+                        FROM payment_drafts
+                        WHERE
+                            payment_draft_user_id = ?
+                        AND
+                            payment_draft_status
+                            IN (
+                                'pending',
+                                'checkout_open',
+                                'paid'
+                            )
+                        LIMIT 1
+                        FOR UPDATE
+                    ");
+
+                $paymentDraftCheck
+                    ->execute([
+                        $user_id,
+                    ]);
+
+                if (
+                    $paymentDraftCheck
+                        ->fetchColumn() !==
+                    false
+                ) {
+                    throw new RuntimeException(
+                        'You cannot submit an account deletion request while you have a pending or processing checkout.'
                     );
                 }
 
@@ -200,7 +287,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare("
                         SELECT order_id
                         FROM orders
-                        WHERE order_user_id = ?
+                        WHERE
+                            order_user_id = ?
                         AND order_status IN (
                             'pending',
                             'processing',
@@ -209,16 +297,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         LIMIT 1
                         FOR UPDATE
                     ");
-                $activeOrderCheck->execute([
-                    $user_id,
-                ]);
+
+                $activeOrderCheck
+                    ->execute([
+                        $user_id,
+                    ]);
 
                 if (
-                    $activeOrderCheck->fetchColumn()
-                    !== false
+                    $activeOrderCheck
+                        ->fetchColumn() !==
+                    false
                 ) {
                     throw new RuntimeException(
-                        'You cannot delete your account while you have an active order. Please wait until the order is completed or cancelled.'
+                        'You cannot submit an account deletion request while you have an active order. Please wait until it is delivered or cancelled.'
                     );
                 }
 
@@ -226,89 +317,295 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare("
                         SELECT return_id
                         FROM return_requests
-                        WHERE return_user_id = ?
-                        AND return_status = 'pending'
+                        WHERE
+                            return_user_id = ?
+                        AND
+                            return_status =
+                            'pending'
                         LIMIT 1
                         FOR UPDATE
                     ");
-                $pendingReturnCheck->execute([
-                    $user_id,
-                ]);
+
+                $pendingReturnCheck
+                    ->execute([
+                        $user_id,
+                    ]);
 
                 if (
-                    $pendingReturnCheck->fetchColumn()
-                    !== false
+                    $pendingReturnCheck
+                        ->fetchColumn() !==
+                    false
                 ) {
                     throw new RuntimeException(
-                        'You cannot delete your account while you have a pending return request.'
+                        'You cannot submit an account deletion request while you have a pending return request.'
                     );
                 }
 
-                $deleteResetTokens =
+                $insertRequest =
                     $pdo->prepare("
-                        DELETE FROM password_resets
-                        WHERE reset_email = ?
+                        INSERT INTO
+                            account_deletion_requests (
+                                deletion_request_user_id,
+                                deletion_request_status,
+                                deletion_request_email_snapshot,
+                                deletion_request_phone_snapshot,
+                                deletion_request_reason,
+                                deletion_request_agreement_version,
+                                deletion_request_agreement_accepted_at,
+                                deletion_request_open_key
+                            )
+                        VALUES (
+                            ?,
+                            'pending',
+                            ?,
+                            ?,
+                            ?,
+                            ?,
+                            NOW(),
+                            1
+                        )
                     ");
-                $deleteResetTokens->execute([
-                    $lockedAccount['user_gmail'],
-                ]);
 
-                $deleteAccount =
-                    $pdo->prepare("
-                        UPDATE users
-                        SET
-                            user_is_active = 0,
-                            user_deleted_at = NOW()
-                        WHERE user_id = ?
-                        AND user_role = 'customer'
-                        AND user_is_active = 1
-                        AND user_deleted_at IS NULL
-                    ");
-                $deleteAccount->execute([
+                $phoneSnapshot = trim(
+                    (string) (
+                        $lockedAccount[
+                            'user_phone'
+                        ] ?? ''
+                    )
+                );
+
+                $insertRequest->execute([
                     $user_id,
+                    (string) $lockedAccount[
+                        'user_gmail'
+                    ],
+                    $phoneSnapshot !== ''
+                        ? $phoneSnapshot
+                        : null,
+                    $deletionReason !== ''
+                        ? $deletionReason
+                        : null,
+                    $deletionAgreementVersion,
                 ]);
-
-                if (
-                    $deleteAccount->rowCount() !== 1
-                ) {
-                    throw new RuntimeException(
-                        'Unable to delete the customer account.'
-                    );
-                }
 
                 $pdo->commit();
-            } catch (RuntimeException $e) {
-                if ($pdo->inTransaction()) {
+
+                redirect_to(
+                    app_path(
+                        'customer/profile.php'
+                    ) .
+                    '?deletion=requested'
+                );
+            } catch (
+                RuntimeException $e
+            ) {
+                if (
+                    $pdo->inTransaction()
+                ) {
                     $pdo->rollBack();
                 }
 
-                $error = $e->getMessage();
+                $error =
+                    $e->getMessage();
             } catch (Throwable $e) {
-                if ($pdo->inTransaction()) {
+                if (
+                    $pdo->inTransaction()
+                ) {
                     $pdo->rollBack();
                 }
 
                 app_error_log(
-                    'Customer self account deletion failed: ' .
+                    'Account deletion request submission failed: ' .
                     $e->getMessage()
                 );
 
                 $error =
-                    'Unable to delete your account. Please try again later.';
+                    'Unable to submit your account deletion request. Please try again later.';
             }
+        }
+    } elseif (
+        $action ===
+        'cancel_account_deletion'
+    ) {
+        $requestId = filter_var(
+            $_POST[
+                'deletion_request_id'
+            ] ?? null,
+            FILTER_VALIDATE_INT,
+            [
+                'options' => [
+                    'min_range' => 1,
+                ],
+            ]
+        );
 
-            if ($error === '') {
-                destroy_session();
+        if (
+            $requestId === false ||
+            $requestId === null
+        ) {
+            $error =
+                'Invalid account deletion request.';
+        } else {
+            try {
+                $pdo->beginTransaction();
+
+                $requestLock =
+                    $pdo->prepare("
+                        SELECT
+                            deletion_request_status
+                        FROM
+                            account_deletion_requests
+                        WHERE
+                            deletion_request_id = ?
+                        AND
+                            deletion_request_user_id = ?
+                        FOR UPDATE
+                    ");
+
+                $requestLock->execute([
+                    (int) $requestId,
+                    $user_id,
+                ]);
+
+                $request =
+                    $requestLock->fetch(
+                        PDO::FETCH_ASSOC
+                    );
+
+                if (
+                    !$request ||
+                    $request[
+                        'deletion_request_status'
+                    ] !== 'pending'
+                ) {
+                    throw new RuntimeException(
+                        'This deletion request can no longer be cancelled.'
+                    );
+                }
+
+                $cancelRequest =
+                    $pdo->prepare("
+                        UPDATE
+                            account_deletion_requests
+                        SET
+                            deletion_request_status =
+                                'cancelled',
+                            deletion_request_cancelled_at =
+                                NOW(),
+                            deletion_request_open_key =
+                                NULL
+                        WHERE
+                            deletion_request_id = ?
+                        AND
+                            deletion_request_user_id = ?
+                        AND
+                            deletion_request_status =
+                                'pending'
+                    ");
+
+                $cancelRequest->execute([
+                    (int) $requestId,
+                    $user_id,
+                ]);
+
+                if (
+                    $cancelRequest
+                        ->rowCount() !== 1
+                ) {
+                    throw new RuntimeException(
+                        'Unable to cancel the deletion request.'
+                    );
+                }
+
+                $pdo->commit();
 
                 redirect_to(
                     app_path(
-                        'login.php'
+                        'customer/profile.php'
                     ) .
-                    '?account=deleted'
+                    '?deletion=cancelled'
                 );
+            } catch (
+                RuntimeException $e
+            ) {
+                if (
+                    $pdo->inTransaction()
+                ) {
+                    $pdo->rollBack();
+                }
+
+                $error =
+                    $e->getMessage();
+            } catch (Throwable $e) {
+                if (
+                    $pdo->inTransaction()
+                ) {
+                    $pdo->rollBack();
+                }
+
+                app_error_log(
+                    'Account deletion request cancellation failed: ' .
+                    $e->getMessage()
+                );
+
+                $error =
+                    'Unable to cancel the account deletion request. Please try again later.';
             }
         }
     }
+}
+
+$deletionRequestStatement =
+    $pdo->prepare("
+        SELECT
+            deletion_request_id,
+            deletion_request_status,
+            deletion_request_reason,
+            deletion_request_requested_at,
+            deletion_request_cancelled_at,
+            deletion_request_processed_at,
+            deletion_request_admin_note
+        FROM
+            account_deletion_requests
+        WHERE
+            deletion_request_user_id = ?
+        ORDER BY
+            deletion_request_id DESC
+        LIMIT 1
+    ");
+
+$deletionRequestStatement
+    ->execute([
+        $user_id,
+    ]);
+
+$deletionRequest =
+    $deletionRequestStatement
+        ->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+$pendingDeletionRequest =
+    $deletionRequest &&
+    $deletionRequest[
+        'deletion_request_status'
+    ] === 'pending';
+
+$deletionResult =
+    $_GET['deletion'] ?? null;
+
+if (
+    is_string($deletionResult) &&
+    $deletionResult === 'requested'
+) {
+    $success =
+        'Your account deletion request has been submitted successfully. Please allow 3–5 working days for review.';
+} elseif (
+    is_string($deletionResult) &&
+    $deletionResult === 'cancelled'
+) {
+    $success =
+        'Your account deletion request has been cancelled.';
 }
 ?>
 <!DOCTYPE html>
@@ -476,87 +773,343 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                     <p class="text-sm text-gray-400 mt-2">Add, edit or remove your delivery addresses from the Addresses page.</p>
                 </div>
-                
-                <!-- Account Deletion -->
-                <div class="bg-white rounded-2xl shadow-sm p-6 mt-6 border border-red-200">
-                    <div class="flex items-start justify-between gap-6 flex-wrap">
+
+                <!-- Account Deletion Request -->
+                <div
+                    class="bg-white rounded-2xl shadow-sm p-6 mt-6 border border-red-200"
+                >
+                    <div
+                        class="flex items-start justify-between gap-6 flex-wrap"
+                    >
                         <div>
-                            <h3 class="font-bold text-red-700">
-                                Danger Zone
+                            <h3
+                                class="font-bold text-red-700 text-lg"
+                            >
+                                Account Deletion Request
                             </h3>
-                            <p class="text-sm text-gray-500 mt-1 max-w-2xl">
-                                Delete your MangaVault account. You will no longer be able to sign in after deletion. Order, return and transaction records will be retained for history and audit purposes.
+
+                            <p
+                                class="text-sm text-gray-500 mt-1 max-w-3xl leading-relaxed"
+                            >
+                                Account deletion is subject to administrator review.
+                                Your account will remain active while the request is
+                                being reviewed. Please allow 3–5 working days for
+                                processing.
                             </p>
                         </div>
 
-                        <span class="bg-red-50 text-red-600 text-xs font-semibold px-3 py-1 rounded-full">
+                        <?php if (
+                            $pendingDeletionRequest
+                        ): ?>
+                        <span
+                            class="bg-yellow-100 text-yellow-700 text-xs font-semibold px-3 py-1 rounded-full"
+                        >
+                            Pending Review
+                        </span>
+                        <?php else: ?>
+                        <span
+                            class="bg-red-50 text-red-600 text-xs font-semibold px-3 py-1 rounded-full"
+                        >
                             Account Deletion
                         </span>
+                        <?php endif; ?>
                     </div>
 
-                    <div class="border-t border-red-100 mt-5 pt-5">
-                        <p class="text-sm text-gray-600 mb-4">
-                            Account deletion is not available while you have a pending checkout, active order or pending return request.
+                    <?php if (
+                        $pendingDeletionRequest
+                    ): ?>
+
+                    <div
+                        class="border-t border-red-100 mt-5 pt-5"
+                    >
+                        <div
+                            class="bg-yellow-50 border border-yellow-200 rounded-xl p-5"
+                        >
+                            <div
+                                class="flex items-start gap-3"
+                            >
+                                <div
+                                    class="w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center flex-shrink-0"
+                                >
+                                    ⏳
+                                </div>
+
+                                <div>
+                                    <p
+                                        class="font-bold text-yellow-800"
+                                    >
+                                        Your request is under review
+                                    </p>
+
+                                    <p
+                                        class="text-sm text-yellow-700 mt-1 leading-relaxed"
+                                    >
+                                        MangaVault administrators will review your
+                                        account deletion request within 3–5 working
+                                        days. Your account remains active until the
+                                        request is approved.
+                                    </p>
+
+                                    <p
+                                        class="text-xs text-yellow-600 mt-3"
+                                    >
+                                        Submitted:
+                                        <?= htmlspecialchars(
+                                            date(
+                                                'd M Y, h:i A',
+                                                strtotime(
+                                                    $deletionRequest[
+                                                        'deletion_request_requested_at'
+                                                    ]
+                                                )
+                                            ),
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="mt-4 flex items-center justify-between gap-4 flex-wrap"
+                        >
+                            <p
+                                class="text-xs text-gray-400"
+                            >
+                                You may cancel this request before an administrator processes it.
+                            </p>
+
+                            <form
+                                method="POST"
+                                onsubmit="return confirm('Cancel your account deletion request?')"
+                            >
+                                <?php csrf_field(); ?>
+
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="cancel_account_deletion"
+                                >
+
+                                <input
+                                    type="hidden"
+                                    name="deletion_request_id"
+                                    value="<?= (int) $deletionRequest['deletion_request_id'] ?>"
+                                >
+
+                                <button
+                                    type="submit"
+                                    class="border border-gray-300 hover:bg-gray-50 text-gray-600 font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
+                                >
+                                    Cancel Request
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <?php else: ?>
+
+                    <?php if (
+                        $deletionRequest &&
+                        $deletionRequest[
+                            'deletion_request_status'
+                        ] === 'rejected'
+                    ): ?>
+                    <div
+                        class="mt-5 bg-red-50 border border-red-200 rounded-xl p-4"
+                    >
+                        <p
+                            class="text-sm font-semibold text-red-700"
+                        >
+                            Previous request rejected
                         </p>
+
+                        <?php if (
+                            !empty(
+                                $deletionRequest[
+                                    'deletion_request_admin_note'
+                                ]
+                            )
+                        ): ?>
+                        <p
+                            class="text-sm text-red-600 mt-1"
+                        >
+                            <?= htmlspecialchars(
+                                $deletionRequest[
+                                    'deletion_request_admin_note'
+                                ],
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>
+                        </p>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
+
+                    <div
+                        class="border-t border-red-100 mt-5 pt-5"
+                    >
+                        <div
+                            class="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-5"
+                        >
+                            <p
+                                class="font-bold text-gray-800 mb-3"
+                            >
+                                Account Deletion Agreement
+                            </p>
+
+                            <ul
+                                class="text-sm text-gray-600 space-y-2 leading-relaxed"
+                            >
+                                <li>
+                                    • My account will remain active while the request is under review.
+                                </li>
+
+                                <li>
+                                    • I understand that the review normally takes 3–5 working days.
+                                </li>
+
+                                <li>
+                                    • I must not have a pending checkout, active order or pending return request.
+                                </li>
+
+                                <li>
+                                    • Order, payment, return and other transaction history may be retained for record integrity and audit purposes.
+                                </li>
+
+                                <li>
+                                    • Deleting my account does not reset my eligibility for new-member or welcome promotions.
+                                </li>
+
+                                <li>
+                                    • Account identifiers, including email address and phone number, may be retained in account history to prevent duplicate accounts and repeated new-member reward claims.
+                                </li>
+
+                                <li>
+                                    • If I want to use MangaVault again after deletion, I may be required to contact an administrator to restore my previous account instead of creating another new-member account.
+                                </li>
+                            </ul>
+                        </div>
 
                         <form
                             method="POST"
-                            class="grid grid-cols-1 md:grid-cols-2 gap-4"
+                            id="accountDeletionRequestForm"
+                            class="space-y-5"
                         >
                             <?php csrf_field(); ?>
 
                             <input
                                 type="hidden"
                                 name="action"
-                                value="delete_account"
+                                value="request_account_deletion"
                             >
 
                             <div>
                                 <label
                                     class="block text-xs font-medium text-gray-500 mb-1"
                                 >
-                                    Current Password *
+                                    Reason for Leaving
+                                    <span
+                                        class="text-gray-400 font-normal"
+                                    >
+                                        (Optional)
+                                    </span>
                                 </label>
 
-                                <input
-                                    type="password"
-                                    name="delete_password"
-                                    maxlength="72"
-                                    autocomplete="current-password"
-                                    required
-                                    class="w-full px-3 py-2.5 border border-red-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
+                                <textarea
+                                    name="deletion_reason"
+                                    maxlength="500"
+                                    rows="3"
+                                    placeholder="Tell us why you would like to delete your account..."
+                                    class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 resize-none"
+                                ></textarea>
+
+                                <p
+                                    class="text-xs text-gray-400 mt-1"
                                 >
+                                    Maximum 500 characters.
+                                </p>
                             </div>
+
+                            <div
+                                class="grid grid-cols-1 md:grid-cols-2 gap-4"
+                            >
+                                <div>
+                                    <label
+                                        class="block text-xs font-medium text-gray-500 mb-1"
+                                    >
+                                        Current Password *
+                                    </label>
+
+                                    <input
+                                        type="password"
+                                        name="delete_password"
+                                        id="deleteAccountPassword"
+                                        maxlength="72"
+                                        autocomplete="current-password"
+                                        required
+                                        class="w-full px-3 py-2.5 border border-red-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
+                                    >
+                                </div>
+
+                                <div>
+                                    <label
+                                        class="block text-xs font-medium text-gray-500 mb-1"
+                                    >
+                                        Type DELETE to Confirm *
+                                    </label>
+
+                                    <input
+                                        type="text"
+                                        name="delete_confirmation"
+                                        id="deleteAccountConfirmation"
+                                        maxlength="6"
+                                        autocomplete="off"
+                                        placeholder="DELETE"
+                                        required
+                                        class="w-full px-3 py-2.5 border border-red-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
+                                    >
+                                </div>
+                            </div>
+
+                            <label
+                                class="flex items-start gap-3 bg-red-50 border border-red-100 rounded-xl p-4 cursor-pointer"
+                            >
+                                <input
+                                    type="checkbox"
+                                    name="deletion_agreement"
+                                    id="deletionAgreementCheckbox"
+                                    value="1"
+                                    required
+                                    class="mt-1 w-4 h-4 accent-red-600"
+                                >
+
+                                <span
+                                    class="text-sm text-gray-600 leading-relaxed"
+                                >
+                                    I have read and agree to the Account Deletion
+                                    Agreement above, including the retention of
+                                    account history and identifiers for transaction
+                                    integrity and prevention of repeated new-member
+                                    reward claims.
+                                </span>
+                            </label>
 
                             <div>
-                                <label
-                                    class="block text-xs font-medium text-gray-500 mb-1"
-                                >
-                                    Type DELETE to Confirm *
-                                </label>
-
-                                <input
-                                    type="text"
-                                    name="delete_confirmation"
-                                    maxlength="6"
-                                    autocomplete="off"
-                                    placeholder="DELETE"
-                                    required
-                                    class="w-full px-3 py-2.5 border border-red-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
-                                >
-                            </div>
-
-                            <div class="md:col-span-2">
                                 <button
                                     type="submit"
-                                    onclick="return confirm('Delete your MangaVault account? You will be signed out immediately.')"
-                                    class="bg-red-600 hover:bg-red-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors"
+                                    id="submitDeletionRequestButton"
+                                    disabled
+                                    class="bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors"
                                 >
-                                    Delete My Account
+                                    Submit Account Deletion Request
                                 </button>
                             </div>
                         </form>
                     </div>
+
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -592,6 +1145,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         return true;
     }
+
+    const deletionPassword =
+        document.getElementById(
+            'deleteAccountPassword'
+        );
+
+    const deletionConfirmation =
+        document.getElementById(
+            'deleteAccountConfirmation'
+        );
+
+    const deletionAgreement =
+        document.getElementById(
+            'deletionAgreementCheckbox'
+        );
+
+    const deletionSubmitButton =
+        document.getElementById(
+            'submitDeletionRequestButton'
+        );
+
+    function updateDeletionRequestButton() {
+        if (
+            !deletionPassword ||
+            !deletionConfirmation ||
+            !deletionAgreement ||
+            !deletionSubmitButton
+        ) {
+            return;
+        }
+
+        deletionSubmitButton.disabled = !(
+            deletionPassword.value.length > 0 &&
+            deletionConfirmation.value ===
+                'DELETE' &&
+            deletionAgreement.checked
+        );
+    }
+
+    [
+        deletionPassword,
+        deletionConfirmation,
+        deletionAgreement,
+    ].forEach((element) => {
+        if (!element) {
+            return;
+        }
+
+        element.addEventListener(
+            'input',
+            updateDeletionRequestButton
+        );
+
+        element.addEventListener(
+            'change',
+            updateDeletionRequestButton
+        );
+    });
+
+    updateDeletionRequestButton();
     </script>
 
 </body>
