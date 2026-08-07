@@ -45,7 +45,156 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['product_is_available']
         ) ? 1 : 0;
 
-        $coverUpload = $_FILES['product_cover_image'] ?? null;
+        $existingProduct =
+            findExistingProductForDuplicateAdd(
+                $pdo,
+                $validated
+            );
+
+        if ($existingProduct !== null) {
+            if ($type === 'ebook') {
+                throw new ProductInputValidationException(
+                    'This e-book already exists. Edit the existing product instead of creating another copy.'
+                );
+            }
+
+            $restockQuantity =
+                (int) $validated['stock'];
+
+            if ($restockQuantity < 1) {
+                throw new ProductInputValidationException(
+                    'This physical product already exists. Enter a stock quantity of at least 1 to add stock to the existing product.'
+                );
+            }
+
+            $existingProductId =
+                (int) $existingProduct['product_id'];
+
+            $pdo->beginTransaction();
+
+            try {
+                $productLock = $pdo->prepare("
+                    SELECT
+                        product_title,
+                        product_type
+                    FROM products
+                    WHERE product_id = ?
+                    FOR UPDATE
+                ");
+                $productLock->execute([
+                    $existingProductId,
+                ]);
+
+                $lockedProduct =
+                    $productLock->fetch(
+                        PDO::FETCH_ASSOC
+                    );
+
+                if (
+                    !$lockedProduct ||
+                    $lockedProduct['product_type'] !==
+                        'physical'
+                ) {
+                    throw new RuntimeException(
+                        'Existing physical product could not be verified.'
+                    );
+                }
+
+                $stockLock = $pdo->prepare("
+                    SELECT physical_stock_quantity
+                    FROM product_physical
+                    WHERE physical_product_id = ?
+                    FOR UPDATE
+                ");
+                $stockLock->execute([
+                    $existingProductId,
+                ]);
+
+                $currentStock =
+                    $stockLock->fetchColumn();
+
+                if ($currentStock === false) {
+                    throw new RuntimeException(
+                        'Existing physical stock record could not be found.'
+                    );
+                }
+
+                $currentStock =
+                    (int) $currentStock;
+
+                $newStock =
+                    $currentStock +
+                    $restockQuantity;
+
+                if ($newStock > 1000000) {
+                    throw new ProductInputValidationException(
+                        'The resulting stock quantity exceeds the maximum allowed quantity.'
+                    );
+                }
+
+                $stockUpdate = $pdo->prepare("
+                    UPDATE product_physical
+                    SET physical_stock_quantity = ?
+                    WHERE physical_product_id = ?
+                ");
+                $stockUpdate->execute([
+                    $newStock,
+                    $existingProductId,
+                ]);
+
+                if ($stockUpdate->rowCount() !== 1) {
+                    throw new RuntimeException(
+                        'Unable to update the existing product stock.'
+                    );
+                }
+
+                $logInsert = $pdo->prepare("
+                    INSERT INTO admin_logs (
+                        log_admin_id,
+                        log_action,
+                        log_target_type,
+                        log_target_id,
+                        log_details
+                    )
+                    VALUES (
+                        ?,
+                        'restock_existing_product',
+                        'product',
+                        ?,
+                        ?
+                    )
+                ");
+                $logInsert->execute([
+                    (int) $_SESSION['user_id'],
+                    $existingProductId,
+                    'Restocked existing product: ' .
+                        (string) $lockedProduct['product_title'] .
+                        ' (+' .
+                        $restockQuantity .
+                        ', ' .
+                        $currentStock .
+                        ' -> ' .
+                        $newStock .
+                        ')',
+                ]);
+
+                $pdo->commit();
+            } catch (Throwable $exception) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+
+                throw $exception;
+            }
+
+            header(
+                'Location: products.php?restocked=1'
+            );
+            exit;
+        }
+
+        $coverUpload =
+            $_FILES['product_cover_image'] ?? null;
 
         if ($coverUpload !== null) {
             if (!is_array($coverUpload)) {
@@ -283,6 +432,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl mb-6">❌ <?= htmlspecialchars($error) ?></div>
         <?php endif; ?>
 
+        <div class="bg-blue-50 border border-blue-100 text-blue-700 text-sm px-4 py-3 rounded-xl mb-6">
+            If the same physical product already exists, MangaVault will not create a duplicate product. The submitted stock quantity will be added to the existing stock while the existing product details and price remain unchanged.
+        </div>
+        
         <form method="POST" enctype="multipart/form-data" id="productForm">
             <?php csrf_field(); ?>
 

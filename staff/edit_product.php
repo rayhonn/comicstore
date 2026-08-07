@@ -122,6 +122,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['product_is_available']
         ) ? 1 : 0;
 
+        $duplicateProduct =
+            findExistingProductForDuplicateAdd(
+                $pdo,
+                $validated,
+                $id
+            );
+
+        if ($duplicateProduct !== null) {
+            throw new ProductInputValidationException(
+                'Another product with the same identity already exists. Edit the existing product instead of creating a duplicate.'
+            );
+        }
+
         $coverImage = $oldCoverImage;
         $coverUpload = $_FILES['product_cover_image'] ?? null;
 

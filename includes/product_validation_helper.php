@@ -379,10 +379,12 @@ function findExistingProductForDuplicateAdd(
                 ' ',
                 ''
             ) = ?
+            AND p.product_type = ?
         ";
 
         $params = [
             strtoupper($isbn),
+            $validated['type'],
         ];
 
         if ($excludeProductId !== null) {
