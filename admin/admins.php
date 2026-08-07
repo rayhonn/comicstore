@@ -7,6 +7,8 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_senior_admin();
 
 $error = '';
+$openAddModalOnError = false;
+
 $formValues = [
     'user_first_name' => '',
     'user_last_name' => '',
@@ -74,125 +76,327 @@ function validateAdminAccountPassword(mixed $value): string
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
+    $action = $_POST['action'] ?? null;
+
     try {
-        if (($_POST['action'] ?? '') !== 'add') {
+        if (
+            !is_string($action) ||
+            !in_array(
+                $action,
+                [
+                    'add',
+                    'toggle',
+                ],
+                true
+            )
+        ) {
             throw new RuntimeException(
                 'Invalid administrator management action.'
             );
         }
 
-        $firstName = normalizeAdminAccountText(
-            $_POST['user_first_name'] ?? '',
-            'First name',
-            50,
-            true
-        );
-        $lastName = normalizeAdminAccountText(
-            $_POST['user_last_name'] ?? '',
-            'Last name',
-            50
-        );
-        $userName = normalizeAdminAccountText(
-            $_POST['user_name'] ?? '',
-            'Username',
-            50,
-            true
-        );
-        $email = normalizeAdminAccountText(
-            $_POST['user_gmail'] ?? '',
-            'Email',
-            100,
-            true
-        );
-        $phone = normalizeAdminAccountText(
-            $_POST['user_phone'] ?? '',
-            'Phone number',
-            20
-        );
-        $password = validateAdminAccountPassword(
-            $_POST['password'] ?? null
-        );
-        $confirmPassword = $_POST['confirm_password'] ?? null;
+        if ($action === 'add') {
+            $openAddModalOnError = true;
 
-        $formValues = [
-            'user_first_name' => $firstName,
-            'user_last_name' => $lastName,
-            'user_name' => $userName,
-            'user_gmail' => $email,
-            'user_phone' => $phone,
-        ];
-
-        if (!is_string($confirmPassword)) {
-            throw new RuntimeException(
-                'Invalid password confirmation.'
+            $firstName = normalizeAdminAccountText(
+                $_POST['user_first_name'] ?? '',
+                'First name',
+                50,
+                true
             );
+            $lastName = normalizeAdminAccountText(
+                $_POST['user_last_name'] ?? '',
+                'Last name',
+                50
+            );
+            $userName = normalizeAdminAccountText(
+                $_POST['user_name'] ?? '',
+                'Username',
+                50,
+                true
+            );
+            $email = normalizeAdminAccountText(
+                $_POST['user_gmail'] ?? '',
+                'Email',
+                100,
+                true
+            );
+            $phone = normalizeAdminAccountText(
+                $_POST['user_phone'] ?? '',
+                'Phone number',
+                20
+            );
+            $password = validateAdminAccountPassword(
+                $_POST['password'] ?? null
+            );
+            $confirmPassword =
+                $_POST['confirm_password'] ?? null;
+
+            $formValues = [
+                'user_first_name' => $firstName,
+                'user_last_name' => $lastName,
+                'user_name' => $userName,
+                'user_gmail' => $email,
+                'user_phone' => $phone,
+            ];
+
+            if (!is_string($confirmPassword)) {
+                throw new RuntimeException(
+                    'Invalid password confirmation.'
+                );
+            }
+
+            if (
+                !hash_equals(
+                    $password,
+                    $confirmPassword
+                )
+            ) {
+                throw new RuntimeException(
+                    'Password confirmation does not match.'
+                );
+            }
+
+            if (
+                !filter_var(
+                    $email,
+                    FILTER_VALIDATE_EMAIL
+                )
+            ) {
+                throw new RuntimeException(
+                    'Please enter a valid email address.'
+                );
+            }
+
+            if (
+                $phone !== '' &&
+                !preg_match(
+                    '/^01[0-9]{8,9}$/',
+                    $phone
+                )
+            ) {
+                throw new RuntimeException(
+                    'Please enter a valid Malaysian phone number.'
+                );
+            }
+
+            $duplicateCheck = $pdo->prepare("
+                SELECT user_id
+                FROM users
+                WHERE user_name = ?
+                OR user_gmail = ?
+                LIMIT 1
+            ");
+            $duplicateCheck->execute([
+                $userName,
+                $email,
+            ]);
+
+            if ($duplicateCheck->fetchColumn()) {
+                throw new RuntimeException(
+                    'Username or email already exists.'
+                );
+            }
+
+            $pdo->beginTransaction();
+
+            try {
+                $insert = $pdo->prepare("
+                    INSERT INTO users (
+                        user_name,
+                        user_gmail,
+                        user_password_hash,
+                        user_first_name,
+                        user_last_name,
+                        user_phone,
+                        user_role,
+                        user_admin_level
+                    )
+                    VALUES (
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        'admin',
+                        'staff_admin'
+                    )
+                ");
+                $insert->execute([
+                    $userName,
+                    $email,
+                    password_hash(
+                        $password,
+                        PASSWORD_DEFAULT
+                    ),
+                    $firstName,
+                    $lastName,
+                    $phone,
+                ]);
+
+                $newAdminId =
+                    (int) $pdo->lastInsertId();
+
+                $log = $pdo->prepare("
+                    INSERT INTO admin_logs (
+                        log_admin_id,
+                        log_action,
+                        log_target_type,
+                        log_target_id,
+                        log_details
+                    )
+                    VALUES (
+                        ?,
+                        'add_admin',
+                        'user',
+                        ?,
+                        ?
+                    )
+                ");
+                $log->execute([
+                    (int) $_SESSION['user_id'],
+                    $newAdminId,
+                    'Added administrator: ' .
+                        $userName,
+                ]);
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+
+                throw $e;
+            }
+
+            header(
+                'Location: admins.php?created=1'
+            );
+            exit;
         }
 
-        if (!hash_equals($password, $confirmPassword)) {
-            throw new RuntimeException(
-                'Password confirmation does not match.'
-            );
-        }
+        $userId = filter_var(
+            $_POST['user_id'] ?? null,
+            FILTER_VALIDATE_INT,
+            [
+                'options' => [
+                    'min_range' => 1,
+                ],
+            ]
+        );
 
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $isActive = filter_var(
+            $_POST['is_active'] ?? null,
+            FILTER_VALIDATE_INT,
+            [
+                'options' => [
+                    'min_range' => 0,
+                    'max_range' => 1,
+                ],
+            ]
+        );
+
+        if (
+            $userId === false ||
+            $userId === null
+        ) {
             throw new RuntimeException(
-                'Please enter a valid email address.'
+                'Invalid administrator account.'
             );
         }
 
         if (
-            $phone !== '' &&
-            !preg_match('/^01[0-9]{8,9}$/', $phone)
+            $isActive === false ||
+            $isActive === null
         ) {
             throw new RuntimeException(
-                'Please enter a valid Malaysian phone number.'
+                'Invalid administrator account status.'
             );
         }
 
-        $duplicateCheck = $pdo->prepare("
-            SELECT user_id
-            FROM users
-            WHERE user_name = ?
-            OR user_gmail = ?
-            LIMIT 1
-        ");
-        $duplicateCheck->execute([
-            $userName,
-            $email,
-        ]);
-
-        if ($duplicateCheck->fetchColumn()) {
+        if (
+            $userId ===
+            (int) $_SESSION['user_id']
+        ) {
             throw new RuntimeException(
-                'Username or email already exists.'
+                'You cannot change the status of your own administrator account.'
             );
         }
 
         $pdo->beginTransaction();
 
         try {
-            $insert = $pdo->prepare("
-                INSERT INTO users (
+            $targetStatement = $pdo->prepare("
+                SELECT
                     user_name,
-                    user_gmail,
-                    user_password_hash,
-                    user_first_name,
-                    user_last_name,
-                    user_phone,
-                    user_role,
+                    user_is_active,
                     user_admin_level
-                )
-                VALUES (?, ?, ?, ?, ?, ?, 'admin', 'staff_admin')
+                FROM users
+                WHERE user_id = ?
+                AND user_role = 'admin'
+                FOR UPDATE
             ");
-            $insert->execute([
-                $userName,
-                $email,
-                password_hash($password, PASSWORD_DEFAULT),
-                $firstName,
-                $lastName,
-                $phone,
+            $targetStatement->execute([
+                $userId,
             ]);
 
-            $newAdminId = (int) $pdo->lastInsertId();
+            $targetAdmin =
+                $targetStatement->fetch(
+                    PDO::FETCH_ASSOC
+                );
+
+            if (!$targetAdmin) {
+                throw new RuntimeException(
+                    'Administrator account not found.'
+                );
+            }
+
+            if (
+                $targetAdmin['user_admin_level'] !==
+                'staff_admin'
+            ) {
+                throw new RuntimeException(
+                    'Super Admin accounts cannot be deactivated or reactivated here.'
+                );
+            }
+
+            if (
+                (int) $targetAdmin['user_is_active'] ===
+                $isActive
+            ) {
+                throw new RuntimeException(
+                    'Administrator account status is already unchanged.'
+                );
+            }
+
+            $update = $pdo->prepare("
+                UPDATE users
+                SET user_is_active = ?
+                WHERE user_id = ?
+                AND user_role = 'admin'
+                AND user_admin_level = 'staff_admin'
+            ");
+            $update->execute([
+                $isActive,
+                $userId,
+            ]);
+
+            if ($update->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Unable to update administrator account status.'
+                );
+            }
+
+            $statusAction =
+                $isActive === 1
+                    ? 'activate_admin'
+                    : 'deactivate_admin';
+
+            $statusLabel =
+                $isActive === 1
+                    ? 'activated'
+                    : 'deactivated';
 
             $log = $pdo->prepare("
                 INSERT INTO admin_logs (
@@ -202,12 +406,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     log_target_id,
                     log_details
                 )
-                VALUES (?, 'add_admin', 'user', ?, ?)
+                VALUES (
+                    ?,
+                    ?,
+                    'user',
+                    ?,
+                    ?
+                )
             ");
             $log->execute([
                 (int) $_SESSION['user_id'],
-                $newAdminId,
-                'Added administrator: ' . $userName,
+                $statusAction,
+                $userId,
+                'Administrator account ' .
+                    $statusLabel .
+                    ': ' .
+                    (string) $targetAdmin['user_name'],
             ]);
 
             $pdo->commit();
@@ -219,17 +433,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw $e;
         }
 
-        header('Location: admins.php?created=1');
+        header(
+            'Location: admins.php?status=' .
+            (
+                $isActive === 1
+                    ? 'activated'
+                    : 'deactivated'
+            )
+        );
         exit;
     } catch (RuntimeException $e) {
         $error = $e->getMessage();
     } catch (Throwable $e) {
         app_error_log(
-            'Administrator account creation failed: ' .
+            'Administrator account management failed: ' .
             $e->getMessage()
         );
 
-        $error = 'Unable to create administrator account.';
+        $error =
+            'Unable to manage administrator account.';
     }
 }
 
@@ -292,12 +514,30 @@ $admins = $pdo->query("
         </div>
 
         <div class="bg-blue-50 border border-blue-100 text-blue-700 text-sm px-4 py-3 rounded-xl mb-5">
-            Only Super Admins can create administrator accounts. New administrator accounts are created as standard Admin accounts.
+            Only Super Admins can create, deactivate or reactivate standard Admin accounts. Super Admin accounts are protected.
         </div>
 
         <?php if (isset($_GET['created'])): ?>
         <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">
             ✅ Administrator account created successfully.
+        </div>
+        <?php endif; ?>
+
+        <?php if (
+            ($_GET['status'] ?? '') ===
+            'deactivated'
+        ): ?>
+        <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">
+            ✅ Administrator account deactivated successfully.
+        </div>
+        <?php endif; ?>
+
+        <?php if (
+            ($_GET['status'] ?? '') ===
+            'activated'
+        ): ?>
+        <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">
+            ✅ Administrator account reactivated successfully.
         </div>
         <?php endif; ?>
 
@@ -318,6 +558,7 @@ $admins = $pdo->query("
                             <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Created</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Last Login</th>
                             <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -402,6 +643,61 @@ $admins = $pdo->query("
                                 <span class="<?= (int) $admin['user_is_active'] === 1 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' ?> text-xs px-2 py-1 rounded-full font-semibold">
                                     <?= (int) $admin['user_is_active'] === 1 ? 'Active' : 'Inactive' ?>
                                 </span>
+                            </td>
+                            <td class="px-5 py-4">
+                                <?php if ($isSuperAdmin): ?>
+                                <span
+                                    class="text-xs text-gray-400 font-medium"
+                                    title="Super Admin accounts are protected"
+                                >
+                                    Protected
+                                </span>
+                                <?php else: ?>
+                                <form
+                                    method="POST"
+                                    class="inline"
+                                    onsubmit="return confirm(
+                                        '<?= (int) $admin['user_is_active'] === 1
+                                            ? 'Deactivate this administrator account?'
+                                            : 'Reactivate this administrator account?' ?>'
+                                    )"
+                                >
+                                    <?php csrf_field(); ?>
+                                    <input
+                                        type="hidden"
+                                        name="action"
+                                        value="toggle"
+                                    >
+                                    <input
+                                        type="hidden"
+                                        name="user_id"
+                                        value="<?= (int) $admin['user_id'] ?>"
+                                    >
+                                    <input
+                                        type="hidden"
+                                        name="is_active"
+                                        value="<?= (int) $admin['user_is_active'] === 1 ? 0 : 1 ?>"
+                                    >
+
+                                    <?php if (
+                                        (int) $admin['user_is_active'] === 1
+                                    ): ?>
+                                    <button
+                                        type="submit"
+                                        class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                                    >
+                                        Deactivate
+                                    </button>
+                                    <?php else: ?>
+                                    <button
+                                        type="submit"
+                                        class="text-xs px-3 py-1.5 border border-green-200 text-green-600 rounded-lg hover:bg-green-50 transition-colors"
+                                    >
+                                        Reactivate
+                                    </button>
+                                    <?php endif; ?>
+                                </form>
+                                <?php endif; ?>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -565,7 +861,10 @@ $admins = $pdo->query("
             }
         });
 
-    <?php if ($error !== ''): ?>
+    <?php if (
+        $openAddModalOnError &&
+        $error !== ''
+    ): ?>
     openAddAdminModal();
     <?php endif; ?>
     </script>
