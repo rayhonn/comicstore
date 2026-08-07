@@ -344,6 +344,113 @@ function productAllowedIds(
     return $allowedIds;
 }
 
+function findExistingProductForDuplicateAdd(
+    PDO $pdo,
+    array $validated,
+    ?int $excludeProductId = null
+): ?array {
+    $isbn = trim(
+        (string) ($validated['isbn'] ?? '')
+    );
+
+    if ($isbn !== '') {
+        $sql = "
+            SELECT
+                p.product_id,
+                p.product_title,
+                p.product_price,
+                p.product_type,
+                p.product_is_available,
+                pp.physical_stock_quantity
+            FROM products p
+            LEFT JOIN product_physical pp
+                ON pp.physical_product_id = p.product_id
+            WHERE REPLACE(
+                REPLACE(
+                    UPPER(
+                        COALESCE(
+                            p.product_isbn,
+                            ''
+                        )
+                    ),
+                    '-',
+                    ''
+                ),
+                ' ',
+                ''
+            ) = ?
+        ";
+
+        $params = [
+            strtoupper($isbn),
+        ];
+
+        if ($excludeProductId !== null) {
+            $sql .= "
+                AND p.product_id != ?
+            ";
+            $params[] = $excludeProductId;
+        }
+
+        $sql .= "
+            LIMIT 1
+        ";
+
+        $statement = $pdo->prepare($sql);
+        $statement->execute($params);
+
+        $matchedProduct =
+            $statement->fetch(PDO::FETCH_ASSOC);
+
+        if ($matchedProduct) {
+            return $matchedProduct;
+        }
+    }
+
+    $sql = "
+        SELECT
+            p.product_id,
+            p.product_title,
+            p.product_price,
+            p.product_type,
+            p.product_is_available,
+            pp.physical_stock_quantity
+        FROM products p
+        LEFT JOIN product_physical pp
+            ON pp.physical_product_id = p.product_id
+        WHERE LOWER(
+            TRIM(
+                p.product_title
+            )
+        ) = LOWER(TRIM(?))
+        AND p.product_type = ?
+    ";
+
+    $params = [
+        $validated['title'],
+        $validated['type'],
+    ];
+
+    if ($excludeProductId !== null) {
+        $sql .= "
+            AND p.product_id != ?
+        ";
+        $params[] = $excludeProductId;
+    }
+
+    $sql .= "
+        LIMIT 1
+    ";
+
+    $statement = $pdo->prepare($sql);
+    $statement->execute($params);
+
+    $matchedProduct =
+        $statement->fetch(PDO::FETCH_ASSOC);
+
+    return $matchedProduct ?: null;
+}
+
 function validateProductFormInput(
     array $input,
     array $categories,

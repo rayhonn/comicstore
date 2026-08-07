@@ -215,6 +215,12 @@ $total_low_stock = (int) $pdo->query("
 
         <?php if (isset($_GET['success'])): ?>
         <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">✅ Action completed.</div>
+        
+        <?php endif; ?>
+        <?php if (isset($_GET['restocked'])): ?>
+        <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">
+            ✅ Existing product found. Stock quantity was updated and no duplicate product was created.
+        </div>
         <?php endif; ?>
 
         <?php if (isset($_GET['error'])): ?>
