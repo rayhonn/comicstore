@@ -129,6 +129,7 @@ function safe_redirect_target(string $target, string $default): string
 
         'admin/index.php',
         'admin/dashboard.php',
+        'admin/admins.php',
         'admin/goods_received.php',
         'admin/delivery_receipt.php',
 

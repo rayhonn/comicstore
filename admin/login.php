@@ -99,40 +99,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $user['user_password_hash']
             )
         ) {
-            session_regenerate_id(true);
-
-            $_SESSION['user_id'] =
-                (int) $user['user_id'];
-            $_SESSION['user_name'] =
-                $user['user_name'];
-            $_SESSION['user_first_name'] =
-                $user['user_first_name'];
-            $_SESSION['role'] =
-                $user['user_role'];
-            $_SESSION['admin_level'] =
-                $user['user_admin_level']
-                ?? 'senior_admin';
-
-            $update_login = $pdo->prepare("
-                UPDATE users
-                SET user_last_login = NOW()
-                WHERE user_id = ?
-            ");
-            $update_login->execute([
-                (int) $user['user_id'],
-            ]);
+            $adminLevel = null;
 
             if ($user['user_role'] === 'admin') {
-                redirect_to($redirect_to);
+                $adminLevel = (string) (
+                    $user['user_admin_level']
+                    ?? ''
+                );
+
+                if (
+                    !in_array(
+                        $adminLevel,
+                        [
+                            'staff_admin',
+                            'senior_admin',
+                        ],
+                        true
+                    )
+                ) {
+                    $error =
+                        'Administrator account configuration is invalid.';
+                }
             }
 
-            redirect_to(
-                app_path('staff/dashboard.php')
-            );
+            if ($error === '') {
+                session_regenerate_id(true);
+
+                $_SESSION['user_id'] =
+                    (int) $user['user_id'];
+                $_SESSION['user_name'] =
+                    $user['user_name'];
+                $_SESSION['user_first_name'] =
+                    $user['user_first_name'];
+                $_SESSION['role'] =
+                    $user['user_role'];
+
+                unset($_SESSION['admin_level']);
+
+                if ($user['user_role'] === 'admin') {
+                    $_SESSION['admin_level'] =
+                        $adminLevel;
+                }
+
+                $update_login = $pdo->prepare("
+                    UPDATE users
+                    SET user_last_login = NOW()
+                    WHERE user_id = ?
+                ");
+                $update_login->execute([
+                    (int) $user['user_id'],
+                ]);
+
+                if ($user['user_role'] === 'admin') {
+                    redirect_to($redirect_to);
+                }
+
+                redirect_to(
+                    app_path('staff/dashboard.php')
+                );
+            }
         }
 
-        $error =
-            'Invalid credentials or insufficient permissions.';
+        if ($error === '') {
+            $error =
+                'Invalid credentials or insufficient permissions.';
+        }
     }
 }
 ?>

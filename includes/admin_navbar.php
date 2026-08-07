@@ -119,6 +119,7 @@ $management_pages = [
     'vouchers.php',
     'tiers.php',
     'staff.php',
+    'admins.php',
     'homepage.php',
     'faq.php',
     'about.php',
@@ -134,6 +135,11 @@ $admin_display_name =
     $_SESSION['user_first_name'] ??
     $_SESSION['user_name'] ??
     'Admin';
+
+$admin_access_label =
+    is_senior_admin()
+        ? 'Super Admin'
+        : 'Admin';
 ?>
 
 <style>
@@ -553,6 +559,17 @@ $admin_display_name =
                     Staff Accounts
                 </a>
 
+                <?php if (is_senior_admin()): ?>
+                <a
+                    href="admins.php"
+                    class="<?= adminSidebarSubLinkClass(
+                        $admin_current === 'admins.php'
+                    ) ?> block px-3 py-2 rounded-lg text-xs transition-colors"
+                >
+                    Admin Accounts
+                </a>
+                <?php endif; ?>
+
                 <a
                     href="homepage.php"
                     class="<?= adminSidebarSubLinkClass(
@@ -599,11 +616,7 @@ $admin_display_name =
 
             <p class="text-[10px] text-white/35 mt-0.5">
                 <?= htmlspecialchars(
-                    ucfirst(
-                        (string) (
-                            $_SESSION['role'] ?? 'admin'
-                        )
-                    ),
+                    $admin_access_label,
                     ENT_QUOTES,
                     'UTF-8'
                 ) ?>
