@@ -395,6 +395,9 @@ function findExistingProductForDuplicateAdd(
         }
 
         $sql .= "
+            ORDER BY
+                p.product_is_available DESC,
+                p.product_id DESC
             LIMIT 1
         ";
 
@@ -441,6 +444,9 @@ function findExistingProductForDuplicateAdd(
     }
 
     $sql .= "
+        ORDER BY
+            p.product_is_available DESC,
+            p.product_id DESC
         LIMIT 1
     ";
 
