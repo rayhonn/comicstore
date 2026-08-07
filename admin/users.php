@@ -16,39 +16,121 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         FILTER_VALIDATE_INT,
         ['options' => ['min_range' => 1]]
     );
+
     $action = $_POST['action'] ?? null;
 
     if (
         $user_id === false ||
         $user_id === null ||
         !is_string($action) ||
-        !in_array($action, ['activate', 'deactivate'], true)
+        !in_array(
+            $action,
+            [
+                'activate',
+                'deactivate',
+            ],
+            true
+        )
     ) {
         header('Location: users.php');
         exit;
     }
 
-    $is_active = $action === 'activate' ? 1 : 0;
-
     try {
         $pdo->beginTransaction();
 
-        $update = $pdo->prepare("
-            UPDATE users
-            SET user_is_active = ?
+        $customerLock = $pdo->prepare("
+            SELECT
+                user_is_active,
+                user_deleted_at
+            FROM users
             WHERE user_id = ?
             AND user_role = 'customer'
-            AND user_is_active != ?
+            FOR UPDATE
         ");
-        $update->execute([
-            $is_active,
+        $customerLock->execute([
             $user_id,
-            $is_active,
         ]);
+
+        $customer =
+            $customerLock->fetch(
+                PDO::FETCH_ASSOC
+            );
+
+        if (!$customer) {
+            throw new RuntimeException(
+                'Customer account not found.'
+            );
+        }
+
+        $wasDeletedByCustomer =
+            $customer['user_deleted_at'] !== null;
+
+        if ($action === 'deactivate') {
+            if (
+                (int) $customer[
+                    'user_is_active'
+                ] !== 1
+            ) {
+                throw new RuntimeException(
+                    'Customer account is already inactive.'
+                );
+            }
+
+            $update = $pdo->prepare("
+                UPDATE users
+                SET user_is_active = 0
+                WHERE user_id = ?
+                AND user_role = 'customer'
+                AND user_is_active = 1
+            ");
+            $update->execute([
+                $user_id,
+            ]);
+
+            $log_action =
+                'deactivate_user';
+
+            $log_details =
+                'Customer account deactivated';
+        } else {
+            if (
+                (int) $customer[
+                    'user_is_active'
+                ] === 1 &&
+                !$wasDeletedByCustomer
+            ) {
+                throw new RuntimeException(
+                    'Customer account is already active.'
+                );
+            }
+
+            $update = $pdo->prepare("
+                UPDATE users
+                SET
+                    user_is_active = 1,
+                    user_deleted_at = NULL
+                WHERE user_id = ?
+                AND user_role = 'customer'
+            ");
+            $update->execute([
+                $user_id,
+            ]);
+
+            $log_action =
+                $wasDeletedByCustomer
+                    ? 'restore_deleted_user'
+                    : 'activate_user';
+
+            $log_details =
+                $wasDeletedByCustomer
+                    ? 'Customer self-deleted account restored'
+                    : 'Customer account activated';
+        }
 
         if ($update->rowCount() !== 1) {
             throw new RuntimeException(
-                'Customer account not found or unchanged.'
+                'Customer account status was not updated.'
             );
         }
 
@@ -64,12 +146,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ");
         $log->execute([
             (int) $_SESSION['user_id'],
-            $action . '_user',
+            $log_action,
             $user_id,
-            'Customer account ' .
-                ($action === 'activate'
-                    ? 'activated'
-                    : 'deactivated'),
+            $log_details,
         ]);
 
         $pdo->commit();
@@ -83,11 +162,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $e->getMessage()
         );
 
-        header('Location: users.php?error=1');
+        header(
+            'Location: users.php?error=1'
+        );
         exit;
     }
 
-    header('Location: users.php?success=1');
+    header(
+        'Location: users.php?success=1'
+    );
     exit;
 }
 
@@ -266,27 +349,84 @@ $active_users = (int) $pdo->query("
                             <?= date('d M Y', strtotime($user['user_created_at'])) ?>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="<?= (int) $user['user_is_active'] === 1 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' ?> text-xs px-2 py-1 rounded-full font-semibold">
-                                <?= (int) $user['user_is_active'] === 1 ? 'Active' : 'Inactive' ?>
+                            <?php if (
+                                !empty(
+                                    $user[
+                                        'user_deleted_at'
+                                    ]
+                                )
+                            ): ?>
+                            <span class="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded-full font-semibold">
+                                Deleted by Customer
                             </span>
+                            <?php elseif (
+                                (int) $user[
+                                    'user_is_active'
+                                ] === 1
+                            ): ?>
+                            <span class="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full font-semibold">
+                                Active
+                            </span>
+                            <?php else: ?>
+                            <span class="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-full font-semibold">
+                                Inactive
+                            </span>
+                            <?php endif; ?>
                         </td>
                         <td class="px-4 py-3">
                             <form method="POST" class="inline">
                                 <?php csrf_field(); ?>
-                                <input type="hidden" name="user_id" value="<?= (int) $user['user_id'] ?>">
-                                <?php if ((int) $user['user_is_active'] === 1): ?>
-                                <input type="hidden" name="action" value="deactivate">
-                                <button type="submit"
-                                        onclick="return confirm('Deactivate this user?')"
-                                        class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
+
+                                <input
+                                    type="hidden"
+                                    name="user_id"
+                                    value="<?= (int) $user['user_id'] ?>"
+                                >
+
+                                <?php if (
+                                    (int) $user[
+                                        'user_is_active'
+                                    ] === 1
+                                ): ?>
+
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="deactivate"
+                                >
+
+                                <button
+                                    type="submit"
+                                    onclick="return confirm('Deactivate this customer account?')"
+                                    class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                                >
                                     Deactivate
                                 </button>
+
                                 <?php else: ?>
-                                <input type="hidden" name="action" value="activate">
-                                <button type="submit"
-                                        class="text-xs px-3 py-1.5 border border-green-200 text-green-600 rounded-lg hover:bg-green-50 transition-colors">
-                                    Activate
+
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="activate"
+                                >
+
+                                <button
+                                    type="submit"
+                                    onclick="return confirm('<?= !empty($user['user_deleted_at'])
+                                        ? 'Restore this customer account?'
+                                        : 'Activate this customer account?' ?>')"
+                                    class="text-xs px-3 py-1.5 border border-green-200 text-green-600 rounded-lg hover:bg-green-50 transition-colors"
+                                >
+                                    <?= !empty(
+                                        $user[
+                                            'user_deleted_at'
+                                        ]
+                                    )
+                                        ? 'Restore'
+                                        : 'Activate' ?>
                                 </button>
+
                                 <?php endif; ?>
                             </form>
                         </td>

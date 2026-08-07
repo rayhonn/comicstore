@@ -100,6 +100,214 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([password_hash($new, PASSWORD_DEFAULT), $user_id]);
             $success = "Password changed successfully!";
         }
+    } elseif ($action === 'delete_account') {
+        $delete_password =
+            $_POST['delete_password'] ?? null;
+
+        $delete_confirmation =
+            $_POST['delete_confirmation'] ?? null;
+
+        if (
+            !is_string($delete_password) ||
+            $delete_password === '' ||
+            strlen($delete_password) > 72 ||
+            !is_string($delete_confirmation)
+        ) {
+            $error =
+                'Delete account confirmation is invalid.';
+        } elseif (
+            $delete_confirmation !== 'DELETE'
+        ) {
+            $error =
+                'Type DELETE exactly to confirm account deletion.';
+        } else {
+            try {
+                $pdo->beginTransaction();
+
+                $accountLock = $pdo->prepare("
+                    SELECT
+                        user_password_hash,
+                        user_gmail,
+                        user_is_active,
+                        user_deleted_at
+                    FROM users
+                    WHERE user_id = ?
+                    AND user_role = 'customer'
+                    FOR UPDATE
+                ");
+                $accountLock->execute([
+                    $user_id,
+                ]);
+
+                $lockedAccount =
+                    $accountLock->fetch(
+                        PDO::FETCH_ASSOC
+                    );
+
+                if (
+                    !$lockedAccount ||
+                    (int) $lockedAccount[
+                        'user_is_active'
+                    ] !== 1 ||
+                    $lockedAccount[
+                        'user_deleted_at'
+                    ] !== null
+                ) {
+                    throw new RuntimeException(
+                        'Your account is not available for deletion.'
+                    );
+                }
+
+                if (
+                    !password_verify(
+                        $delete_password,
+                        $lockedAccount[
+                            'user_password_hash'
+                        ]
+                    )
+                ) {
+                    throw new RuntimeException(
+                        'Current password is incorrect.'
+                    );
+                }
+
+                $paymentDraftCheck =
+                    $pdo->prepare("
+                        SELECT payment_draft_id
+                        FROM payment_drafts
+                        WHERE payment_draft_user_id = ?
+                        AND payment_draft_status IN (
+                            'pending',
+                            'checkout_open'
+                        )
+                        LIMIT 1
+                        FOR UPDATE
+                    ");
+                $paymentDraftCheck->execute([
+                    $user_id,
+                ]);
+
+                if (
+                    $paymentDraftCheck->fetchColumn()
+                    !== false
+                ) {
+                    throw new RuntimeException(
+                        'You cannot delete your account while you have a pending checkout. Cancel or complete the checkout first.'
+                    );
+                }
+
+                $activeOrderCheck =
+                    $pdo->prepare("
+                        SELECT order_id
+                        FROM orders
+                        WHERE order_user_id = ?
+                        AND order_status IN (
+                            'pending',
+                            'processing',
+                            'shipped'
+                        )
+                        LIMIT 1
+                        FOR UPDATE
+                    ");
+                $activeOrderCheck->execute([
+                    $user_id,
+                ]);
+
+                if (
+                    $activeOrderCheck->fetchColumn()
+                    !== false
+                ) {
+                    throw new RuntimeException(
+                        'You cannot delete your account while you have an active order. Please wait until the order is completed or cancelled.'
+                    );
+                }
+
+                $pendingReturnCheck =
+                    $pdo->prepare("
+                        SELECT return_id
+                        FROM return_requests
+                        WHERE return_user_id = ?
+                        AND return_status = 'pending'
+                        LIMIT 1
+                        FOR UPDATE
+                    ");
+                $pendingReturnCheck->execute([
+                    $user_id,
+                ]);
+
+                if (
+                    $pendingReturnCheck->fetchColumn()
+                    !== false
+                ) {
+                    throw new RuntimeException(
+                        'You cannot delete your account while you have a pending return request.'
+                    );
+                }
+
+                $deleteResetTokens =
+                    $pdo->prepare("
+                        DELETE FROM password_resets
+                        WHERE reset_email = ?
+                    ");
+                $deleteResetTokens->execute([
+                    $lockedAccount['user_gmail'],
+                ]);
+
+                $deleteAccount =
+                    $pdo->prepare("
+                        UPDATE users
+                        SET
+                            user_is_active = 0,
+                            user_deleted_at = NOW()
+                        WHERE user_id = ?
+                        AND user_role = 'customer'
+                        AND user_is_active = 1
+                        AND user_deleted_at IS NULL
+                    ");
+                $deleteAccount->execute([
+                    $user_id,
+                ]);
+
+                if (
+                    $deleteAccount->rowCount() !== 1
+                ) {
+                    throw new RuntimeException(
+                        'Unable to delete the customer account.'
+                    );
+                }
+
+                $pdo->commit();
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+
+                $error = $e->getMessage();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+
+                app_error_log(
+                    'Customer self account deletion failed: ' .
+                    $e->getMessage()
+                );
+
+                $error =
+                    'Unable to delete your account. Please try again later.';
+            }
+
+            if ($error === '') {
+                destroy_session();
+
+                redirect_to(
+                    app_path(
+                        'login.php'
+                    ) .
+                    '?account=deleted'
+                );
+            }
+        }
     }
 }
 ?>
@@ -268,7 +476,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                     <p class="text-sm text-gray-400 mt-2">Add, edit or remove your delivery addresses from the Addresses page.</p>
                 </div>
+                
+                <!-- Account Deletion -->
+                <div class="bg-white rounded-2xl shadow-sm p-6 mt-6 border border-red-200">
+                    <div class="flex items-start justify-between gap-6 flex-wrap">
+                        <div>
+                            <h3 class="font-bold text-red-700">
+                                Danger Zone
+                            </h3>
+                            <p class="text-sm text-gray-500 mt-1 max-w-2xl">
+                                Delete your MangaVault account. You will no longer be able to sign in after deletion. Order, return and transaction records will be retained for history and audit purposes.
+                            </p>
+                        </div>
 
+                        <span class="bg-red-50 text-red-600 text-xs font-semibold px-3 py-1 rounded-full">
+                            Account Deletion
+                        </span>
+                    </div>
+
+                    <div class="border-t border-red-100 mt-5 pt-5">
+                        <p class="text-sm text-gray-600 mb-4">
+                            Account deletion is not available while you have a pending checkout, active order or pending return request.
+                        </p>
+
+                        <form
+                            method="POST"
+                            class="grid grid-cols-1 md:grid-cols-2 gap-4"
+                        >
+                            <?php csrf_field(); ?>
+
+                            <input
+                                type="hidden"
+                                name="action"
+                                value="delete_account"
+                            >
+
+                            <div>
+                                <label
+                                    class="block text-xs font-medium text-gray-500 mb-1"
+                                >
+                                    Current Password *
+                                </label>
+
+                                <input
+                                    type="password"
+                                    name="delete_password"
+                                    maxlength="72"
+                                    autocomplete="current-password"
+                                    required
+                                    class="w-full px-3 py-2.5 border border-red-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
+                                >
+                            </div>
+
+                            <div>
+                                <label
+                                    class="block text-xs font-medium text-gray-500 mb-1"
+                                >
+                                    Type DELETE to Confirm *
+                                </label>
+
+                                <input
+                                    type="text"
+                                    name="delete_confirmation"
+                                    maxlength="6"
+                                    autocomplete="off"
+                                    placeholder="DELETE"
+                                    required
+                                    class="w-full px-3 py-2.5 border border-red-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
+                                >
+                            </div>
+
+                            <div class="md:col-span-2">
+                                <button
+                                    type="submit"
+                                    onclick="return confirm('Delete your MangaVault account? You will be signed out immediately.')"
+                                    class="bg-red-600 hover:bg-red-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors"
+                                >
+                                    Delete My Account
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -14,6 +14,14 @@ if (
 $error = '';
 $identifier_value = '';
 
+$account_status =
+    $_GET['account'] ?? null;
+
+$account_deleted_notice =
+    $_SERVER['REQUEST_METHOD'] === 'GET' &&
+    is_string($account_status) &&
+    $account_status === 'deleted';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
@@ -75,8 +83,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (
                 (int) $user['user_is_active'] !== 1
             ) {
-                $error =
-                    'Your account has been deactivated. Please contact an administrator for assistance.';
+                if (
+                    !empty(
+                        $user['user_deleted_at']
+                    )
+                ) {
+                    $error =
+                        'This account has been deleted. Please contact an administrator if you need assistance.';
+                } else {
+                    $error =
+                        'Your account has been deactivated. Please contact an administrator for assistance.';
+                }
             } else {
                 session_regenerate_id(true);
 
@@ -820,6 +837,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <div class="my-7 h-px bg-gray-900/10"></div>
 
+                    <?php if ($account_deleted_notice): ?>
+                    <div
+                        class="mb-5 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
+                        role="status"
+                    >
+                        Your account has been deleted successfully. Please contact an administrator if you need the account restored.
+                    </div>
+                    <?php endif; ?>
+                    
                     <?php if ($error): ?>
                     <div
                         class="error-box"
