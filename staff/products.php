@@ -70,7 +70,16 @@ $type =
 $filter_raw = $_GET['filter'] ?? '';
 $filter =
     is_string($filter_raw) &&
-    in_array($filter_raw, ['', 'low_stock'], true)
+    in_array(
+        $filter_raw,
+        [
+            '',
+            'low_stock',
+            'inactive',
+            'all',
+        ],
+        true
+    )
         ? $filter_raw
         : '';
 
@@ -108,8 +117,18 @@ if ($type !== '') {
 
 if ($filter === 'low_stock') {
     $sql .= "
+        AND p.product_is_available = 1
+        AND p.product_type = 'physical'
         AND pp.physical_stock_quantity <=
             pp.physical_low_stock_threshold
+    ";
+} elseif ($filter === 'inactive') {
+    $sql .= "
+        AND p.product_is_available = 0
+    ";
+} elseif ($filter !== 'all') {
+    $sql .= "
+        AND p.product_is_available = 1
     ";
 }
 
@@ -153,7 +172,7 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
             ✅ Existing product found. Stock quantity was updated and no duplicate product was created.
         </div>
         <?php endif; ?>
-        
+
         <?php if (isset($_GET['error'])): ?>
         <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5">❌ Unable to update the product.</div>
         <?php endif; ?>
@@ -174,8 +193,10 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <option value="ebook" <?= $type === 'ebook' ? 'selected' : '' ?>>E-Book</option>
                 </select>
                 <select name="filter" class="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400">
-                    <option value="">All</option>
+                    <option value="" <?= $filter === '' ? 'selected' : '' ?>>Active</option>
                     <option value="low_stock" <?= $filter === 'low_stock' ? 'selected' : '' ?>>Low Stock</option>
+                    <option value="inactive" <?= $filter === 'inactive' ? 'selected' : '' ?>>Inactive</option>
+                    <option value="all" <?= $filter === 'all' ? 'selected' : '' ?>>All Status</option>
                 </select>
                 <button type="submit" class="bg-[#1e2d4a] text-white px-5 py-2.5 rounded-xl text-sm font-semibold">Search</button>
                 <?php if ($search || $type || $filter): ?>
@@ -244,13 +265,44 @@ $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <div class="flex gap-2">
                                 <a href="edit_product.php?id=<?= (int) $p['product_id'] ?>"
                                    class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">✏️ Edit</a>
-                                <form method="POST" class="inline">
+                                <form
+                                    method="POST"
+                                    class="inline"
+                                    onsubmit="return confirm(
+                                        '<?= $p['product_is_available']
+                                            ? 'Deactivate this product? Customers will no longer be able to purchase it.'
+                                            : 'Reactivate this product and make it available to customers again?' ?>'
+                                    )"
+                                >
                                     <?php csrf_field(); ?>
-                                    <input type="hidden" name="action" value="toggle">
-                                    <input type="hidden" name="product_id" value="<?= (int) $p['product_id'] ?>">
-                                    <button type="submit" class="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
-                                        <?= $p['product_is_available'] ? '🙈 Hide' : '👁️ Show' ?>
+                                    <input
+                                        type="hidden"
+                                        name="action"
+                                        value="toggle"
+                                    >
+                                    <input
+                                        type="hidden"
+                                        name="product_id"
+                                        value="<?= (int) $p['product_id'] ?>"
+                                    >
+
+                                    <?php if (
+                                        (int) $p['product_is_available'] === 1
+                                    ): ?>
+                                    <button
+                                        type="submit"
+                                        class="text-xs px-3 py-1.5 border border-orange-200 text-orange-600 rounded-lg hover:bg-orange-50 transition-colors"
+                                    >
+                                        Deactivate
                                     </button>
+                                    <?php else: ?>
+                                    <button
+                                        type="submit"
+                                        class="text-xs px-3 py-1.5 border border-green-200 text-green-600 rounded-lg hover:bg-green-50 transition-colors"
+                                    >
+                                        Reactivate
+                                    </button>
+                                    <?php endif; ?>
                                 </form>
                             </div>
                         </td>

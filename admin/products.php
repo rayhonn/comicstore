@@ -19,58 +19,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     );
 
     if (
-        !is_string($action) ||
-        !in_array($action, ['toggle', 'delete'], true) ||
+        $action !== 'toggle' ||
         $product_id === false ||
         $product_id === null
     ) {
-        header('Location: products.php?error=invalid');
+        header(
+            'Location: products.php?error=invalid'
+        );
         exit;
     }
 
     $product_id = (int) $product_id;
 
     try {
-        if ($action === 'toggle') {
-            $update = $pdo->prepare("
-                UPDATE products
-                SET product_is_available =
-                    NOT product_is_available
-                WHERE product_id = ?
-            ");
-            $update->execute([$product_id]);
+        $update = $pdo->prepare("
+            UPDATE products
+            SET product_is_available =
+                NOT product_is_available
+            WHERE product_id = ?
+        ");
+        $update->execute([
+            $product_id,
+        ]);
 
-            if ($update->rowCount() !== 1) {
-                throw new RuntimeException(
-                    'Product not found.'
-                );
-            }
-        } else {
-            $delete = $pdo->prepare("
-                DELETE FROM products
-                WHERE product_id = ?
-            ");
-            $delete->execute([$product_id]);
-
-            if ($delete->rowCount() !== 1) {
-                throw new RuntimeException(
-                    'Product not found.'
-                );
-            }
+        if ($update->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Product not found.'
+            );
         }
 
-        header('Location: products.php?success=1');
+        header(
+            'Location: products.php?status=updated'
+        );
         exit;
     } catch (PDOException $e) {
         error_log(
-            'Product action failed: ' .
+            'Product status update failed: ' .
             $e->getMessage()
         );
 
-        header('Location: products.php?error=in_use');
+        header(
+            'Location: products.php?error=update'
+        );
         exit;
     } catch (RuntimeException $e) {
-        header('Location: products.php?error=not_found');
+        header(
+            'Location: products.php?error=not_found'
+        );
         exit;
     }
 }
@@ -103,7 +98,12 @@ $filter =
     is_string($filter_raw) &&
     in_array(
         $filter_raw,
-        ['', 'low_stock', 'inactive'],
+        [
+            '',
+            'low_stock',
+            'inactive',
+            'all',
+        ],
         true
     )
         ? $filter_raw
@@ -151,11 +151,19 @@ if ($type !== '') {
 
 if ($filter === 'low_stock') {
     $sql .= "
+        AND p.product_is_available = 1
+        AND p.product_type = 'physical'
         AND pp.physical_stock_quantity <=
             pp.physical_low_stock_threshold
     ";
 } elseif ($filter === 'inactive') {
-    $sql .= " AND p.product_is_available = 0";
+    $sql .= "
+        AND p.product_is_available = 0
+    ";
+} elseif ($filter !== 'all') {
+    $sql .= "
+        AND p.product_is_available = 1
+    ";
 }
 
 $sql .= "
@@ -179,9 +187,13 @@ $total_active = (int) $pdo->query("
 
 $total_low_stock = (int) $pdo->query("
     SELECT COUNT(*)
-    FROM product_physical
-    WHERE physical_stock_quantity <=
-        physical_low_stock_threshold
+    FROM product_physical pp
+    INNER JOIN products p
+        ON p.product_id =
+            pp.physical_product_id
+    WHERE p.product_is_available = 1
+    AND pp.physical_stock_quantity <=
+        pp.physical_low_stock_threshold
 ")->fetchColumn();
 ?>
 <!DOCTYPE html>
@@ -217,6 +229,15 @@ $total_low_stock = (int) $pdo->query("
         <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">✅ Action completed.</div>
         
         <?php endif; ?>
+
+        <?php if (
+            ($_GET['status'] ?? '') ===
+            'updated'
+        ): ?>
+        <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">
+            ✅ Product status updated. The product remains stored in the database.
+        </div>
+        <?php endif; ?>
         <?php if (isset($_GET['restocked'])): ?>
         <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">
             ✅ Existing product found. Stock quantity was updated and no duplicate product was created.
@@ -225,9 +246,7 @@ $total_low_stock = (int) $pdo->query("
 
         <?php if (isset($_GET['error'])): ?>
         <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5">
-            ❌ <?= $_GET['error'] === 'in_use'
-                ? 'This product cannot be deleted because it is in use.'
-                : 'Unable to complete the product action.' ?>
+            ❌ Unable to update the product status.
         </div>
         <?php endif; ?>
 
@@ -249,9 +268,10 @@ $total_low_stock = (int) $pdo->query("
                     <option value="ebook" <?= $type === 'ebook' ? 'selected' : '' ?>>E-Book</option>
                 </select>
                 <select name="filter" class="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400">
-                    <option value="">All Status</option>
+                    <option value="" <?= $filter === '' ? 'selected' : '' ?>>Active</option>
                     <option value="low_stock" <?= $filter === 'low_stock' ? 'selected' : '' ?>>Low Stock</option>
                     <option value="inactive" <?= $filter === 'inactive' ? 'selected' : '' ?>>Inactive</option>
+                    <option value="all" <?= $filter === 'all' ? 'selected' : '' ?>>All Status</option>
                 </select>
                 <button type="submit" class="bg-[#1e2d4a] hover:bg-[#162338] text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors">
                     Search
@@ -358,23 +378,44 @@ $total_low_stock = (int) $pdo->query("
                                    class="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">
                                     ✏️ Edit
                                 </a>
-                                <form method="POST" class="inline">
+                                <form
+                                    method="POST"
+                                    class="inline"
+                                    onsubmit="return confirm(
+                                        '<?= $p['product_is_available']
+                                            ? 'Deactivate this product? Customers will no longer be able to purchase it.'
+                                            : 'Reactivate this product and make it available to customers again?' ?>'
+                                    )"
+                                >
                                     <?php csrf_field(); ?>
-                                    <input type="hidden" name="action" value="toggle">
-                                    <input type="hidden" name="product_id" value="<?= (int) $p['product_id'] ?>">
-                                    <button type="submit"
-                                            class="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">
-                                        <?= $p['product_is_available'] ? '🙈 Hide' : '👁️ Show' ?>
+                                    <input
+                                        type="hidden"
+                                        name="action"
+                                        value="toggle"
+                                    >
+                                    <input
+                                        type="hidden"
+                                        name="product_id"
+                                        value="<?= (int) $p['product_id'] ?>"
+                                    >
+
+                                    <?php if (
+                                        (int) $p['product_is_available'] === 1
+                                    ): ?>
+                                    <button
+                                        type="submit"
+                                        class="text-xs px-3 py-1.5 border border-orange-200 text-orange-600 rounded-lg hover:bg-orange-50 transition-colors"
+                                    >
+                                        Deactivate
                                     </button>
-                                </form>
-                                <form method="POST" class="inline">
-                                    <?php csrf_field(); ?>
-                                    <input type="hidden" name="action" value="delete">
-                                    <input type="hidden" name="product_id" value="<?= (int) $p['product_id'] ?>">
-                                    <button type="submit" onclick="return confirm('Delete this product permanently?')"
-                                            class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
-                                        🗑️
+                                    <?php else: ?>
+                                    <button
+                                        type="submit"
+                                        class="text-xs px-3 py-1.5 border border-green-200 text-green-600 rounded-lg hover:bg-green-50 transition-colors"
+                                    >
+                                        Reactivate
                                     </button>
+                                    <?php endif; ?>
                                 </form>
                             </div>
                         </td>
