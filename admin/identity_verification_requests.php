@@ -6,7 +6,245 @@ require_once __DIR__ .
 require_once __DIR__ .
     '/../includes/auth.php';
 
+require_once __DIR__ .
+    '/../includes/csrf.php';
+
+require_once __DIR__ .
+    '/../includes/identity_verification_helper.php';
+
+require_once __DIR__ .
+    '/../includes/notifications.php';
+
 require_senior_admin();
+
+$error = '';
+$success = '';
+
+require_senior_admin();
+
+if (
+    $_SERVER['REQUEST_METHOD'] ===
+        'POST'
+) {
+    csrf_verify();
+
+    $action =
+        $_POST['action'] ?? null;
+
+    $postRequestId =
+        filter_var(
+            $_POST['request_id'] ?? null,
+            FILTER_VALIDATE_INT,
+            [
+                'options' => [
+                    'min_range' => 1,
+                ],
+            ]
+        );
+
+    $adminNote =
+        $_POST['admin_note'] ?? null;
+
+    if (
+        !is_string($action) ||
+        $postRequestId === false ||
+        $postRequestId === null ||
+        !is_string($adminNote)
+    ) {
+        $error =
+            'Invalid identity verification decision.';
+    } else {
+        try {
+            if (
+                $action ===
+                    'approve_verification'
+            ) {
+                $nricConfirmation =
+                    $_POST[
+                        'nric_confirmation'
+                    ] ?? null;
+
+                $evidenceVerified =
+                    $_POST[
+                        'evidence_verified'
+                    ] ?? null;
+
+                if (
+                    !is_string(
+                        $nricConfirmation
+                    )
+                ) {
+                    throw new RuntimeException(
+                        'Please enter the MyKad / NRIC number shown in the reviewed evidence.'
+                    );
+                }
+
+                if (
+                    $evidenceVerified !== '1'
+                ) {
+                    throw new RuntimeException(
+                        'You must confirm that both identity and phone ownership evidence were reviewed before approval.'
+                    );
+                }
+
+                $result =
+                    processIdentityVerificationDecision(
+                        $pdo,
+                        (int) $postRequestId,
+                        (int) $_SESSION[
+                            'user_id'
+                        ],
+                        'approved',
+                        $adminNote,
+                        $nricConfirmation
+                    );
+            } elseif (
+                $action ===
+                    'reject_verification'
+            ) {
+                $result =
+                    processIdentityVerificationDecision(
+                        $pdo,
+                        (int) $postRequestId,
+                        (int) $_SESSION[
+                            'user_id'
+                        ],
+                        'rejected',
+                        $adminNote
+                    );
+            } else {
+                throw new RuntimeException(
+                    'Invalid identity verification decision.'
+                );
+            }
+
+            $identityEvidenceDeleted =
+                deleteIdentityVerificationEvidence(
+                    (string) $result[
+                        'identity_file'
+                    ]
+                );
+
+            $phoneEvidenceDeleted =
+                deleteIdentityVerificationEvidence(
+                    (string) $result[
+                        'phone_evidence_file'
+                    ]
+                );
+
+            if (
+                !$identityEvidenceDeleted ||
+                !$phoneEvidenceDeleted
+            ) {
+                app_error_log(
+                    'Sensitive identity evidence cleanup was incomplete after verification request #' .
+                    (int) $result[
+                        'request_id'
+                    ]
+                );
+            }
+
+            try {
+                if (
+                    $result['decision'] ===
+                        'approved'
+                ) {
+                    $message =
+                        'Your phone ownership verification for ' .
+                        $result['phone'] .
+                        ' was approved. The verified phone number has been assigned to your MangaVault account.';
+
+                    if (
+                        !empty(
+                            $result[
+                                'welcome_rewards_granted'
+                            ]
+                        )
+                    ) {
+                        $message .=
+                            ' Your eligible new-member welcome vouchers have also been unlocked.';
+                    }
+
+                    sendNotification(
+                        $pdo,
+                        (int) $result[
+                            'customer_id'
+                        ],
+                        'Phone Ownership Verification Approved',
+                        $message,
+                        'system'
+                    );
+                } else {
+                    sendNotification(
+                        $pdo,
+                        (int) $result[
+                            'customer_id'
+                        ],
+                        'Phone Ownership Verification Rejected',
+                        'Your phone ownership verification for ' .
+                        $result['phone'] .
+                        ' was rejected. Please review the Super Admin decision note before submitting new evidence.',
+                        'system'
+                    );
+                }
+            } catch (Throwable $notificationError) {
+                app_error_log(
+                    'Identity verification decision notification failed: ' .
+                    $notificationError->getMessage()
+                );
+            }
+
+            redirect_to(
+                app_path(
+                    'admin/identity_verification_requests.php'
+                ) .
+                '?status=all&request_id=' .
+                (int) $result[
+                    'request_id'
+                ] .
+                '&decision=' .
+                urlencode(
+                    (string) $result[
+                        'decision'
+                    ]
+                )
+            );
+        } catch (Throwable $e) {
+            if (
+                $e instanceof
+                IdentityProtectionException ||
+                $e instanceof
+                RuntimeException
+            ) {
+                $error =
+                    $e->getMessage();
+            } else {
+                app_error_log(
+                    'Identity verification decision failed: ' .
+                    $e->getMessage()
+                );
+
+                $error =
+                    'Unable to process the identity verification request.';
+            }
+        }
+    }
+}
+
+$decisionNotice =
+    $_GET['decision'] ?? '';
+
+if (
+    $decisionNotice === 'approved'
+) {
+    $success =
+        'Identity verification approved successfully. Sensitive evidence has been removed from temporary storage.';
+} elseif (
+    $decisionNotice === 'rejected'
+) {
+    $success =
+        'Identity verification rejected successfully. Sensitive evidence has been removed from temporary storage.';
+}
 
 $status =
     $_GET['status'] ?? 'pending';
@@ -286,6 +524,30 @@ function verificationCustomerStatus(
                 <?php endforeach; ?>
             </div>
         </div>
+
+        <?php if ($error !== ''): ?>
+        <div
+            class="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+            <?= htmlspecialchars(
+                $error,
+                ENT_QUOTES,
+                'UTF-8'
+            ) ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($success !== ''): ?>
+        <div
+            class="mb-5 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
+        >
+            <?= htmlspecialchars(
+                $success,
+                ENT_QUOTES,
+                'UTF-8'
+            ) ?>
+        </div>
+        <?php endif; ?>
 
         <div
             class="grid grid-cols-1 xl:grid-cols-[0.9fr_1.3fr] gap-6"
@@ -664,6 +926,152 @@ function verificationCustomerStatus(
                     >
                         The evidence viewer validates the stored SHA-256 fingerprint before displaying each file.
                     </p>
+                </div>
+
+                <div
+                    class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5"
+                >
+                    <form
+                        method="POST"
+                        class="border border-green-200 bg-green-50 rounded-xl p-5 space-y-4"
+                        onsubmit="return confirm('Approve this identity verification and transfer the phone number to this customer?')"
+                    >
+                        <?php csrf_field(); ?>
+
+                        <input
+                            type="hidden"
+                            name="request_id"
+                            value="<?= (int) $selectedRequest[
+                                'verification_request_id'
+                            ] ?>"
+                        >
+
+                        <h3
+                            class="font-bold text-green-800"
+                        >
+                            Approve Verification
+                        </h3>
+
+                        <p
+                            class="text-xs text-green-700"
+                        >
+                            Read the MyKad number from the reviewed identity evidence and enter it below. The system will compare its protected fingerprint with the customer's original submission.
+                        </p>
+
+                        <div>
+                            <label
+                                class="block text-xs font-semibold text-gray-700 mb-1"
+                            >
+                                MyKad / NRIC Number from Evidence *
+                            </label>
+
+                            <input
+                                type="text"
+                                name="nric_confirmation"
+                                maxlength="14"
+                                autocomplete="off"
+                                required
+                                placeholder="12-digit MyKad / NRIC"
+                                class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-green-500"
+                            >
+                        </div>
+
+                        <div>
+                            <label
+                                class="block text-xs font-semibold text-gray-700 mb-1"
+                            >
+                                Review Note *
+                            </label>
+
+                            <textarea
+                                name="admin_note"
+                                maxlength="1000"
+                                rows="4"
+                                required
+                                placeholder="Explain what was verified before approval."
+                                class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-green-500"
+                            ></textarea>
+                        </div>
+
+                        <label
+                            class="flex items-start gap-3 text-xs text-gray-700"
+                        >
+                            <input
+                                type="checkbox"
+                                name="evidence_verified"
+                                value="1"
+                                required
+                                class="mt-1"
+                            >
+
+                            <span>
+                                I confirm that I reviewed both the MyKad identity evidence and the phone ownership evidence and verified that they support this ownership request.
+                            </span>
+                        </label>
+
+                        <button
+                            type="submit"
+                            name="action"
+                            value="approve_verification"
+                            class="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-lg text-sm font-bold"
+                        >
+                            Approve & Transfer Phone
+                        </button>
+                    </form>
+
+                    <form
+                        method="POST"
+                        class="border border-red-200 bg-red-50 rounded-xl p-5 space-y-4"
+                        onsubmit="return confirm('Reject this identity verification request?')"
+                    >
+                        <?php csrf_field(); ?>
+
+                        <input
+                            type="hidden"
+                            name="request_id"
+                            value="<?= (int) $selectedRequest[
+                                'verification_request_id'
+                            ] ?>"
+                        >
+
+                        <h3
+                            class="font-bold text-red-800"
+                        >
+                            Reject Verification
+                        </h3>
+
+                        <p
+                            class="text-xs text-red-700"
+                        >
+                            Reject the request if the identity or phone ownership evidence is insufficient, inconsistent, or cannot be verified.
+                        </p>
+
+                        <div>
+                            <label
+                                class="block text-xs font-semibold text-gray-700 mb-1"
+                            >
+                                Rejection Reason *
+                            </label>
+
+                            <textarea
+                                name="admin_note"
+                                maxlength="1000"
+                                rows="6"
+                                required
+                                placeholder="Explain why the verification request was rejected."
+                                class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500"
+                            ></textarea>
+                        </div>
+
+                        <button
+                            type="submit"
+                            name="action"
+                            value="reject_verification"
+                            class="w-full bg-red-600 hover:bg-red-700 text-white py-2.5 rounded-lg text-sm font-bold"
+                        >
+                            Reject Verification
+                        </button>
+                    </form>
                 </div>
 
                 <?php else: ?>

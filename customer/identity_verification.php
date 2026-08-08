@@ -622,7 +622,126 @@ if (
             </div>
         </section>
 
+        <?php elseif (
+            $currentRequest &&
+            $currentRequest[
+                'verification_request_status'
+            ] === 'approved'
+        ): ?>
+
+        <section
+            class="bg-white rounded-2xl shadow-sm p-6"
+        >
+            <div
+                class="bg-green-50 border border-green-200 rounded-xl p-5"
+            >
+                <p
+                    class="text-xs uppercase tracking-wide font-bold text-green-600"
+                >
+                    Verification Approved
+                </p>
+
+                <h2
+                    class="font-black text-green-800 text-lg mt-1"
+                >
+                    Phone Ownership Verified
+                </h2>
+
+                <p
+                    class="text-sm text-green-700 mt-3"
+                >
+                    Your verified phone number
+                    <strong>
+                        <?= htmlspecialchars(
+                            (string) $currentRequest[
+                                'verification_request_phone_snapshot'
+                            ],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                    </strong>
+                    has been assigned to your MangaVault account.
+                </p>
+
+                <?php if (
+                    !empty(
+                        $currentRequest[
+                            'verification_request_admin_note'
+                        ]
+                    )
+                ): ?>
+                <div
+                    class="mt-4 bg-white rounded-lg px-4 py-3"
+                >
+                    <p
+                        class="text-xs text-gray-400"
+                    >
+                        Super Admin Review Note
+                    </p>
+
+                    <p
+                        class="text-sm text-gray-700 mt-1 whitespace-pre-wrap"
+                    ><?= htmlspecialchars(
+                        (string) $currentRequest[
+                            'verification_request_admin_note'
+                        ],
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?></p>
+                </div>
+                <?php endif; ?>
+
+                <a
+                    href="profile.php"
+                    class="inline-flex mt-4 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold"
+                >
+                    Return to My Profile
+                </a>
+            </div>
+        </section>
+
         <?php else: ?>
+
+        <?php if (
+            $currentRequest &&
+            $currentRequest[
+                'verification_request_status'
+            ] === 'rejected'
+        ): ?>
+        <div
+            class="mb-5 bg-red-50 border border-red-200 rounded-xl p-5"
+        >
+            <p
+                class="font-bold text-red-800"
+            >
+                Previous Verification Rejected
+            </p>
+
+            <?php if (
+                !empty(
+                    $currentRequest[
+                        'verification_request_admin_note'
+                    ]
+                )
+            ): ?>
+            <p
+                class="text-sm text-red-700 mt-2 whitespace-pre-wrap"
+            ><?= htmlspecialchars(
+                (string) $currentRequest[
+                    'verification_request_admin_note'
+                ],
+                ENT_QUOTES,
+                'UTF-8'
+            ) ?></p>
+            <?php endif; ?>
+
+            <p
+                class="text-xs text-red-500 mt-2"
+            >
+                You may submit a new verification request with corrected or stronger evidence.
+            </p>
+        </div>
+        <?php endif; ?>
 
         <form
             method="POST"

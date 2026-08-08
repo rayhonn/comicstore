@@ -664,7 +664,8 @@ function releaseHistoricalPhoneIdentity(
     int $identityHistoryId,
     string $phone,
     int $adminId,
-    string $reason
+    string $reason,
+    ?int $verifiedNewOwnerId = null
 ): array {
     if (
         $identityHistoryId < 1 ||
@@ -672,6 +673,15 @@ function releaseHistoricalPhoneIdentity(
     ) {
         throw new IdentityProtectionException(
             'Invalid phone ownership review.'
+        );
+    }
+
+    if (
+        $verifiedNewOwnerId !== null &&
+        $verifiedNewOwnerId < 1
+    ) {
+        throw new IdentityProtectionException(
+            'Invalid verified phone owner.'
         );
     }
 
@@ -714,8 +724,13 @@ function releaseHistoricalPhoneIdentity(
             $phone
         );
 
+    $ownsTransaction =
+        !$pdo->inTransaction();
+
     try {
-        $pdo->beginTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
 
         $identityLock =
             $pdo->prepare("
@@ -916,6 +931,16 @@ function releaseHistoricalPhoneIdentity(
                 !$currentIsDeleted
             ) {
                 if (
+                    $verifiedNewOwnerId !== null &&
+                    $currentUserId !==
+                        $verifiedNewOwnerId
+                ) {
+                    throw new IdentityProtectionException(
+                        'This phone number is currently assigned to a different active customer and cannot be transferred to the verified requester.'
+                    );
+                }
+
+                if (
                     $verifiedCurrentOwnerId !==
                         null &&
                     $verifiedCurrentOwnerId !==
@@ -931,7 +956,6 @@ function releaseHistoricalPhoneIdentity(
 
                 continue;
             }
-
             /*
              * Another inactive or closed account also
              * contains the number. This requires a
@@ -1031,7 +1055,9 @@ function releaseHistoricalPhoneIdentity(
             $reason,
         ]);
 
-        $pdo->commit();
+        if ($ownsTransaction) {
+            $pdo->commit();
+        }
 
         return [
             'identity_history_id' =>
@@ -1047,6 +1073,7 @@ function releaseHistoricalPhoneIdentity(
         ];
     } catch (Throwable $e) {
         if (
+            $ownsTransaction &&
             $pdo->inTransaction()
         ) {
             $pdo->rollBack();
