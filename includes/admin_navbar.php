@@ -28,6 +28,7 @@ $pending_reviews_count = (int) $pdo->query("
 ")->fetchColumn();
 
 $pending_account_deletions_count = 0;
+$pending_identity_verifications_count = 0;
 
 if (is_senior_admin()) {
     $pending_account_deletions_count =
@@ -39,6 +40,16 @@ if (is_senior_admin()) {
                 deletion_request_status =
                     'pending'
         ")->fetchColumn();
+
+    $pending_identity_verifications_count =
+        (int) $pdo->query("
+            SELECT COUNT(*)
+            FROM
+                identity_verification_requests
+            WHERE
+                verification_request_status =
+                    'pending'
+        ")->fetchColumn();    
 }
 
 $low_stock_count = (int) $pdo->query("
@@ -98,6 +109,11 @@ $account_deletion_pages = [
 
 $identity_conflict_pages = [
     'identity_conflicts.php',
+];
+
+$identity_verification_pages = [
+    'identity_verification_requests.php',
+    'identity_verification_evidence.php',
 ];
 
 $report_pages = [
@@ -442,7 +458,35 @@ $admin_access_label =
 
             Phone Ownership
         </a>
+        <a
+            href="identity_verification_requests.php"
+            class="<?= adminSidebarLinkClass(
+                in_array(
+                    $admin_current,
+                    $identity_verification_pages,
+                    true
+                )
+            ) ?> mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-sm"
+        >
+            <span
+                class="w-6 text-center"
+            >
+                ◫
+            </span>
 
+            Identity Verification
+
+            <?php if (
+                $pending_identity_verifications_count >
+                0
+            ): ?>
+            <span
+                class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-purple-500 text-white text-[10px] font-bold flex items-center justify-center"
+            >
+                <?= $pending_identity_verifications_count ?>
+            </span>
+            <?php endif; ?>
+        </a>
         <?php endif; ?>
 
         <p

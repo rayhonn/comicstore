@@ -133,6 +133,7 @@ function safe_redirect_target(string $target, string $default): string
         'admin/admins.php',
         'admin/account_deletion_requests.php',
         'admin/identity_conflicts.php',
+        'admin/identity_verification_requests.php',
         'admin/goods_received.php',
         'admin/delivery_receipt.php',
 

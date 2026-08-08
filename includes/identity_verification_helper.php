@@ -213,7 +213,7 @@ function storeIdentityVerificationEvidence(
     ) {
         throw new RuntimeException(
             $label .
-            ' image resolution is too low.'
+            ' resolution is too low. The image must be at least 500 × 300 pixels.'
         );
     }
 
