@@ -96,6 +96,10 @@ $account_deletion_pages = [
     'account_deletion_requests.php',
 ];
 
+$identity_conflict_pages = [
+    'identity_conflicts.php',
+];
+
 $report_pages = [
     'reports.php',
 ];
@@ -419,6 +423,26 @@ $admin_access_label =
             </span>
             <?php endif; ?>
         </a>
+
+        <a
+            href="identity_conflicts.php"
+            class="<?= adminSidebarLinkClass(
+                in_array(
+                    $admin_current,
+                    $identity_conflict_pages,
+                    true
+                )
+            ) ?> mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-sm"
+        >
+            <span
+                class="w-6 text-center"
+            >
+                ⟳
+            </span>
+
+            Phone Ownership
+        </a>
+
         <?php endif; ?>
 
         <p
