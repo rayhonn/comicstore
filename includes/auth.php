@@ -119,6 +119,7 @@ function safe_redirect_target(string $target, string $default): string
 
         'customer/index.php',
         'customer/profile.php',
+        'customer/identity_verification.php',
         'customer/cart.php',
         'customer/checkout.php',
         'customer/orders.php',

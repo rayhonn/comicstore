@@ -900,7 +900,15 @@ if (
                                     ✓ Your new-member welcome rewards have already been unlocked.
                                 </p>
                                 <?php endif; ?>
+
+                                <a
+                                    href="identity_verification.php"
+                                    class="inline-flex items-center mt-2 text-xs font-semibold text-red-600 hover:text-red-700"
+                                >
+                                    Using a reassigned phone number? Submit ownership verification →
+                                </a>
                             </div>
+
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">
                                     Date of Birth
