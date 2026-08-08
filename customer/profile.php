@@ -4,6 +4,8 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ .
     '/../includes/identity_helper.php';
+require_once __DIR__ .
+    '/../includes/welcome_reward_helper.php';
 
 require_customer();
 
@@ -169,9 +171,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $user_id,
                     ]);
 
+                    $welcomeRewardsGranted =
+                        grantWelcomeRewardsIfEligible(
+                            $pdo,
+                            $user_id
+                        );
+
                     $pdo->commit();
 
-                    if (
+                    $dobChangedNow =
                         !empty($new_dob) &&
                         !$user[
                             'user_dob_changed'
@@ -180,7 +188,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $user['user_dob']
                         ) &&
                         $new_dob !==
-                            $user['user_dob']
+                            $user['user_dob'];
+
+                    if (
+                        $welcomeRewardsGranted &&
+                        $dobChangedNow
+                    ) {
+                        $success =
+                            'Profile updated! Your date of birth is now locked and your eligible phone number unlocked your welcome vouchers.';
+                    } elseif (
+                        $welcomeRewardsGranted
+                    ) {
+                        $success =
+                            'Profile updated successfully! Your eligible phone number unlocked your welcome vouchers.';
+                    } elseif (
+                        $dobChangedNow
                     ) {
                         $success =
                             'Profile updated! Date of birth has been changed and is now locked.';
@@ -831,13 +853,53 @@ if (
                                        class="w-full px-3 py-2.5 border border-gray-100 rounded-lg text-sm bg-gray-50 text-gray-400 cursor-not-allowed">
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-gray-500 mb-1">Phone</label>
-                                <input type="text" name="user_phone"
-                                       value="<?= htmlspecialchars($user['user_phone'] ?? '') ?>"
-                                       oninput="this.value = this.value.replace(/[^0-9]/g, '')"
-                                       maxlength="11"
-                                       class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
-                                       placeholder="e.g. 01234567890">
+                                <label
+                                    class="block text-xs font-medium text-gray-500 mb-1"
+                                >
+                                    Phone
+                                </label>
+
+                                <input
+                                    type="text"
+                                    name="user_phone"
+                                    value="<?= htmlspecialchars(
+                                        $user['user_phone'] ?? ''
+                                    ) ?>"
+                                    oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                                    maxlength="11"
+                                    class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors"
+                                    placeholder="e.g. 01234567890"
+                                >
+
+                                <?php if (
+                                    empty(
+                                        $user[
+                                            'user_welcome_reward_granted_at'
+                                        ]
+                                    )
+                                ): ?>
+                                <div
+                                    class="mt-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2"
+                                >
+                                    <p
+                                        class="text-xs font-semibold text-amber-700"
+                                    >
+                                        🎁 Add an eligible phone number to unlock your new-member welcome vouchers.
+                                    </p>
+
+                                    <p
+                                        class="text-[11px] text-amber-600 mt-1"
+                                    >
+                                        Phone numbers associated with another existing or previous MangaVault account are not eligible.
+                                    </p>
+                                </div>
+                                <?php else: ?>
+                                <p
+                                    class="text-xs text-green-600 mt-2 font-medium"
+                                >
+                                    ✓ Your new-member welcome rewards have already been unlocked.
+                                </p>
+                                <?php endif; ?>
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">

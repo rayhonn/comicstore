@@ -5,6 +5,8 @@ require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/notifications.php';
 require_once __DIR__ .
     '/includes/identity_helper.php';
+require_once __DIR__ .
+    '/includes/welcome_reward_helper.php';
 
 $error = '';
 $success = '';
@@ -276,82 +278,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'system'
             );
 
-            sendNotification(
-                $pdo,
-                $newUserId,
-                '🎟️ Welcome Gift — 10% OFF!',
-                'Use code WELCOME10 for 10% off your first order ' .
-                '(min RM20, max RM15 discount). Happy shopping!',
-                'promo'
-            );
-
-            sendNotification(
-                $pdo,
-                $newUserId,
-                '🎁 New Member Special — 20% OFF!',
-                'Exclusive for new members! Use code NEWUSER20 ' .
-                'for 20% off (min RM50, max RM20 discount). ' .
-                'One-time use only!',
-                'promo'
-            );
-
-            sendNotification(
-                $pdo,
-                $newUserId,
-                '🎊 New Member Gift — 50% OFF!',
-                'Welcome gift! Use code NEWMEMBER50 for 50% off ' .
-                'your first order (min RM30, max RM25 discount). ' .
-                'Valid for 1 month only!',
-                'promo'
-            );
-
-            $welcomeVouchers =
-                $pdo->prepare(
-                    "SELECT voucher_id
-                     FROM vouchers
-                     WHERE voucher_code IN (
-                        'WELCOME10',
-                        'NEWUSER20',
-                        'NEWMEMBER50'
-                     )
-                     AND voucher_is_active = 1"
+            $welcomeRewardGranted =
+                grantWelcomeRewardsIfEligible(
+                    $pdo,
+                    $newUserId
                 );
-
-            $welcomeVouchers->execute();
-
-            $expiresAt = date(
-                'Y-m-d H:i:s',
-                strtotime('+1 month')
-            );
-
-            $claimVoucher =
-                $pdo->prepare(
-                    'INSERT IGNORE INTO user_vouchers (
-                        uv_user_id,
-                        uv_voucher_id,
-                        uv_expires_at
-                     ) VALUES (?, ?, ?)'
-                );
-
-            foreach (
-                $welcomeVouchers
-                    ->fetchAll(
-                        PDO::FETCH_ASSOC
-                    ) as $voucher
-            ) {
-                $claimVoucher->execute([
-                    $newUserId,
-                    (int) $voucher[
-                        'voucher_id'
-                    ],
-                    $expiresAt,
-                ]);
-            }
 
             $pdo->commit();
 
-            $success =
-                'Registration successful! You can now login.';
+            if ($welcomeRewardGranted) {
+                $success =
+                    'Registration successful! Your eligible phone number unlocked your welcome vouchers. You can now login.';
+            } elseif ($phone === '') {
+                $success =
+                    'Registration successful! Add an eligible phone number in My Profile to unlock your welcome vouchers.';
+            } else {
+                $success =
+                    'Registration successful! Your account has been created successfully.';
+            }
+
         } catch (Throwable $e) {
             if (
                 $pdo->inTransaction()
@@ -1598,6 +1543,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <p class="helper-text">
                                     Malaysian format, for example
                                     01234567890.
+                                </p>
+
+                                <p
+                                    class="mt-1 text-[0.66rem] font-bold text-amber-700"
+                                >
+                                    🎁 Optional — add an eligible phone number to unlock your new-member welcome vouchers. You can also add one later in My Profile.
                                 </p>
                             </div>
 
