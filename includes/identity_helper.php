@@ -821,6 +821,9 @@ function releaseHistoricalPhoneIdentity(
                 'identity_user_id'
             ];
 
+        $verifiedCurrentOwnerId =
+            null;
+
         foreach (
             $currentPhones as
             $currentCustomer
@@ -850,50 +853,96 @@ function releaseHistoricalPhoneIdentity(
                     'user_id'
                 ];
 
-            /*
-             * A closed account can release its old
-             * plaintext phone value because the
-             * historical fingerprint remains for
-             * audit purposes.
-             */
-            if (
-                $currentUserId ===
-                    $historicalOwnerId &&
+            $currentIsActive =
+                (int) $currentCustomer[
+                    'user_is_active'
+                ] === 1;
+
+            $currentIsDeleted =
                 !empty(
                     $currentCustomer[
                         'user_deleted_at'
                     ]
-                ) &&
-                (int) $currentCustomer[
-                    'user_is_active'
-                ] !== 1
-            ) {
-                $clearOldPhone =
-                    $pdo->prepare("
-                        UPDATE users
-                        SET user_phone = NULL
-                        WHERE user_id = ?
-                        AND user_role = 'customer'
-                    ");
+                );
 
-                $clearOldPhone->execute([
-                    $currentUserId,
-                ]);
+            /*
+             * Remove the stale plaintext phone from
+             * the closed historical owner. The
+             * released fingerprint remains as the
+             * permanent audit record.
+             */
+            if (
+                $currentUserId ===
+                    $historicalOwnerId
+            ) {
+                if (
+                    $currentIsDeleted &&
+                    !$currentIsActive
+                ) {
+                    $clearOldPhone =
+                        $pdo->prepare("
+                            UPDATE users
+                            SET user_phone = NULL
+                            WHERE user_id = ?
+                            AND user_role = 'customer'
+                            AND user_deleted_at
+                                IS NOT NULL
+                            AND user_is_active = 0
+                        ");
+
+                    $clearOldPhone->execute([
+                        $currentUserId,
+                    ]);
+
+                    continue;
+                }
+
+                throw new IdentityProtectionException(
+                    'The historical owner still has this phone number as a current account phone and it cannot be released.'
+                );
+            }
+
+            /*
+             * A different active customer may already
+             * hold the reassigned number because of
+             * legacy data created before identity
+             * protection was introduced.
+             *
+             * After Super Admin verification, this
+             * account becomes the current owner.
+             */
+            if (
+                $currentIsActive &&
+                !$currentIsDeleted
+            ) {
+                if (
+                    $verifiedCurrentOwnerId !==
+                        null &&
+                    $verifiedCurrentOwnerId !==
+                        $currentUserId
+                ) {
+                    throw new IdentityProtectionException(
+                        'Multiple active customer accounts currently use this phone number. Resolve the duplicate customer records before releasing ownership.'
+                    );
+                }
+
+                $verifiedCurrentOwnerId =
+                    $currentUserId;
 
                 continue;
             }
 
             /*
-             * The number is still a current phone
-             * on an active or temporarily inactive
-             * MangaVault account, so it cannot be
-             * reassigned here.
+             * Another inactive or closed account also
+             * contains the number. This requires a
+             * separate ownership review instead of
+             * being cleared automatically.
              */
             throw new IdentityProtectionException(
-                'This phone number is still assigned as the current phone number of a MangaVault customer account and cannot be released.'
+                'This phone number is also stored on another inactive or closed MangaVault account. Resolve that ownership conflict before releasing this identity.'
             );
         }
-
+        
         $release =
             $pdo->prepare("
                 UPDATE
@@ -937,6 +986,24 @@ function releaseHistoricalPhoneIdentity(
             );
         }
 
+        /*
+         * If the reassigned number is already stored
+         * on one verified active customer, create the
+         * new active identity claim immediately.
+         */
+        if (
+            $verifiedCurrentOwnerId !==
+            null
+        ) {
+            claimCustomerIdentity(
+                $pdo,
+                $verifiedCurrentOwnerId,
+                'phone',
+                $phone,
+                'admin_reassignment'
+            );
+        }
+        
         $log =
             $pdo->prepare("
                 INSERT INTO admin_logs (
