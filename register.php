@@ -3,6 +3,8 @@
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/notifications.php';
+require_once __DIR__ .
+    '/includes/identity_helper.php';
 
 $error = '';
 $success = '';
@@ -174,6 +176,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
         }
 
+        $email =
+            normalizeIdentityEmail(
+                $email
+            );
+
+        if ($phone !== '') {
+            $phone =
+                normalizeIdentityPhone(
+                    $phone
+                );
+        }
+
         $check = $pdo->prepare(
             'SELECT user_id
              FROM users
@@ -188,109 +202,184 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
         }
 
-        $insert = $pdo->prepare(
-            "INSERT INTO users (
-                user_name,
-                user_gmail,
-                user_password_hash,
-                user_first_name,
-                user_last_name,
-                user_phone,
-                user_dob,
-                user_role
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'customer')"
-        );
-        $insert->execute([
-            $userName,
-            $email,
-            password_hash(
-                $password,
-                PASSWORD_DEFAULT
-            ),
-            $firstName,
-            $lastName,
-            $phone,
-            $dobInput,
-        ]);
-
-        $newUserId = (int) $pdo->lastInsertId();
-
-        sendNotification(
+        assertCustomerIdentityAvailable(
             $pdo,
-            $newUserId,
-            'Welcome to MangaVault! 🎉',
-            'Hi ' . $firstName .
-            '! Your account has been created successfully. ' .
-            'Start exploring thousands of manga titles now!',
-            'system'
-        );
-        sendNotification(
-            $pdo,
-            $newUserId,
-            '🎟️ Welcome Gift — 10% OFF!',
-            'Use code WELCOME10 for 10% off your first order ' .
-            '(min RM20, max RM15 discount). Happy shopping!',
-            'promo'
-        );
-        sendNotification(
-            $pdo,
-            $newUserId,
-            '🎁 New Member Special — 20% OFF!',
-            'Exclusive for new members! Use code NEWUSER20 ' .
-            'for 20% off (min RM50, max RM20 discount). ' .
-            'One-time use only!',
-            'promo'
-        );
-        sendNotification(
-            $pdo,
-            $newUserId,
-            '🎊 New Member Gift — 50% OFF!',
-            'Welcome gift! Use code NEWMEMBER50 for 50% off ' .
-            'your first order (min RM30, max RM25 discount). ' .
-            'Valid for 1 month only!',
-            'promo'
+            'email',
+            $email
         );
 
-        $welcomeVouchers = $pdo->prepare(
-            "SELECT voucher_id
-             FROM vouchers
-             WHERE voucher_code IN (
-                'WELCOME10',
-                'NEWUSER20',
-                'NEWMEMBER50'
-             )
-             AND voucher_is_active = 1"
-        );
-        $welcomeVouchers->execute();
-
-        $expiresAt = date(
-            'Y-m-d H:i:s',
-            strtotime('+1 month')
-        );
-
-        $claimVoucher = $pdo->prepare(
-            'INSERT IGNORE INTO user_vouchers (
-                uv_user_id,
-                uv_voucher_id,
-                uv_expires_at
-             ) VALUES (?, ?, ?)'
-        );
-
-        foreach (
-            $welcomeVouchers->fetchAll(PDO::FETCH_ASSOC)
-            as $voucher
-        ) {
-            $claimVoucher->execute([
-                $newUserId,
-                (int) $voucher['voucher_id'],
-                $expiresAt,
-            ]);
+        if ($phone !== '') {
+            assertCustomerIdentityAvailable(
+                $pdo,
+                'phone',
+                $phone
+            );
         }
 
-        $success =
-            'Registration successful! You can now login.';
+        $pdo->beginTransaction();
+
+        try {
+            $insert = $pdo->prepare(
+                "INSERT INTO users (
+                    user_name,
+                    user_gmail,
+                    user_password_hash,
+                    user_first_name,
+                    user_last_name,
+                    user_phone,
+                    user_dob,
+                    user_role
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'customer')"
+            );
+
+            $insert->execute([
+                $userName,
+                $email,
+                password_hash(
+                    $password,
+                    PASSWORD_DEFAULT
+                ),
+                $firstName,
+                $lastName,
+                $phone,
+                $dobInput,
+            ]);
+
+            $newUserId =
+                (int) $pdo->lastInsertId();
+
+            claimCustomerIdentity(
+                $pdo,
+                $newUserId,
+                'email',
+                $email,
+                'registration'
+            );
+
+            if ($phone !== '') {
+                claimCustomerIdentity(
+                    $pdo,
+                    $newUserId,
+                    'phone',
+                    $phone,
+                    'registration'
+                );
+            }
+
+            sendNotification(
+                $pdo,
+                $newUserId,
+                'Welcome to MangaVault! 🎉',
+                'Hi ' . $firstName .
+                '! Your account has been created successfully. ' .
+                'Start exploring thousands of manga titles now!',
+                'system'
+            );
+
+            sendNotification(
+                $pdo,
+                $newUserId,
+                '🎟️ Welcome Gift — 10% OFF!',
+                'Use code WELCOME10 for 10% off your first order ' .
+                '(min RM20, max RM15 discount). Happy shopping!',
+                'promo'
+            );
+
+            sendNotification(
+                $pdo,
+                $newUserId,
+                '🎁 New Member Special — 20% OFF!',
+                'Exclusive for new members! Use code NEWUSER20 ' .
+                'for 20% off (min RM50, max RM20 discount). ' .
+                'One-time use only!',
+                'promo'
+            );
+
+            sendNotification(
+                $pdo,
+                $newUserId,
+                '🎊 New Member Gift — 50% OFF!',
+                'Welcome gift! Use code NEWMEMBER50 for 50% off ' .
+                'your first order (min RM30, max RM25 discount). ' .
+                'Valid for 1 month only!',
+                'promo'
+            );
+
+            $welcomeVouchers =
+                $pdo->prepare(
+                    "SELECT voucher_id
+                     FROM vouchers
+                     WHERE voucher_code IN (
+                        'WELCOME10',
+                        'NEWUSER20',
+                        'NEWMEMBER50'
+                     )
+                     AND voucher_is_active = 1"
+                );
+
+            $welcomeVouchers->execute();
+
+            $expiresAt = date(
+                'Y-m-d H:i:s',
+                strtotime('+1 month')
+            );
+
+            $claimVoucher =
+                $pdo->prepare(
+                    'INSERT IGNORE INTO user_vouchers (
+                        uv_user_id,
+                        uv_voucher_id,
+                        uv_expires_at
+                     ) VALUES (?, ?, ?)'
+                );
+
+            foreach (
+                $welcomeVouchers
+                    ->fetchAll(
+                        PDO::FETCH_ASSOC
+                    ) as $voucher
+            ) {
+                $claimVoucher->execute([
+                    $newUserId,
+                    (int) $voucher[
+                        'voucher_id'
+                    ],
+                    $expiresAt,
+                ]);
+            }
+
+            $pdo->commit();
+
+            $success =
+                'Registration successful! You can now login.';
+        } catch (Throwable $e) {
+            if (
+                $pdo->inTransaction()
+            ) {
+                $pdo->rollBack();
+            }
+
+            if (
+                $e instanceof
+                IdentityProtectionException
+            ) {
+                throw new RuntimeException(
+                    $e->getMessage()
+                );
+            }
+
+            app_error_log(
+                'Customer registration transaction failed: ' .
+                $e->getMessage()
+            );
+
+            throw new RuntimeException(
+                'Registration could not be completed. Please try again later.'
+            );
+        }
     } catch (RuntimeException $e) {
-        $error = $e->getMessage();
+        $error =
+            $e->getMessage();
     }
 }
 ?>

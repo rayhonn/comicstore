@@ -12,6 +12,9 @@ require_once __DIR__ .
 require_once __DIR__ .
     '/../includes/account_deletion_mail_helper.php';
 
+require_once __DIR__ .
+    '/../includes/identity_helper.php';
+
 require_senior_admin();
 
 $error = '';
@@ -271,6 +274,39 @@ if (
                         'Approval blocked because the customer currently has a pending return request.'
                     );
                 }
+
+                claimCustomerIdentity(
+                    $pdo,
+                    $customerId,
+                    'email',
+                    (string) $request[
+                        'user_gmail'
+                    ],
+                    'account_deletion'
+                );
+
+                if (
+                    !empty(
+                        $request[
+                            'user_phone'
+                        ]
+                    )
+                ) {
+                    claimCustomerIdentity(
+                        $pdo,
+                        $customerId,
+                        'phone',
+                        (string) $request[
+                            'user_phone'
+                        ],
+                        'account_deletion'
+                    );
+                }
+
+                markCustomerIdentitiesHistorical(
+                    $pdo,
+                    $customerId
+                );
 
                 $deleteResetTokens =
                     $pdo->prepare("

@@ -2,6 +2,8 @@
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ .
+    '/../includes/identity_helper.php';
 
 require_customer();
 
@@ -70,18 +72,164 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (empty($error)) {
-                $pdo->prepare("UPDATE users SET user_first_name = ?, user_last_name = ?, user_phone = ?, user_dob = ?, user_dob_changed = ? WHERE user_id = ?")
-                    ->execute([$first_name, $last_name, $phone, $dob_to_save, $dob_changed_flag, $user_id]);
+                try {
+                    if ($phone !== '') {
+                        $phone =
+                            normalizeIdentityPhone(
+                                $phone
+                            );
+                    }
 
-                if (!empty($new_dob) && !$user['user_dob_changed'] && !empty($user['user_dob']) && $new_dob !== $user['user_dob']) {
-                    $success = "Profile updated! Date of birth has been changed and is now locked.";
-                } else {
-                    $success = "Profile updated successfully!";
+                    $oldPhone =
+                        normalizeIdentityPhone(
+                            (string) (
+                                $user[
+                                    'user_phone'
+                                ] ?? ''
+                            )
+                        );
+
+                    $phoneChanged =
+                        $phone !==
+                        $oldPhone;
+
+                    if ($phoneChanged) {
+                        assertCustomerIdentityAvailable(
+                            $pdo,
+                            'phone',
+                            $phone,
+                            $user_id
+                        );
+                    }
+
+                    $pdo->beginTransaction();
+
+                    claimCustomerIdentity(
+                        $pdo,
+                        $user_id,
+                        'email',
+                        (string) $user[
+                            'user_gmail'
+                        ],
+                        'legacy_sync'
+                    );
+
+                    if ($phoneChanged) {
+                        if (
+                            $oldPhone !== ''
+                        ) {
+                            markCustomerIdentityHistorical(
+                                $pdo,
+                                $user_id,
+                                'phone',
+                                $oldPhone
+                            );
+                        }
+
+                        if ($phone !== '') {
+                            claimCustomerIdentity(
+                                $pdo,
+                                $user_id,
+                                'phone',
+                                $phone,
+                                'profile_update'
+                            );
+                        }
+                    } elseif (
+                        $phone !== ''
+                    ) {
+                        claimCustomerIdentity(
+                            $pdo,
+                            $user_id,
+                            'phone',
+                            $phone,
+                            'legacy_sync'
+                        );
+                    }
+
+                    $updateProfile =
+                        $pdo->prepare("
+                            UPDATE users
+                            SET
+                                user_first_name = ?,
+                                user_last_name = ?,
+                                user_phone = ?,
+                                user_dob = ?,
+                                user_dob_changed = ?
+                            WHERE user_id = ?
+                            AND user_role = 'customer'
+                        ");
+
+                    $updateProfile->execute([
+                        $first_name,
+                        $last_name,
+                        $phone,
+                        $dob_to_save,
+                        $dob_changed_flag,
+                        $user_id,
+                    ]);
+
+                    $pdo->commit();
+
+                    if (
+                        !empty($new_dob) &&
+                        !$user[
+                            'user_dob_changed'
+                        ] &&
+                        !empty(
+                            $user['user_dob']
+                        ) &&
+                        $new_dob !==
+                            $user['user_dob']
+                    ) {
+                        $success =
+                            'Profile updated! Date of birth has been changed and is now locked.';
+                    } else {
+                        $success =
+                            'Profile updated successfully!';
+                    }
+
+                    $stmt =
+                        $pdo->prepare("
+                            SELECT *
+                            FROM users
+                            WHERE user_id = ?
+                        ");
+
+                    $stmt->execute([
+                        $user_id,
+                    ]);
+
+                    $user =
+                        $stmt->fetch(
+                            PDO::FETCH_ASSOC
+                        );
+                } catch (
+                    IdentityProtectionException $e
+                ) {
+                    if (
+                        $pdo->inTransaction()
+                    ) {
+                        $pdo->rollBack();
+                    }
+
+                    $error =
+                        $e->getMessage();
+                } catch (Throwable $e) {
+                    if (
+                        $pdo->inTransaction()
+                    ) {
+                        $pdo->rollBack();
+                    }
+
+                    app_error_log(
+                        'Customer profile identity update failed: ' .
+                        $e->getMessage()
+                    );
+
+                    $error =
+                        'Unable to update your profile. Please try again later.';
                 }
-
-                $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
-                $stmt->execute([$user_id]);
-                $user = $stmt->fetch(PDO::FETCH_ASSOC);
             }
         }
 
