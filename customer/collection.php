@@ -8,24 +8,45 @@ require_once __DIR__ . '/../includes/csrf.php';
 
 $user_id = current_user_id();
 
-// Get ebooks
+// Get e-books with the customer's latest reading progress
 $collection = $pdo->prepare("
-    SELECT DISTINCT p.*, 
-    pe.ebook_file_path, pe.ebook_download_limit,
-    oi.order_item_id, oi.order_item_download_count,
-    o.order_created_at as purchased_at,
-    o.order_id
+    SELECT DISTINCT
+        p.*,
+        pe.ebook_file_format,
+        oi.order_item_id,
+        o.order_created_at AS purchased_at,
+        o.order_id,
+        erp.ebook_progress_page,
+        erp.ebook_progress_locator,
+        COALESCE(
+            erp.ebook_progress_percent,
+            0.00
+        ) AS reading_progress
     FROM order_items oi
-    JOIN orders o ON oi.order_item_order_id = o.order_id
-    JOIN products p ON oi.order_item_product_id = p.product_id
-    JOIN product_ebook pe ON p.product_id = pe.ebook_product_id
+    JOIN orders o
+        ON oi.order_item_order_id =
+            o.order_id
+    JOIN products p
+        ON oi.order_item_product_id =
+            p.product_id
+    JOIN product_ebook pe
+        ON p.product_id =
+            pe.ebook_product_id
+    LEFT JOIN ebook_reading_progress erp
+        ON erp.ebook_progress_order_item_id =
+            oi.order_item_id
+        AND erp.ebook_progress_user_id =
+            o.order_user_id
     WHERE o.order_user_id = ?
     AND oi.order_item_type = 'ebook'
     AND o.order_payment_status = 'confirmed'
     ORDER BY o.order_created_at DESC
 ");
 $collection->execute([$user_id]);
-$collection = $collection->fetchAll(PDO::FETCH_ASSOC);
+$collection =
+    $collection->fetchAll(
+        PDO::FETCH_ASSOC
+    );
 
 // Get owned physical products
 $owned_stmt = $pdo->prepare("
@@ -251,49 +272,87 @@ $total_physical = count($owned_ids);
                                     <p class="text-xs text-gray-400 mb-1"><?= htmlspecialchars($item['product_author'] ?? '') ?></p>
                                     <p class="text-xs text-gray-400 mb-3">Purchased <?= date('d M Y', strtotime($item['purchased_at'])) ?></p>
                                     <?php
-                                    $download_limit = max(
+                                    $reading_progress = max(
                                         0,
-                                        (int) $item['ebook_download_limit']
+                                        min(
+                                            100,
+                                            (float) (
+                                                $item['reading_progress'] ??
+                                                0
+                                            )
+                                        )
                                     );
-                                    $download_count = max(
-                                        0,
-                                        (int) $item['order_item_download_count']
-                                    );
-                                    $downloads_left = max(
-                                        0,
-                                        $download_limit - $download_count
-                                    );
+
+                                    $has_progress =
+                                        $reading_progress > 0 ||
+                                        !empty(
+                                            $item['ebook_progress_page']
+                                        ) ||
+                                        !empty(
+                                            $item['ebook_progress_locator']
+                                        );
                                     ?>
+
                                     <div class="mb-3">
-                                        <div class="flex justify-between text-xs text-gray-400 mb-1">
-                                            <span>Downloads</span>
-                                            <span><?= $download_count ?>/<?= $download_limit ?></span>
+                                        <div
+                                            class="flex justify-between text-xs text-gray-400 mb-1"
+                                        >
+                                            <span>Reading Progress</span>
+
+                                            <span>
+                                                <?= number_format(
+                                                    $reading_progress,
+                                                    0
+                                                ) ?>%
+                                            </span>
                                         </div>
-                                        <div class="w-full bg-gray-100 rounded-full h-1.5">
-                                            <div class="bg-red-500 h-1.5 rounded-full"
-                                                 style="width: <?= $download_limit > 0 ? min(100, ($download_count / $download_limit) * 100) : 100 ?>%"></div>
+
+                                        <div
+                                            class="w-full bg-gray-100 rounded-full h-1.5"
+                                        >
+                                            <div
+                                                class="bg-red-500 h-1.5 rounded-full"
+                                                style="width: <?= number_format(
+                                                    $reading_progress,
+                                                    2,
+                                                    '.',
+                                                    ''
+                                                ) ?>%"
+                                            ></div>
                                         </div>
+
+                                        <?php if (
+                                            !empty(
+                                                $item[
+                                                    'ebook_progress_page'
+                                                ]
+                                            )
+                                        ): ?>
+                                            <p
+                                                class="mt-1.5 text-[11px] text-gray-400"
+                                            >
+                                                Last read at page
+                                                <?= (int) $item[
+                                                    'ebook_progress_page'
+                                                ] ?>
+                                            </p>
+                                        <?php elseif ($has_progress): ?>
+                                            <p
+                                                class="mt-1.5 text-[11px] text-gray-400"
+                                            >
+                                                Your reading position is saved automatically.
+                                            </p>
+                                        <?php endif; ?>
                                     </div>
-                                    <?php if ($downloads_left > 0): ?>
-                                        <form method="POST" action="download.php">
-                                            <?php csrf_field(); ?>
-                                            <input
-                                                type="hidden"
-                                                name="item_id"
-                                                value="<?= (int) $item['order_item_id'] ?>"
-                                            >
-                                            <button
-                                                type="submit"
-                                                class="block w-full text-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors"
-                                            >
-                                                ↓ Download (<?= (int) $downloads_left ?> left)
-                                            </button>
-                                        </form>
-                                    <?php else: ?>
-                                        <button disabled class="w-full bg-gray-100 text-gray-400 text-xs font-semibold py-2 rounded-lg cursor-not-allowed">
-                                            Download Limit Reached
-                                        </button>
-                                    <?php endif; ?>
+
+                                    <a
+                                        href="ebook_reader.php?item_id=<?= (int) $item['order_item_id'] ?>"
+                                        class="block w-full text-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors"
+                                    >
+                                        <?= $has_progress
+                                            ? 'Continue Reading'
+                                            : 'Read Now' ?>
+                                    </a>
                                 </div>
                             </div>
                             <?php endforeach; ?>
