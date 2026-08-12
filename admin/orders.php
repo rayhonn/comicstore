@@ -14,7 +14,6 @@ $allowed_statuses = [
     'processing',
     'shipped',
     'delivered',
-    'cancelled',
 ];
 
 if (
@@ -97,13 +96,10 @@ if (
     }
 
     if (
-        $status !== 'cancelled' &&
-        (
-            !isset($status_levels[$current_status]) ||
-            !isset($status_levels[$status]) ||
-            $status_levels[$status] !==
-                $status_levels[$current_status] + 1
-        )
+        !isset($status_levels[$current_status]) ||
+        !isset($status_levels[$status]) ||
+        $status_levels[$status] !==
+            $status_levels[$current_status] + 1
     ) {
         header('Location: orders.php');
         exit;
@@ -197,10 +193,6 @@ if (
         'delivered' => [
             'Order Delivered ✅',
             "Your order $order_num has been delivered. Enjoy your manga!",
-        ],
-        'cancelled' => [
-            'Order Cancelled ❌',
-            "Your order $order_num has been cancelled.",
         ],
     ];
 
@@ -527,7 +519,6 @@ $counts['all'] = array_sum($counts);
                             'processing' => 1,
                             'shipped' => 2,
                             'delivered' => 3,
-                            'cancelled' => 99,
                         ];
 
                         $current_level =
@@ -552,9 +543,6 @@ $counts['all'] = array_sum($counts);
                         <div class="flex flex-wrap items-center gap-2">
                             <?php foreach ($status_flow as $option_status => $level): ?>
                                 <?php
-                                if ($option_status === 'cancelled') {
-                                    continue;
-                                }
 
                                 $is_current_status =
                                     $order['order_status'] === $option_status;
@@ -628,26 +616,6 @@ $counts['all'] = array_sum($counts);
                                     </button>
                                 </form>
                             <?php endif; ?>
-
-                            <form method="POST" onsubmit="return confirm('Are you sure you want to cancel this order?');">
-                                <?php csrf_field(); ?>
-                                <input
-                                    type="hidden"
-                                    name="order_id"
-                                    value="<?= (int) $order['order_id'] ?>"
-                                >
-                                <input
-                                    type="hidden"
-                                    name="status"
-                                    value="cancelled"
-                                >
-                                <button
-                                    type="submit"
-                                    class="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-sm font-semibold px-5 py-2 rounded-xl transition-colors"
-                                >
-                                    Cancel Order
-                                </button>
-                            </form>
                         </div>
                     </div>
                 </div>

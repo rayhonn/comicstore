@@ -175,8 +175,16 @@ $stmt = $pdo->prepare("
         o.order_address_street
             AS address_street,
         o.order_address_city
-            AS address_city
+            AS address_city,
+        cr.cancel_request_reason,
+        cr.cancel_request_details,
+        cr.cancel_request_created_at
     FROM orders o
+    LEFT JOIN order_cancellation_requests cr
+        ON cr.cancel_request_order_id =
+            o.order_id
+        AND cr.cancel_request_user_id =
+            o.order_user_id
     WHERE o.order_user_id = ?
     ORDER BY o.order_created_at DESC
 ");
@@ -250,6 +258,14 @@ if ($filter !== 'all') {
                 <?php if (isset($_GET['success'])): ?>
                     <div class="bg-green-50 border border-green-200 text-green-600 text-sm px-4 py-3 rounded-xl mb-5">
                         Order placed successfully!
+                    </div>
+                <?php endif; ?>
+
+                <?php if (isset($_GET['cancellation_requested'])): ?>
+                    <div
+                        class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5"
+                    >
+                        Your cancellation request was accepted and the order has been cancelled.
                     </div>
                 <?php endif; ?>
 
@@ -497,10 +513,32 @@ if ($filter !== 'all') {
                                         <?= $payment_label ?>
                                     </span>
                                     <?php if ($order['order_payment_status'] === 'pending_confirmation'): ?>
-                                    <a href="payment_waiting.php?order_id=<?= $order['order_id'] ?>"
-                                        class="text-xs text-red-600 hover:underline font-semibold">
-                                        Confirm Now →
-                                    </a>
+                                        <a
+                                            href="payment_waiting.php?order_id=<?= (int) $order['order_id'] ?>"
+                                            class="text-xs text-red-600 hover:underline font-semibold"
+                                        >
+                                            Confirm Now →
+                                        </a>
+
+                                        <?php if (
+                                            !empty(
+                                                $order[
+                                                    'order_confirm_expires_at'
+                                                ]
+                                            ) &&
+                                            strtotime(
+                                                $order[
+                                                    'order_confirm_expires_at'
+                                                ]
+                                            ) > time()
+                                        ): ?>
+                                            <a
+                                                href="cancel_order.php?order_id=<?= (int) $order['order_id'] ?>"
+                                                class="text-xs text-gray-500 hover:text-red-600 hover:underline font-semibold"
+                                            >
+                                                Request Cancellation
+                                            </a>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                 </div>
                                 <p class="font-bold text-red-600">
@@ -596,6 +634,52 @@ if ($filter !== 'all') {
                                 <?php endforeach; ?>
                             </div>
 
+                            <?php if (
+                                $order['order_status'] === 'cancelled' &&
+                                !empty(
+                                    $order[
+                                        'cancel_request_reason'
+                                    ]
+                                )
+                            ): ?>
+                                <div
+                                    class="mx-6 mb-4 bg-red-50 border border-red-100 rounded-xl px-4 py-3"
+                                >
+                                    <p
+                                        class="text-xs font-semibold text-red-700"
+                                    >
+                                        Cancellation Reason:
+                                        <?= htmlspecialchars(
+                                            $order[
+                                                'cancel_request_reason'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </p>
+
+                                    <?php if (
+                                        !empty(
+                                            $order[
+                                                'cancel_request_details'
+                                            ]
+                                        )
+                                    ): ?>
+                                        <p
+                                            class="text-xs text-red-600 mt-1"
+                                        >
+                                            <?= htmlspecialchars(
+                                                $order[
+                                                    'cancel_request_details'
+                                                ],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>
+                                        </p>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+                            
                             <!-- Invoice + Actions Footer -->
                             <div class="px-6 py-3 border-t border-gray-50 flex items-center justify-between">
                                 <div class="flex items-center gap-4">

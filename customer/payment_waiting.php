@@ -99,11 +99,35 @@ $order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
                 <p class="text-sm text-green-700 font-semibold">✅ Payment confirmed! Redirecting...</p>
             </div>
 
-            <p class="text-xs text-gray-400 mb-4">Didn't receive the email? Check your spam folder.</p>
+            <p class="text-xs text-gray-400 mb-4">
+                Didn't receive the email? Check your spam folder.
+            </p>
 
-            <a href="orders.php" class="text-xs text-gray-400 hover:text-red-600 transition-colors">
-                View My Orders
-            </a>
+            <div
+                class="bg-gray-50 border border-gray-100 rounded-xl p-4 mb-5"
+            >
+                <p class="text-xs text-gray-500 leading-relaxed">
+                    Need to cancel this order?
+                    You can submit a cancellation request before payment confirmation.
+                    After payment is confirmed, cancellation will be permanently locked.
+                </p>
+            </div>
+
+            <div class="flex flex-col gap-3">
+                <a
+                    href="cancel_order.php?order_id=<?= (int) $order_id ?>"
+                    class="w-full border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 font-semibold py-3 rounded-xl text-sm text-center transition-colors"
+                >
+                    Request Cancellation
+                </a>
+
+                <a
+                    href="orders.php"
+                    class="text-xs text-gray-400 hover:text-red-600 transition-colors"
+                >
+                    View My Orders
+                </a>
+            </div>
         </div>
     </div>
 
