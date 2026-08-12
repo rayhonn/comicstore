@@ -798,8 +798,7 @@ function loadPurchasableEbook(
             p.product_type,
             p.product_is_available,
             pe.ebook_file_path,
-            pe.ebook_file_format,
-            pe.ebook_download_limit
+            pe.ebook_file_format
         FROM products p
         JOIN product_ebook pe
             ON pe.ebook_product_id = p.product_id
@@ -824,8 +823,7 @@ function loadPurchasableEbook(
     if (
         !$ebook ||
         $ebook['product_type'] !== 'ebook' ||
-        (int) $ebook['product_is_available'] !== 1 ||
-        (int) $ebook['ebook_download_limit'] < 1
+        (int) $ebook['product_is_available'] !== 1
     ) {
         throw new RuntimeException(
             'This e-book is not available for purchase.'

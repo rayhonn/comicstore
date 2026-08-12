@@ -34,8 +34,7 @@ $productStatement = $pdo->prepare("
         pp.physical_dimensions,
         pe.ebook_file_path,
         pe.ebook_file_format,
-        pe.ebook_file_size_mb,
-        pe.ebook_download_limit
+        pe.ebook_file_size_mb
     FROM products p
     LEFT JOIN product_physical pp
         ON pp.physical_product_id = p.product_id
@@ -322,15 +321,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UPDATE product_ebook
                     SET ebook_file_path = ?,
                         ebook_file_format = ?,
-                        ebook_file_size_mb = ?,
-                        ebook_download_limit = ?
+                        ebook_file_size_mb = ?
                     WHERE ebook_product_id = ?
                 ");
                 $ebookUpdate->execute([
                     $ebookFile,
                     $ebookFormat,
                     $ebookFileSize,
-                    $validated['download_limit'],
                     $id,
                 ]);
             } else {
@@ -339,17 +336,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ebook_product_id,
                         ebook_file_path,
                         ebook_file_format,
-                        ebook_file_size_mb,
-                        ebook_download_limit
+                        ebook_file_size_mb
                     )
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?)
                 ");
                 $ebookInsert->execute([
                     $id,
                     $ebookFile,
                     $ebookFormat,
                     $ebookFileSize,
-                    $validated['download_limit'],
                 ]);
             }
         }
@@ -648,20 +643,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <p class="text-xs text-gray-400 mt-1">Current: <?= htmlspecialchars($product['ebook_file_path']) ?></p>
                                 <?php endif; ?>
                             </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Format</label>
-                                    <select name="ebook_file_format"
-                                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
-                                        <option value="PDF" <?= ($product['ebook_file_format'] ?? '') === 'PDF' ? 'selected' : '' ?>>PDF</option>
-                                        <option value="EPUB" <?= ($product['ebook_file_format'] ?? '') === 'EPUB' ? 'selected' : '' ?>>EPUB</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Download Limit</label>
-                                    <input type="number" name="ebook_download_limit" min="1" value="<?= $product['ebook_download_limit'] ?? 3 ?>"
-                                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
-                                </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Format</label>
+                                <select name="ebook_file_format"
+                                        class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
+                                    <option value="PDF" <?= ($product['ebook_file_format'] ?? '') === 'PDF' ? 'selected' : '' ?>>PDF</option>
+                                    <option value="EPUB" <?= ($product['ebook_file_format'] ?? '') === 'EPUB' ? 'selected' : '' ?>>EPUB</option>
+                                </select>
                             </div>
                         </div>
                     </div>

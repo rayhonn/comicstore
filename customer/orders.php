@@ -523,13 +523,8 @@ if ($filter !== 'all') {
                                     oi.order_item_product_title
                                         AS product_title,
                                     oi.order_item_product_cover_image
-                                        AS product_cover_image,
-                                    pe.ebook_file_path,
-                                    pe.ebook_download_limit
+                                        AS product_cover_image
                                 FROM order_items oi
-                                LEFT JOIN product_ebook pe
-                                    ON oi.order_item_product_id =
-                                        pe.ebook_product_id
                                 WHERE oi.order_item_order_id = ?
                             ");
                             $stmt2->execute([$order['order_id']]);
@@ -559,15 +554,14 @@ if ($filter !== 'all') {
                                         </p>
                                     </div>
                                     <div class="flex-shrink-0">
-                                        <?php if ($item['order_item_type'] === 'ebook' && $item['ebook_file_path']): ?>
-                                            <?php if ($item['order_item_download_count'] < $item['ebook_download_limit']): ?>
-                                                <a href="download.php?item_id=<?= $item['order_item_id'] ?>"
-                                                   class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors duration-200 inline-block">
-                                                    ↓ Download (<?= $item['ebook_download_limit'] - $item['order_item_download_count'] ?> left)
-                                                </a>
-                                            <?php else: ?>
-                                                <span class="text-xs text-red-500 font-medium">Limit reached</span>
-                                            <?php endif; ?>
+                                        <?php if (
+                                            $item['order_item_type'] === 'ebook' &&
+                                            $order['order_payment_status'] === 'confirmed'
+                                        ): ?>
+                                            <a href="ebook_reader.php?item_id=<?= (int) $item['order_item_id'] ?>"
+                                               class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors duration-200 inline-block">
+                                                Read Online
+                                            </a>
                                         <?php elseif ($item['order_item_type'] === 'physical' && $order['order_status'] === 'delivered'): ?>
                                             <?php
                                             $return_check = $pdo->prepare("SELECT return_id, return_status FROM return_requests WHERE return_item_id = ?");

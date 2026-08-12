@@ -102,8 +102,7 @@ $genres = $pdo->query("
 
 $featured_ebook = $pdo->query("
     SELECT
-        p.*,
-        pe.ebook_download_limit
+        p.*
     FROM products p
     JOIN product_ebook pe
         ON pe.ebook_product_id =

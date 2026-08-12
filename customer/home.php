@@ -60,15 +60,12 @@ $sql = "
         p.*,
         c.category_name,
         pp.physical_stock_quantity,
-        pp.physical_low_stock_threshold,
-        pe.ebook_download_limit
+        pp.physical_low_stock_threshold
     FROM products p
     LEFT JOIN categories c
         ON c.category_id = p.product_category_id
     LEFT JOIN product_physical pp
         ON pp.physical_product_id = p.product_id
-    LEFT JOIN product_ebook pe
-        ON pe.ebook_product_id = p.product_id
     LEFT JOIN product_genres pg
         ON pg.product_genres_product_id = p.product_id
     WHERE p.product_is_available = 1

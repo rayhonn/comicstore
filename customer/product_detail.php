@@ -31,8 +31,7 @@ $stmt = $pdo->prepare("
         pp.physical_low_stock_threshold,
         pe.ebook_file_path,
         pe.ebook_file_format,
-        pe.ebook_file_size_mb,
-        pe.ebook_download_limit
+        pe.ebook_file_size_mb
     FROM products p
     LEFT JOIN categories c
         ON c.category_id = p.product_category_id
@@ -272,7 +271,7 @@ $ebook_status_message = '';
 
 if ($ebook_status === 'owned') {
     $ebook_status_message =
-        'You already own this e-book. Open My Collection to download it.';
+        'You already own this e-book. Open My Collection to read it online.';
 } elseif ($ebook_status === 'unavailable') {
     $ebook_status_message =
         'This e-book is currently unavailable and was not added to your cart.';
@@ -590,7 +589,6 @@ if ($ebook_status === 'owned') {
                         <?php if ($product['product_type'] === 'ebook'): ?>
                         <div><span class="text-gray-400">Format</span><br><span class="font-medium text-gray-700"><?= htmlspecialchars($product['ebook_file_format']) ?></span></div>
                         <div><span class="text-gray-400">File Size</span><br><span class="font-medium text-gray-700"><?= $product['ebook_file_size_mb'] ?> MB</span></div>
-                        <div><span class="text-gray-400">Download Limit</span><br><span class="font-medium text-gray-700"><?= $product['ebook_download_limit'] ?> downloads</span></div>
                         <?php endif; ?>
                     </div>
 

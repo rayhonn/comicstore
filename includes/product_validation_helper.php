@@ -619,7 +619,6 @@ function validateProductFormInput(
         'threshold' => null,
         'weight' => null,
         'dimensions' => '',
-        'download_limit' => null,
         'file_format' => null,
     ];
 
@@ -656,15 +655,6 @@ function validateProductFormInput(
             50
         );
     } else {
-        $validated['download_limit'] = validateProductInteger(
-            $input,
-            'ebook_download_limit',
-            'Download limit',
-            1,
-            1000,
-            true
-        );
-
         $fileFormat = strtoupper(
             productInputScalar(
                 $input,

@@ -54,14 +54,10 @@ $item_stmt = $pdo->prepare("
     SELECT
         oi.*,
         oi.order_item_product_title AS product_title,
-        p.product_cover_image,
-        pe.ebook_file_path,
-        pe.ebook_download_limit
+        p.product_cover_image
     FROM order_items oi
     JOIN products p
         ON oi.order_item_product_id = p.product_id
-    LEFT JOIN product_ebook pe
-        ON p.product_id = pe.ebook_product_id
     WHERE oi.order_item_order_id = ?
 ");
 $item_stmt->execute([$order_id]);
@@ -140,10 +136,13 @@ $order_total_sen = moneyDecimalToSen(
                         <p class="text-xs text-gray-400"><?= $item['order_item_type'] === 'ebook' ? '📱 E-Book' : '📦 Physical' ?> × <?= $item['order_item_quantity'] ?></p>
                         <p class="text-red-600 font-bold text-sm">RM <?= moneyFormatSen(moneyDecimalToSen((string) $item['order_item_price'])) ?></p>
                     </div>
-                    <?php if ($item['order_item_type'] === 'ebook' && $item['ebook_file_path']): ?>
-                        <a href="download.php?item_id=<?= (int) $item['order_item_id'] ?>"
+                    <?php if (
+                        $item['order_item_type'] === 'ebook' &&
+                        $order['order_payment_status'] === 'confirmed'
+                    ): ?>
+                        <a href="ebook_reader.php?item_id=<?= (int) $item['order_item_id'] ?>"
                            class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors flex-shrink-0">
-                            ↓ Download
+                            Read Online
                         </a>
                     <?php endif; ?>
                 </div>

@@ -115,7 +115,6 @@ $sql = "
         c.category_name,
         pp.physical_stock_quantity,
         pp.physical_low_stock_threshold,
-        pe.ebook_download_limit,
         COALESCE(AVG(r.review_rating), 0) AS avg_rating,
         COUNT(DISTINCT r.review_id) AS review_count
     FROM products p
@@ -123,8 +122,6 @@ $sql = "
         ON p.product_category_id = c.category_id
     LEFT JOIN product_physical pp
         ON p.product_id = pp.physical_product_id
-    LEFT JOIN product_ebook pe
-        ON p.product_id = pe.ebook_product_id
     LEFT JOIN product_reviews r
         ON p.product_id = r.review_product_id
         AND r.review_status = 'approved'

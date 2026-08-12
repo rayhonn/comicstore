@@ -104,12 +104,10 @@ $stmt = $pdo->prepare("
         p.product_type,
         p.product_is_available,
         pp.physical_stock_quantity,
-        pe.ebook_download_limit,
         p.product_cover_image
     FROM cart_items ci
     JOIN products p ON ci.cart_item_product_id = p.product_id
     LEFT JOIN product_physical pp ON p.product_id = pp.physical_product_id
-    LEFT JOIN product_ebook pe ON p.product_id = pe.ebook_product_id
     WHERE ci.cart_item_user_id = ?
     AND ci.cart_item_id IN ($placeholders)
 ");

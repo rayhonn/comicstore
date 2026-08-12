@@ -103,10 +103,23 @@ if (
                 $confirm_order = $pdo->prepare("
                     UPDATE orders
                     SET order_payment_status = 'confirmed',
-                        order_status = 'processing',
+                        order_status = CASE
+                            WHEN order_has_physical = 1
+                                THEN 'processing'
+                            ELSE 'delivered'
+                        END,
                         order_confirm_token = NULL,
                         order_confirm_expires_at = NULL,
-                        order_processing_at = NOW()
+                        order_processing_at = CASE
+                            WHEN order_has_physical = 1
+                                THEN NOW()
+                            ELSE NULL
+                        END,
+                        order_delivered_at = CASE
+                            WHEN order_has_physical = 0
+                                THEN NOW()
+                            ELSE NULL
+                        END
                     WHERE order_id = ?
                     AND order_payment_status =
                         'pending_confirmation'
@@ -506,12 +519,22 @@ if ($order && $confirmed) {
             STR_PAD_LEFT
         );
 
+    $is_digital_only_order =
+        (int) (
+            $order['order_has_physical'] ?? 0
+        ) === 0;
+
+    $confirmation_message =
+        $is_digital_only_order
+            ? "Payment for order $order_num has been confirmed. Your e-book order is delivered and ready to read online."
+            : "Payment for order $order_num has been confirmed. The order will now be processed.";
+
     try {
         sendNotification(
             $pdo,
             $order_user_id,
             'Payment Confirmed!',
-            "Payment for order $order_num has been confirmed. The order will now be processed.",
+            $confirmation_message,
             'order'
         );
 

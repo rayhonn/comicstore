@@ -301,17 +301,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ebook_product_id,
                     ebook_file_path,
                     ebook_file_format,
-                    ebook_file_size_mb,
-                    ebook_download_limit
+                    ebook_file_size_mb
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?)
             ");
             $ebookInsert->execute([
                 $productId,
                 $ebookMetadata['file_name'],
                 $ebookMetadata['format'],
                 $ebookMetadata['size_mb'],
-                $validated['download_limit'],
             ]);
         }
 
@@ -608,20 +606,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <input type="file" name="ebook_file" accept=".pdf,.epub"
                                        class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm bg-gray-50 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-red-50 file:text-red-600 hover:file:bg-red-100">
                             </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">File Format</label>
-                                    <select name="ebook_file_format"
-                                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
-                                        <option value="PDF">PDF</option>
-                                        <option value="EPUB">EPUB</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Download Limit</label>
-                                    <input type="number" name="ebook_download_limit" min="1" value="3"
-                                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
-                                </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">File Format</label>
+                                <select name="ebook_file_format"
+                                        class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white">
+                                    <option value="PDF">PDF</option>
+                                    <option value="EPUB">EPUB</option>
+                                </select>
                             </div>
                         </div>
                     </div>
