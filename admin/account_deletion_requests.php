@@ -10,6 +10,9 @@ require_once __DIR__ .
     '/../includes/csrf.php';
 
 require_once __DIR__ .
+    '/../includes/money_helper.php';
+
+require_once __DIR__ .
     '/../includes/account_deletion_mail_helper.php';
 
 require_once __DIR__ .
@@ -272,6 +275,118 @@ if (
                 ) {
                     throw new RuntimeException(
                         'Approval blocked because the customer currently has a pending return request.'
+                    );
+                }
+
+                $activeWalletTopupCheck =
+                    $pdo->prepare("
+                        SELECT
+                            wallet_topup_id
+                        FROM wallet_topups
+                        WHERE
+                            wallet_topup_user_id = ?
+                        AND
+                            wallet_topup_status
+                            IN (
+                                'pending',
+                                'checkout_open'
+                            )
+                        LIMIT 1
+                        FOR UPDATE
+                    ");
+
+                $activeWalletTopupCheck
+                    ->execute([
+                        $customerId,
+                    ]);
+
+                if (
+                    $activeWalletTopupCheck
+                        ->fetchColumn() !==
+                    false
+                ) {
+                    throw new RuntimeException(
+                        'Approval blocked because the customer currently has a pending wallet top-up.'
+                    );
+                }
+
+                $walletStateCheck =
+                    $pdo->prepare("
+                        SELECT
+                            wallet_balance,
+                            wallet_reserved_amount
+                        FROM wallet_accounts
+                        WHERE
+                            wallet_user_id = ?
+                        LIMIT 1
+                        FOR UPDATE
+                    ");
+
+                $walletStateCheck
+                    ->execute([
+                        $customerId,
+                    ]);
+
+                $walletState =
+                    $walletStateCheck->fetch(
+                        PDO::FETCH_ASSOC
+                    );
+
+                if ($walletState) {
+                    $walletBalanceSen =
+                        moneyDecimalToSen(
+                            (string) $walletState[
+                                'wallet_balance'
+                            ]
+                        );
+
+                    $walletReservedSen =
+                        moneyDecimalToSen(
+                            (string) $walletState[
+                                'wallet_reserved_amount'
+                            ]
+                        );
+
+                    if (
+                        $walletBalanceSen > 0 ||
+                        $walletReservedSen > 0
+                    ) {
+                        throw new RuntimeException(
+                            'Approval blocked because the customer still has wallet funds or reserved wallet funds.'
+                        );
+                    }
+                }
+
+                $activeWithdrawalCheck =
+                    $pdo->prepare("
+                        SELECT
+                            wallet_withdrawal_id
+                        FROM
+                            wallet_withdrawal_requests
+                        WHERE
+                            wallet_withdrawal_user_id = ?
+                        AND
+                            wallet_withdrawal_status
+                            IN (
+                                'pending',
+                                'approved'
+                            )
+                        LIMIT 1
+                        FOR UPDATE
+                    ");
+
+                $activeWithdrawalCheck
+                    ->execute([
+                        $customerId,
+                    ]);
+
+                if (
+                    $activeWithdrawalCheck
+                        ->fetchColumn() !==
+                    false
+                ) {
+                    throw new RuntimeException(
+                        'Approval blocked because the customer currently has an active bank withdrawal request.'
                     );
                 }
 

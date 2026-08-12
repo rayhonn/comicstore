@@ -36,7 +36,7 @@ if (!$order) {
 }
 
 // Check 7 day window
-$delivered_at = new DateTime($order['order_processing_at']);
+$delivered_at = new DateTime($order['order_delivered_at']);
 $now = new DateTime();
 $days_since = $now->diff($delivered_at)->days;
 $within_window = $days_since <= 7;

@@ -29,6 +29,7 @@ $pending_reviews_count = (int) $pdo->query("
 
 $pending_account_deletions_count = 0;
 $pending_identity_verifications_count = 0;
+$pending_wallet_withdrawals_count = 0;
 
 if (is_senior_admin()) {
     $pending_account_deletions_count =
@@ -49,7 +50,18 @@ if (is_senior_admin()) {
             WHERE
                 verification_request_status =
                     'pending'
-        ")->fetchColumn();    
+        ")->fetchColumn();
+
+    $pending_wallet_withdrawals_count =
+        (int) $pdo->query("
+            SELECT COUNT(*)
+            FROM wallet_withdrawal_requests
+            WHERE wallet_withdrawal_status
+                IN (
+                    'pending',
+                    'approved'
+                )
+        ")->fetchColumn();
 }
 
 $low_stock_count = (int) $pdo->query("
@@ -93,6 +105,12 @@ $order_pages = [
 
 $return_pages = [
     'returns.php',
+];
+
+$wallet_withdrawal_pages = [
+    'wallet_withdrawals.php',
+    'wallet_withdrawal_bank.php',
+    'wallet_withdrawal_receipt.php',
 ];
 
 $review_pages = [
@@ -370,6 +388,33 @@ $admin_access_label =
             </span>
             <?php endif; ?>
         </a>
+
+        <?php if (is_senior_admin()): ?>
+        <a
+            href="wallet_withdrawals.php"
+            class="<?= adminSidebarLinkClass(
+                in_array(
+                    $admin_current,
+                    $wallet_withdrawal_pages,
+                    true
+                )
+            ) ?> mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-sm"
+        >
+            <span class="w-6 text-center">¤</span>
+            Wallet Withdrawals
+
+            <?php if (
+                $pending_wallet_withdrawals_count >
+                0
+            ): ?>
+            <span
+                class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-green-500 text-white text-[10px] font-bold flex items-center justify-center"
+            >
+                <?= $pending_wallet_withdrawals_count ?>
+            </span>
+            <?php endif; ?>
+        </a>
+        <?php endif; ?>
 
         <a
             href="reviews.php"

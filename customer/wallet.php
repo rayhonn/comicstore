@@ -6,6 +6,7 @@ require_customer();
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/money_helper.php';
 require_once __DIR__ . '/../includes/wallet_helper.php';
+require_once __DIR__ . '/../includes/wallet_withdrawal_helper.php';
 
 $user_id = current_user_id();
 
@@ -20,6 +21,19 @@ try {
         $user_id,
         20
     );
+
+    $withdrawal_summary =
+        getWalletWithdrawalSummary(
+            $pdo,
+            $user_id
+        );
+
+    $withdrawals =
+        getCustomerWalletWithdrawals(
+            $pdo,
+            $user_id,
+            20
+        );
 } catch (Throwable $e) {
     app_error_log(
         'Customer wallet page failed: ' .
@@ -29,6 +43,15 @@ try {
     http_response_code(500);
     exit('Unable to load your wallet.');
 }
+
+$withdrawable_refund_sen = min(
+    (int) $withdrawal_summary[
+        'eligible_sen'
+    ],
+    (int) $wallet['available_sen']
+);
+$active_withdrawal =
+    $withdrawal_summary['active_request'];
 
 $type_labels = [
     'topup' => 'Wallet Top-Up',
@@ -91,16 +114,30 @@ $type_labels = [
                             My Wallet
                         </h1>
                         <p class="text-sm text-gray-400 mt-1">
-                            Top up securely and receive eligible refunds here.
+                            Secure wallet top-ups, refund credits and refund-to-bank transfers.
                         </p>
                     </div>
 
-                    <a
-                        href="wallet_topup.php"
-                        class="bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors"
-                    >
-                        + Top Up Wallet
-                    </a>
+                    <div class="flex gap-2 flex-wrap">
+                        <?php if (
+                            $withdrawable_refund_sen >= 100 &&
+                            !$active_withdrawal
+                        ): ?>
+                            <a
+                                href="wallet_withdrawal.php"
+                                class="bg-[#1e2d4a] hover:bg-[#162338] text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors"
+                            >
+                                Withdraw Refund to Bank
+                            </a>
+                        <?php endif; ?>
+
+                        <a
+                            href="wallet_topup.php"
+                            class="bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors"
+                        >
+                            + Top Up Wallet
+                        </a>
+                    </div>
                 </div>
 
                 <?php if (isset($_GET['topup_success'])): ?>
@@ -124,6 +161,14 @@ $type_labels = [
                         class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5"
                     >
                         The wallet top-up could not be verified. Please check your transaction history before trying again.
+                    </div>
+                <?php endif; ?>
+
+                <?php if (isset($_GET['withdrawal_submitted'])): ?>
+                    <div
+                        class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5"
+                    >
+                        Bank withdrawal request submitted successfully. The requested refund amount is now reserved while awaiting administrator review.
                     </div>
                 <?php endif; ?>
 
@@ -188,7 +233,7 @@ $type_labels = [
                         <p
                             class="text-xs text-gray-400 leading-relaxed mt-2 mb-5"
                         >
-                            Top-ups are added only after Stripe confirms a successful payment.
+                            Top-ups are added only after Stripe confirms and MangaVault verifies a successful payment.
                         </p>
 
                         <a
@@ -200,6 +245,295 @@ $type_labels = [
                     </div>
                 </div>
 
+                <div
+                    class="bg-white rounded-2xl shadow-sm overflow-hidden mb-6"
+                >
+                    <div
+                        class="px-6 py-5 border-b border-gray-100 flex items-center justify-between gap-4 flex-wrap"
+                    >
+                        <div>
+                            <h2 class="font-black text-gray-800">
+                                Refund Bank Withdrawal
+                            </h2>
+                            <p class="text-xs text-gray-400 mt-1">
+                                Only refund credits are cash-withdrawable. Stripe wallet top-ups cannot be withdrawn.
+                            </p>
+                        </div>
+
+                        <div class="text-right">
+                            <p class="text-xs text-gray-400">
+                                Eligible Now
+                            </p>
+                            <p class="text-2xl font-black text-green-600">
+                                RM <?= moneyFormatSen(
+                                    $withdrawable_refund_sen
+                                ) ?>
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="p-6">
+                        <?php if ($active_withdrawal): ?>
+                            <?php
+                            $active_status = (string) $active_withdrawal[
+                                'wallet_withdrawal_status'
+                            ];
+                            $active_class =
+                                $active_status === 'approved'
+                                    ? 'bg-blue-50 border-blue-200 text-blue-700'
+                                    : 'bg-yellow-50 border-yellow-200 text-yellow-700';
+                            ?>
+                            <div
+                                class="<?= $active_class ?> border rounded-xl p-4"
+                            >
+                                <div
+                                    class="flex items-center justify-between gap-4 flex-wrap"
+                                >
+                                    <div>
+                                        <p class="font-bold">
+                                            Active Request #<?= str_pad(
+                                                (string) $active_withdrawal[
+                                                    'wallet_withdrawal_id'
+                                                ],
+                                                4,
+                                                '0',
+                                                STR_PAD_LEFT
+                                            ) ?>
+                                        </p>
+                                        <p class="text-xs mt-1">
+                                            Status: <?= htmlspecialchars(
+                                                ucfirst($active_status),
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?> · The requested amount remains reserved until completion or rejection.
+                                        </p>
+                                    </div>
+                                    <p class="font-black">
+                                        RM <?= moneyFormatSen(
+                                            moneyDecimalToSen(
+                                                (string) $active_withdrawal[
+                                                    'wallet_withdrawal_amount'
+                                                ]
+                                            )
+                                        ) ?>
+                                    </p>
+                                </div>
+                            </div>
+                        <?php elseif ($withdrawable_refund_sen >= 100): ?>
+                            <div
+                                class="flex items-center justify-between gap-5 flex-wrap"
+                            >
+                                <div class="max-w-2xl">
+                                    <p class="font-bold text-gray-800">
+                                        Eligible refund balance is available for bank transfer.
+                                    </p>
+                                    <p class="text-sm text-gray-500 mt-1 leading-relaxed">
+                                        Bank withdrawal must be requested within 7 days of each refund credit. The system reserves the requested amount immediately and requires password re-authentication before submission.
+                                    </p>
+                                    <?php if (!empty(
+                                        $withdrawal_summary[
+                                            'earliest_expiry'
+                                        ]
+                                    )): ?>
+                                        <p class="text-xs text-red-600 mt-2 font-semibold">
+                                            Earliest expiry: <?= htmlspecialchars(
+                                                date(
+                                                    'd M Y, h:i A',
+                                                    strtotime(
+                                                        (string) $withdrawal_summary[
+                                                            'earliest_expiry'
+                                                        ]
+                                                    )
+                                                ),
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>
+                                        </p>
+                                    <?php endif; ?>
+                                </div>
+
+                                <a
+                                    href="wallet_withdrawal.php"
+                                    class="bg-[#1e2d4a] hover:bg-[#162338] text-white font-bold px-5 py-3 rounded-xl text-sm"
+                                >
+                                    Request Bank Withdrawal
+                                </a>
+                            </div>
+                        <?php else: ?>
+                            <div class="text-center py-4">
+                                <p class="font-semibold text-gray-600">
+                                    No refund balance is currently eligible for bank withdrawal.
+                                </p>
+                                <p class="text-xs text-gray-400 mt-1">
+                                    Approved returns and eligible cancelled-order refunds will appear here automatically.
+                                </p>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <div
+                    class="bg-white rounded-2xl shadow-sm overflow-hidden mb-6"
+                >
+                    <div
+                        class="px-6 py-5 border-b border-gray-100"
+                    >
+                        <h2 class="font-black text-gray-800">
+                            Bank Withdrawal History
+                        </h2>
+                        <p class="text-xs text-gray-400 mt-1">
+                            Review status, bank destination and transfer receipts.
+                        </p>
+                    </div>
+
+                    <?php if ($withdrawals === []): ?>
+                        <div class="p-8 text-center text-sm text-gray-400">
+                            No bank withdrawal requests yet.
+                        </div>
+                    <?php else: ?>
+                        <div class="divide-y divide-gray-100">
+                            <?php foreach ($withdrawals as $withdrawal): ?>
+                                <?php
+                                $withdrawal_status = (string) $withdrawal[
+                                    'wallet_withdrawal_status'
+                                ];
+                                $withdrawal_status_classes = [
+                                    'pending' =>
+                                        'bg-yellow-100 text-yellow-700',
+                                    'approved' =>
+                                        'bg-blue-100 text-blue-700',
+                                    'rejected' =>
+                                        'bg-red-100 text-red-700',
+                                    'completed' =>
+                                        'bg-green-100 text-green-700',
+                                ];
+                                ?>
+                                <div
+                                    class="px-6 py-4 flex items-start justify-between gap-5 flex-wrap"
+                                >
+                                    <div>
+                                        <div
+                                            class="flex items-center gap-2 flex-wrap"
+                                        >
+                                            <p class="font-bold text-gray-800">
+                                                #<?= str_pad(
+                                                    (string) $withdrawal[
+                                                        'wallet_withdrawal_id'
+                                                    ],
+                                                    4,
+                                                    '0',
+                                                    STR_PAD_LEFT
+                                                ) ?> · <?= htmlspecialchars(
+                                                    (string) $withdrawal[
+                                                        'wallet_withdrawal_bank_name'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?> ••••<?= htmlspecialchars(
+                                                    (string) $withdrawal[
+                                                        'wallet_withdrawal_account_number_last4'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+                                            <span
+                                                class="<?= $withdrawal_status_classes[$withdrawal_status] ?? 'bg-gray-100 text-gray-600' ?> text-[11px] font-bold px-2.5 py-1 rounded-full capitalize"
+                                            >
+                                                <?= htmlspecialchars(
+                                                    $withdrawal_status,
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </span>
+                                        </div>
+
+                                        <p class="text-xs text-gray-400 mt-1">
+                                            Requested <?= htmlspecialchars(
+                                                date(
+                                                    'd M Y, h:i A',
+                                                    strtotime(
+                                                        (string) $withdrawal[
+                                                            'wallet_withdrawal_created_at'
+                                                        ]
+                                                    )
+                                                ),
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>
+                                        </p>
+
+                                        <?php if (!empty(
+                                            $withdrawal[
+                                                'wallet_withdrawal_admin_note'
+                                            ]
+                                        )): ?>
+                                            <p class="text-xs text-gray-500 mt-2">
+                                                Admin note: <?= htmlspecialchars(
+                                                    (string) $withdrawal[
+                                                        'wallet_withdrawal_admin_note'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+                                        <?php endif; ?>
+
+                                        <?php if (!empty(
+                                            $withdrawal[
+                                                'wallet_withdrawal_transfer_reference'
+                                            ]
+                                        )): ?>
+                                            <p class="text-xs text-gray-500 mt-1">
+                                                Transfer reference:
+                                                <span class="font-mono font-semibold">
+                                                    <?= htmlspecialchars(
+                                                        (string) $withdrawal[
+                                                            'wallet_withdrawal_transfer_reference'
+                                                        ],
+                                                        ENT_QUOTES,
+                                                        'UTF-8'
+                                                    ) ?>
+                                                </span>
+                                            </p>
+                                        <?php endif; ?>
+                                    </div>
+
+                                    <div class="text-right">
+                                        <p class="font-black text-gray-800">
+                                            RM <?= moneyFormatSen(
+                                                moneyDecimalToSen(
+                                                    (string) $withdrawal[
+                                                        'wallet_withdrawal_amount'
+                                                    ]
+                                                )
+                                            ) ?>
+                                        </p>
+
+                                        <?php if (
+                                            $withdrawal_status === 'completed' &&
+                                            !empty(
+                                                $withdrawal[
+                                                    'wallet_withdrawal_receipt_file'
+                                                ]
+                                            )
+                                        ): ?>
+                                            <a
+                                                href="wallet_withdrawal_receipt.php?id=<?= (int) $withdrawal['wallet_withdrawal_id'] ?>"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                class="inline-block mt-2 text-xs font-semibold text-green-700 hover:underline"
+                                            >
+                                                View Transfer Receipt
+                                            </a>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
                 <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
                     <div
                         class="px-6 py-5 border-b border-gray-100 flex items-center justify-between"
@@ -209,7 +543,7 @@ $type_labels = [
                                 Transaction History
                             </h2>
                             <p class="text-xs text-gray-400 mt-1">
-                                Latest 20 wallet events
+                                Latest 20 wallet ledger events
                             </p>
                         </div>
                     </div>
@@ -221,7 +555,7 @@ $type_labels = [
                                 No wallet transactions yet
                             </p>
                             <p class="text-xs text-gray-400 mt-1">
-                                Top-ups and refunds will appear here.
+                                Top-ups, refunds and bank withdrawal events will appear here.
                             </p>
                         </div>
                     <?php else: ?>

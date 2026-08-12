@@ -127,6 +127,10 @@ function safe_redirect_target(string $target, string $default): string
         'customer/vouchers.php',
         'customer/wishlist.php',
         'customer/addresses.php',
+        'customer/wallet.php',
+        'customer/wallet_topup.php',
+        'customer/wallet_withdrawal.php',
+        'customer/wallet_withdrawal_receipt.php',
 
         'admin/index.php',
         'admin/dashboard.php',
@@ -134,6 +138,9 @@ function safe_redirect_target(string $target, string $default): string
         'admin/account_deletion_requests.php',
         'admin/identity_conflicts.php',
         'admin/identity_verification_requests.php',
+        'admin/wallet_withdrawals.php',
+        'admin/wallet_withdrawal_bank.php',
+        'admin/wallet_withdrawal_receipt.php',
         'admin/goods_received.php',
         'admin/delivery_receipt.php',
 
@@ -212,6 +219,53 @@ function safe_redirect_target(string $target, string $default): string
             'nonce' => $nonce,
             'sig' => $signature,
         ]);
+    }
+
+    if (
+        in_array(
+            $path,
+            [
+                'customer/wallet_withdrawal_receipt.php',
+                'admin/wallet_withdrawal_bank.php',
+                'admin/wallet_withdrawal_receipt.php',
+            ],
+            true
+        )
+    ) {
+        $query = parse_url(
+            $target,
+            PHP_URL_QUERY
+        );
+
+        if (!is_string($query)) {
+            return $default;
+        }
+
+        parse_str(
+            $query,
+            $queryParameters
+        );
+
+        $withdrawalId = filter_var(
+            $queryParameters['id'] ?? null,
+            FILTER_VALIDATE_INT,
+            [
+                'options' => [
+                    'min_range' => 1,
+                ],
+            ]
+        );
+
+        if (
+            $withdrawalId === false ||
+            $withdrawalId === null
+        ) {
+            return $default;
+        }
+
+        return app_path($path) .
+            '?id=' .
+            (int) $withdrawalId;
     }
 
     return app_path($path);
