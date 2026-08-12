@@ -115,7 +115,11 @@ $order_total_sen = moneyDecimalToSen(
             <p class="text-sm text-gray-400 font-medium mb-1">Order #<?= str_pad((string) $order_id, 4, '0', STR_PAD_LEFT) ?></p>
             <h1 class="text-3xl font-black text-gray-800 mb-3">Order Confirmed!</h1>
             <p class="text-gray-500 text-sm max-w-sm mx-auto leading-relaxed">
-                Thank you for your purchase! We've received your order and will process it shortly.
+                <?php if ((int) $order['order_has_physical'] === 0): ?>
+                    Your e-book order is delivered and ready to read online.
+                <?php else: ?>
+                    Thank you for your purchase! We've received your order and will process it shortly.
+                <?php endif; ?>
             </p>
         </div>
 
