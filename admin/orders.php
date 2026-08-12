@@ -101,8 +101,8 @@ if (
         (
             !isset($status_levels[$current_status]) ||
             !isset($status_levels[$status]) ||
-            $status_levels[$status] <=
-                $status_levels[$current_status]
+            $status_levels[$status] !==
+                $status_levels[$current_status] + 1
         )
     ) {
         header('Location: orders.php');
@@ -520,13 +520,7 @@ $counts['all'] = array_sum($counts);
 
                 <?php if ($order['order_status'] !== 'cancelled' && $order['order_status'] !== 'delivered'): ?>
                 <div class="px-6 py-4 border-t border-gray-50 bg-gray-50">
-                    <form method="POST" class="flex items-center gap-3 flex-wrap">
-                        <?php csrf_field(); ?>
-                        <input
-                            type="hidden"
-                            name="order_id"
-                            value="<?= (int) $order['order_id'] ?>"
-                        >
+                    <div class="space-y-4">
                         <?php
                         $status_flow = [
                             'pending' => 0,
@@ -535,37 +529,127 @@ $counts['all'] = array_sum($counts);
                             'delivered' => 3,
                             'cancelled' => 99,
                         ];
+
                         $current_level =
                             $status_flow[$order['order_status']] ?? 0;
+
+                        $next_status = array_search(
+                            $current_level + 1,
+                            $status_flow,
+                            true
+                        );
+
+                        $action_labels = [
+                            'processing' => 'Mark as Processing',
+                            'shipped' => 'Mark as Shipped',
+                            'delivered' => 'Mark as Delivered',
+                        ];
+
+                        $next_action_label =
+                            $action_labels[$next_status] ?? 'Update Status';
                         ?>
-                        <select name="status" class="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-white">
+
+                        <div class="flex flex-wrap items-center gap-2">
                             <?php foreach ($status_flow as $option_status => $level): ?>
                                 <?php
-                                if (
-                                    $option_status !== 'cancelled' &&
-                                    $level < $current_level
-                                ) {
+                                if ($option_status === 'cancelled') {
                                     continue;
                                 }
+
+                                $is_current_status =
+                                    $order['order_status'] === $option_status;
+
+                                $is_next_status =
+                                    $option_status === $next_status;
+
+                                if ($is_current_status) {
+                                    $badge_class =
+                                        'bg-gray-700 text-white border-gray-700';
+                                } elseif ($is_next_status) {
+                                    $badge_class =
+                                        'bg-blue-50 text-blue-700 border-blue-200';
+                                } else {
+                                    $badge_class =
+                                        'bg-gray-100 text-gray-400 border-gray-200';
+                                }
                                 ?>
-                                <option value="<?= htmlspecialchars($option_status, ENT_QUOTES, 'UTF-8') ?>" <?= $order['order_status'] === $option_status ? 'selected' : '' ?>>
+                                <span
+                                    class="inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold <?= $badge_class ?>"
+                                >
                                     <?= htmlspecialchars(ucfirst($option_status), ENT_QUOTES, 'UTF-8') ?>
-                                </option>
+                                    <?php if ($is_current_status): ?>
+                                        <span class="ml-1 text-[10px] uppercase tracking-wide opacity-90">
+                                            Current
+                                        </span>
+                                    <?php elseif ($is_next_status): ?>
+                                        <span class="ml-1 text-[10px] uppercase tracking-wide opacity-90">
+                                            Next
+                                        </span>
+                                    <?php endif; ?>
+                                </span>
                             <?php endforeach; ?>
-                        </select>
-                        <?php if ($order['order_has_physical']): ?>
-                        <input type="text"
-                               name="tracking_number"
-                               maxlength="50"
-                               value="<?= htmlspecialchars($order['order_tracking_number'] ?? '') ?>"
-                               placeholder="Tracking number (optional)"
-                               class="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-white flex-1 min-w-32">
-                        <?php endif; ?>
-                        <button type="submit"
-                                class="bg-[#1e2d4a] hover:bg-[#162338] text-white text-sm font-semibold px-5 py-2 rounded-xl transition-colors">
-                            Update Status
-                        </button>
-                    </form>
+                        </div>
+
+                        <p class="text-xs text-gray-500">
+                            Previous statuses are locked. Only the next status can be updated.
+                        </p>
+
+                        <div class="flex flex-wrap items-center gap-3">
+                            <?php if ($next_status !== false): ?>
+                                <form method="POST" class="flex items-center gap-3 flex-wrap">
+                                    <?php csrf_field(); ?>
+                                    <input
+                                        type="hidden"
+                                        name="order_id"
+                                        value="<?= (int) $order['order_id'] ?>"
+                                    >
+                                    <input
+                                        type="hidden"
+                                        name="status"
+                                        value="<?= htmlspecialchars($next_status, ENT_QUOTES, 'UTF-8') ?>"
+                                    >
+
+                                    <?php if ($order['order_has_physical'] && $next_status === 'shipped'): ?>
+                                    <input
+                                        type="text"
+                                        name="tracking_number"
+                                        maxlength="50"
+                                        value="<?= htmlspecialchars($order['order_tracking_number'] ?? '') ?>"
+                                        placeholder="Tracking number (optional)"
+                                        class="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 bg-white min-w-[220px]"
+                                    >
+                                    <?php endif; ?>
+
+                                    <button
+                                        type="submit"
+                                        class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2 rounded-xl transition-colors"
+                                    >
+                                        <?= htmlspecialchars($next_action_label, ENT_QUOTES, 'UTF-8') ?>
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+
+                            <form method="POST" onsubmit="return confirm('Are you sure you want to cancel this order?');">
+                                <?php csrf_field(); ?>
+                                <input
+                                    type="hidden"
+                                    name="order_id"
+                                    value="<?= (int) $order['order_id'] ?>"
+                                >
+                                <input
+                                    type="hidden"
+                                    name="status"
+                                    value="cancelled"
+                                >
+                                <button
+                                    type="submit"
+                                    class="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-sm font-semibold px-5 py-2 rounded-xl transition-colors"
+                                >
+                                    Cancel Order
+                                </button>
+                            </form>
+                        </div>
+                    </div>
                 </div>
                 <?php else: ?>
                 <div class="px-6 py-3 border-t border-gray-50 bg-gray-50">
