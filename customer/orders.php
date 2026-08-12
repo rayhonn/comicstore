@@ -265,7 +265,7 @@ if ($filter !== 'all') {
                     <div
                         class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5"
                     >
-                        Your cancellation request was accepted and the order has been cancelled.
+                        Your cancellation request was accepted. The order was cancelled and the paid amount was refunded to your MangaVault Wallet.
                     </div>
                 <?php endif; ?>
 

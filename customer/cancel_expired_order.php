@@ -13,6 +13,7 @@ require_once __DIR__ . '/../includes/stock_helper.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/notifications.php';
+require_once __DIR__ . '/../includes/wallet_helper.php';
 require_once __DIR__ . '/../includes/mail_config.php';
 
 header('Content-Type: application/json');
@@ -108,6 +109,25 @@ try {
         $user_id
     );
 
+    creditWalletRefund(
+        $pdo,
+        $user_id,
+        'payment_timeout',
+        $order_id,
+        moneyDecimalToSen(
+            (string) $order[
+                'order_total_amount'
+            ]
+        ),
+        'Refund for expired payment confirmation Order #' .
+            str_pad(
+                (string) $order_id,
+                4,
+                '0',
+                STR_PAD_LEFT
+            )
+    );
+
     $pdo->commit();
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) {
@@ -142,7 +162,7 @@ try {
 $order_num = '#' . str_pad($order['order_id'], 4, '0', STR_PAD_LEFT);
 sendNotification($pdo, $user_id,
     '⏰ Payment Timeout',
-    "Your order $order_num has been cancelled due to payment timeout. Stock and vouchers have been restored.",
+    "Your order $order_num has been cancelled due to payment timeout. The paid amount has been refunded to your MangaVault Wallet, and stock and vouchers have been restored.",
     'order'
 );
 
@@ -176,6 +196,7 @@ $email_body = "
             <div style='background:#f9fafb; border-radius:12px; padding:16px; margin-bottom:24px;'>
                 <p style='color:#6b7280; font-size:13px; margin:0 0 8px 0;'>✅ Stock has been restored</p>
                 <p style='color:#6b7280; font-size:13px; margin:0 0 8px 0;'>✅ Your voucher has been restored (if any)</p>
+                <p style='color:#6b7280; font-size:13px; margin:0 0 8px 0;'>✅ The paid amount has been refunded to your MangaVault Wallet</p>
                 <p style='color:#6b7280; font-size:13px; margin:0;'>✅ You can place a new order now</p>
             </div>
             <div style='text-align:center;'>

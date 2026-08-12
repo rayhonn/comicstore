@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/money_helper.php';
 require_once __DIR__ . '/voucher_helper.php';
+require_once __DIR__ . '/wallet_helper.php';
 
 function allocateReturnDiscountSen(
     int $discountSen,
@@ -450,6 +451,22 @@ function reconcileApprovedCustomerReturn(
             );
     }
 
+    $walletRefund =
+        creditWalletRefund(
+            $pdo,
+            $userId,
+            'return',
+            $returnId,
+            $refundAmountSen,
+            'Refund for approved Return #' .
+                str_pad(
+                    (string) $returnId,
+                    4,
+                    '0',
+                    STR_PAD_LEFT
+                )
+        );
+
     return [
         'refund_amount_sen' =>
             $refundAmountSen,
@@ -460,5 +477,15 @@ function reconcileApprovedCustomerReturn(
         'full_order_returned' =>
             $fullOrderReturned,
         'new_tier' => $newTier,
+        'wallet_refund_credited' =>
+            (bool) $walletRefund['created'],
+        'wallet_refund_credit_id' =>
+            $walletRefund[
+                'refund_credit_id'
+            ],
+        'wallet_withdrawal_expires_at' =>
+            $walletRefund[
+                'withdrawal_expires_at'
+            ],
     ];
 }

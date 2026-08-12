@@ -295,8 +295,9 @@ if (
                 $return_data['product_title'] .
                 "\" has been approved. A refund of RM " .
                 $refund_amount .
-                ' will be processed to your original ' .
-                'payment method within 5-7 working days.' .
+                ' has been credited to your MangaVault Wallet. ' .
+                'If you prefer a bank transfer, submit the request ' .
+                'from My Wallet within 7 days of the refund credit.' .
                 $adjustment_message,
                 'return'
             );

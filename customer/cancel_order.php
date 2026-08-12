@@ -8,6 +8,7 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/stock_helper.php';
 require_once __DIR__ . '/../includes/voucher_helper.php';
 require_once __DIR__ . '/../includes/notifications.php';
+require_once __DIR__ . '/../includes/wallet_helper.php';
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
@@ -165,6 +166,7 @@ if (
                 $locked_stmt = $pdo->prepare("
                     SELECT
                         order_id,
+                        order_total_amount,
                         order_status,
                         order_payment_status,
                         order_confirm_expires_at,
@@ -291,6 +293,25 @@ if (
                     $user_id
                 );
 
+                creditWalletRefund(
+                    $pdo,
+                    $user_id,
+                    'customer_cancellation',
+                    $order_id,
+                    moneyDecimalToSen(
+                        (string) $locked_order[
+                            'order_total_amount'
+                        ]
+                    ),
+                    'Refund for cancelled Order #' .
+                        str_pad(
+                            (string) $order_id,
+                            4,
+                            '0',
+                            STR_PAD_LEFT
+                        )
+                );
+
                 $pdo->commit();
             } catch (Throwable $exception) {
                 if ($pdo->inTransaction()) {
@@ -331,7 +352,7 @@ if (
                         $pdo,
                         $user_id,
                         'Order Cancelled',
-                        "Your cancellation request for order $order_num has been accepted. Reason: $reason.",
+                        "Your cancellation request for order $order_num has been accepted. The paid amount has been refunded to your MangaVault Wallet. Reason: $reason.",
                         'order'
                     );
                 } catch (Throwable $exception) {

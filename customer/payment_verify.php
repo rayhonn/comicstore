@@ -11,6 +11,7 @@ require_once __DIR__ . '/../includes/voucher_helper.php';
 require_once __DIR__ . '/../includes/stock_helper.php';
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/notifications.php';
+require_once __DIR__ . '/../includes/wallet_helper.php';
 require_once __DIR__ . '/../includes/mail_config.php';
 
 date_default_timezone_set('Asia/Kuala_Lumpur');
@@ -95,6 +96,25 @@ if (
                     $order['order_voucher_code'] ?? null,
                     $order_id,
                     $order_user_id
+                );
+
+                creditWalletRefund(
+                    $pdo,
+                    $order_user_id,
+                    'payment_timeout',
+                    $order_id,
+                    moneyDecimalToSen(
+                        (string) $order[
+                            'order_total_amount'
+                        ]
+                    ),
+                    'Refund for expired payment confirmation Order #' .
+                        str_pad(
+                            (string) $order_id,
+                            4,
+                            '0',
+                            STR_PAD_LEFT
+                        )
                 );
 
                 $pdo->commit();
@@ -413,7 +433,7 @@ if ($order && $error === 'expired') {
             $pdo,
             (int) $order['order_user_id'],
             'Payment Cancelled',
-            "Order $order_num was cancelled because the confirmation link expired. Stock and vouchers were restored.",
+            "Order $order_num was cancelled because the confirmation link expired. The paid amount was refunded to your MangaVault Wallet, and stock and vouchers were restored.",
             'order'
         );
     } catch (Throwable $e) {
@@ -486,8 +506,9 @@ if ($order && $error === 'expired') {
                             expired after 5 minutes.
                         </p>
                         <p>
-                            The order was cancelled. Physical stock
-                            and any voucher used were restored.
+                            The order was cancelled. The paid amount was
+                            refunded to your MangaVault Wallet. Physical
+                            stock and any voucher used were restored.
                         </p>
                     </div>
                 </body>
@@ -495,7 +516,7 @@ if ($order && $error === 'expired') {
             ";
 
             $mail->AltBody =
-                "Order $order_num was cancelled because the confirmation link expired.";
+                "Order $order_num was cancelled because the confirmation link expired. The paid amount was refunded to your MangaVault Wallet.";
 
             $mail->send();
         }

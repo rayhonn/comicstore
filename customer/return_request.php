@@ -36,7 +36,7 @@ if (!$order) {
 }
 
 // Check 7 day window
-$delivered_at = new DateTime($order['order_delivered_at']);
+$delivered_at = new DateTime($order['order_processing_at']);
 $now = new DateTime();
 $days_since = $now->diff($delivered_at)->days;
 $within_window = $days_since <= 7;
@@ -194,10 +194,12 @@ $reason_options = [
                     <p class="text-sm <?= $sc['text'] ?> opacity-80">Please wait up to <strong>3 working days</strong> for our team to review your request.</p>
                 <?php elseif ($existing['return_status'] === 'approved'): ?>
                     Your return has been approved. The final refund amount
-                    has been calculated after any voucher discount and will
-                    be processed to your original payment method within
-                    <strong>5-7 working days</strong>. Please check your
-                    notification for the confirmed refund amount.
+                    has been calculated after any voucher discount and
+                    credited to your <strong>MangaVault Wallet</strong>.
+                    If you prefer a bank transfer, you must submit the
+                    withdrawal request within <strong>7 days</strong> of
+                    the refund credit. Please check your notification for
+                    the confirmed refund amount.
                 <?php elseif ($existing['return_status'] === 'rejected'): ?>
                     <p class="text-sm <?= $sc['text'] ?> opacity-80">Your return request was not approved.</p>
                 <?php endif; ?>
@@ -282,7 +284,7 @@ $reason_options = [
                         <span class="text-amber-500 text-lg flex-shrink-0">ℹ️</span>
                         <div class="text-xs text-amber-700 leading-relaxed">
                             <p class="font-semibold mb-1">Return Policy</p>
-                            <p>Returns are only accepted for physical items within 7 days of delivery. Our team will review your request within <strong>3 working days</strong>. If approved, refund will be processed within 5-7 working days.</p>
+                            <p>Returns are only accepted for physical items within 7 days of delivery. Our team will review your request within <strong>3 working days</strong>. If approved, the eligible refund will be credited to your MangaVault Wallet.</p>
                         </div>
                     </div>
                 </div>

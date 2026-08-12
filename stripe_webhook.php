@@ -5,6 +5,8 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/stripe_config.php';
 require_once __DIR__ .
     '/includes/payment_finalization_helper.php';
+require_once __DIR__ .
+    '/includes/wallet_topup_helper.php';
 
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
@@ -192,27 +194,61 @@ if (
         );
     }
 
-    try {
-        $result = fulfillStripeCheckoutSession(
-            $pdo,
-            $sessionId,
-            null
-        );
+    $checkoutType = trim(
+        (string) (
+            $checkoutSession
+                ->metadata
+                ->checkout_type
+            ?? ''
+        )
+    );
 
-        app_log(
-            'INFO',
-            'Stripe Webhook',
-            'Stripe checkout event was processed.',
-            [
-                'event_id' => $eventId,
-                'event_type' => $eventType,
-                'stripe_session_id' => $sessionId,
-                'order_id' =>
-                    (int) $result['order_id'],
-                'order_created' =>
-                    (bool) $result['created'],
-            ]
-        );
+    try {
+        if ($checkoutType === 'wallet_topup') {
+            $result =
+                fulfillWalletTopupStripeSession(
+                    $pdo,
+                    $sessionId,
+                    null
+                );
+
+            app_log(
+                'INFO',
+                'Stripe Webhook',
+                'Wallet top-up checkout event was processed.',
+                [
+                    'event_id' => $eventId,
+                    'event_type' => $eventType,
+                    'stripe_session_id' => $sessionId,
+                    'wallet_topup_id' =>
+                        (int) $result['topup_id'],
+                    'wallet_credited' =>
+                        (bool) $result['created'],
+                ]
+            );
+        } else {
+            $result =
+                fulfillStripeCheckoutSession(
+                    $pdo,
+                    $sessionId,
+                    null
+                );
+
+            app_log(
+                'INFO',
+                'Stripe Webhook',
+                'Stripe checkout event was processed.',
+                [
+                    'event_id' => $eventId,
+                    'event_type' => $eventType,
+                    'stripe_session_id' => $sessionId,
+                    'order_id' =>
+                        (int) $result['order_id'],
+                    'order_created' =>
+                        (bool) $result['created'],
+                ]
+            );
+        }
     } catch (
         \Stripe\Exception\ApiErrorException $e
     ) {
@@ -251,6 +287,66 @@ if (
                 'message' => 'Webhook processing failed.',
             ]
         );
+    }
+}
+
+if ($eventType === 'checkout.session.expired') {
+    $checkoutSession =
+        $event->data->object;
+
+    $sessionId = trim(
+        (string) (
+            $checkoutSession->id
+            ?? ''
+        )
+    );
+
+    $checkoutType = trim(
+        (string) (
+            $checkoutSession
+                ->metadata
+                ->checkout_type
+            ?? ''
+        )
+    );
+
+    if ($checkoutType === 'wallet_topup') {
+        try {
+            expireWalletTopupStripeSession(
+                $pdo,
+                $sessionId
+            );
+
+            app_log(
+                'INFO',
+                'Stripe Webhook',
+                'Expired wallet top-up session was recorded.',
+                [
+                    'event_id' => $eventId,
+                    'event_type' => $eventType,
+                    'stripe_session_id' => $sessionId,
+                ]
+            );
+        } catch (Throwable $e) {
+            app_log_exception(
+                'Stripe Webhook',
+                $e,
+                [
+                    'event_id' => $eventId,
+                    'event_type' => $eventType,
+                    'stripe_session_id' => $sessionId,
+                ]
+            );
+
+            stripeWebhookRespond(
+                500,
+                [
+                    'received' => false,
+                    'message' =>
+                        'Webhook processing failed.',
+                ]
+            );
+        }
     }
 }
 

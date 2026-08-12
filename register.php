@@ -7,6 +7,8 @@ require_once __DIR__ .
     '/includes/identity_helper.php';
 require_once __DIR__ .
     '/includes/welcome_reward_helper.php';
+require_once __DIR__ .
+    '/includes/wallet_helper.php';
 
 $error = '';
 $success = '';
@@ -249,6 +251,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $newUserId =
                 (int) $pdo->lastInsertId();
+
+            ensureWalletAccount(
+                $pdo,
+                $newUserId
+            );
 
             claimCustomerIdentity(
                 $pdo,
