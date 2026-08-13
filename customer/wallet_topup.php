@@ -13,6 +13,42 @@ require_once __DIR__ . '/../includes/wallet_topup_helper.php';
 $user_id = current_user_id();
 $error = '';
 $amount_input = '';
+$return_to = 'wallet';
+
+$return_value =
+    $_SERVER['REQUEST_METHOD'] === 'POST'
+        ? ($_POST['return_to'] ?? null)
+        : ($_GET['return_to'] ?? null);
+
+if (
+    is_string($return_value) &&
+    $return_value === 'checkout'
+) {
+    $return_to = 'checkout';
+}
+
+if (
+    $_SERVER['REQUEST_METHOD'] !== 'POST'
+) {
+    $prefill_amount =
+        $_GET['amount'] ?? null;
+
+    if (
+        is_string($prefill_amount) &&
+        trim($prefill_amount) !== ''
+    ) {
+        try {
+            $amount_input =
+                moneyFormatSen(
+                    normalizeWalletTopupAmount(
+                        $prefill_amount
+                    )
+                );
+        } catch (WalletTopupException $e) {
+            $amount_input = '';
+        }
+    }
+}
 
 try {
     $wallet = getWalletSummary(
@@ -102,12 +138,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $app_url .
                         '/customer/wallet_topup_success.php' .
                         '?session_id=' .
-                        '{CHECKOUT_SESSION_ID}',
+                        '{CHECKOUT_SESSION_ID}' .
+                        '&return_to=' .
+                        rawurlencode(
+                            $return_to
+                        ),
                     'cancel_url' =>
                         $app_url .
                         '/customer/wallet_topup_cancel.php' .
                         '?topup_id=' .
-                        $topup_id,
+                        $topup_id .
+                        '&return_to=' .
+                        rawurlencode(
+                            $return_to
+                        ),
                     'expires_at' =>
                         $expires_at,
                     'custom_text' => [
@@ -213,10 +257,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <div class="max-w-xl mx-auto px-6 py-10">
         <a
-            href="wallet.php"
+            href="<?= $return_to === 'checkout'
+                ? 'payment_gateway.php'
+                : 'wallet.php' ?>"
             class="inline-flex items-center text-sm text-gray-500 hover:text-red-600 mb-5"
         >
-            ← Back to My Wallet
+            <?= $return_to === 'checkout'
+                ? '← Back to Checkout'
+                : '← Back to My Wallet' ?>
         </a>
 
         <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
@@ -253,8 +301,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </p>
                 </div>
 
-                <form method="POST" class="space-y-5">
+                <form
+                    method="POST"
+                    id="walletTopupForm"
+                    class="space-y-5"
+                >
                     <?php csrf_field(); ?>
+
+                    <input
+                        type="hidden"
+                        name="return_to"
+                        value="<?= htmlspecialchars(
+                            $return_to,
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>"
+                    >
 
                     <div>
                         <label
@@ -308,12 +370,166 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         type="submit"
                         class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 rounded-xl text-sm transition-colors"
                     >
-                        Continue to Stripe
+                        Review & Continue to Stripe
                     </button>
                 </form>
             </div>
         </div>
     </div>
+
+    <div
+        id="topupConfirmModal"
+        class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-6"
+    >
+        <div
+            class="bg-white rounded-3xl p-7 max-w-sm w-full shadow-2xl"
+        >
+            <div
+                class="w-14 h-14 bg-emerald-100 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
+            >
+                👛
+            </div>
+
+            <h2
+                class="text-xl font-black text-gray-800 text-center"
+            >
+                Confirm Wallet Top-Up
+            </h2>
+
+            <p
+                class="text-sm text-gray-500 text-center mt-2"
+            >
+                You are about to add
+            </p>
+
+            <p
+                id="topupConfirmAmount"
+                class="text-3xl font-black text-emerald-600 text-center mt-2"
+            >
+                RM 0.00
+            </p>
+
+            <div
+                class="bg-blue-50 border border-blue-100 rounded-xl p-4 mt-5"
+            >
+                <p
+                    class="text-xs text-blue-700 leading-relaxed"
+                >
+                    You will be redirected to Stripe for secure
+                    payment. Your MangaVault Wallet will only be
+                    credited after Stripe payment is successfully
+                    verified.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mt-6">
+                <button
+                    type="button"
+                    id="cancelTopupConfirm"
+                    class="border border-gray-200 hover:bg-gray-50 text-gray-600 font-bold py-3 rounded-xl text-sm"
+                >
+                    Cancel
+                </button>
+
+                <button
+                    type="button"
+                    id="confirmTopupButton"
+                    class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm"
+                >
+                    Confirm Top-Up
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const walletTopupForm =
+        document.getElementById(
+            'walletTopupForm'
+        );
+
+    const topupAmountInput =
+        document.getElementById(
+            'amount'
+        );
+
+    const topupConfirmModal =
+        document.getElementById(
+            'topupConfirmModal'
+        );
+
+    const topupConfirmAmount =
+        document.getElementById(
+            'topupConfirmAmount'
+        );
+
+    const cancelTopupConfirm =
+        document.getElementById(
+            'cancelTopupConfirm'
+        );
+
+    const confirmTopupButton =
+        document.getElementById(
+            'confirmTopupButton'
+        );
+
+    walletTopupForm.addEventListener(
+        'submit',
+        event => {
+            if (
+                walletTopupForm.dataset
+                    .confirmed === 'true'
+            ) {
+                return;
+            }
+
+            event.preventDefault();
+
+            const amount =
+                Number.parseFloat(
+                    topupAmountInput.value
+                );
+
+            if (
+                !Number.isFinite(amount) ||
+                amount < 1 ||
+                amount > 5000
+            ) {
+                return;
+            }
+
+            topupConfirmAmount.textContent =
+                'RM ' + amount.toFixed(2);
+
+            topupConfirmModal
+                .classList
+                .remove('hidden');
+        }
+    );
+
+    cancelTopupConfirm.addEventListener(
+        'click',
+        () => {
+            topupConfirmModal
+                .classList
+                .add('hidden');
+        }
+    );
+
+    confirmTopupButton.addEventListener(
+        'click',
+        () => {
+            walletTopupForm.dataset
+                .confirmed = 'true';
+
+            topupConfirmModal
+                .classList
+                .add('hidden');
+
+            walletTopupForm.requestSubmit();
+        }
+    );
+    </script>
 
 </body>
 </html>

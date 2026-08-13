@@ -11,6 +11,14 @@ $session_id = trim(
     (string) ($_GET['session_id'] ?? '')
 );
 
+$return_to =
+    is_string(
+        $_GET['return_to'] ?? null
+    ) &&
+    $_GET['return_to'] === 'checkout'
+        ? 'checkout'
+        : 'wallet';
+
 if (
     strlen($session_id) > 255 ||
     !preg_match(
@@ -34,7 +42,9 @@ try {
 
     redirect_to(
         app_path(
-            'customer/wallet.php?topup_success=1'
+            $return_to === 'checkout'
+                ? 'customer/payment_gateway.php?topup_success=1'
+                : 'customer/wallet.php?topup_success=1'
         )
     );
 } catch (

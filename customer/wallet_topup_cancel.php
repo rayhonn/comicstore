@@ -5,6 +5,14 @@ require_customer();
 
 require_once __DIR__ . '/../includes/db.php';
 
+$return_to =
+    is_string(
+        $_GET['return_to'] ?? null
+    ) &&
+    $_GET['return_to'] === 'checkout'
+        ? 'checkout'
+        : 'wallet';
+
 $topup_id = filter_input(
     INPUT_GET,
     'topup_id',
@@ -50,6 +58,8 @@ if ($statement->fetchColumn() === false) {
  */
 redirect_to(
     app_path(
-        'customer/wallet.php?topup_cancelled=1'
+        $return_to === 'checkout'
+            ? 'customer/payment_gateway.php?topup_cancelled=1'
+            : 'customer/wallet.php?topup_cancelled=1'
     )
 );

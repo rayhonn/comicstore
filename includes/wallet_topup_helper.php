@@ -1,8 +1,13 @@
 <?php
 
+use PHPMailer\PHPMailer\PHPMailer;
+
+require_once dirname(__DIR__) .
+    '/vendor/autoload.php';
 require_once __DIR__ . '/stripe_config.php';
 require_once __DIR__ . '/wallet_helper.php';
 require_once __DIR__ . '/notifications.php';
+require_once __DIR__ . '/mail_config.php';
 
 final class WalletTopupException extends RuntimeException
 {
@@ -700,6 +705,22 @@ function fulfillWalletTopupStripeSession(
                 $e->getMessage()
             );
         }
+
+        try {
+            sendWalletTopupSuccessEmail(
+                $pdo,
+                $userId,
+                $topupId,
+                $amountTotal
+            );
+        } catch (Throwable $e) {
+            app_error_log(
+                'Wallet top-up email failed for top-up #' .
+                $topupId .
+                ': ' .
+                $e->getMessage()
+            );
+        }
     }
 
     return [
@@ -710,6 +731,182 @@ function fulfillWalletTopupStripeSession(
         'wallet_credit' => $walletCredit,
     ];
 }
+
+function sendWalletTopupSuccessEmail(
+    PDO $pdo,
+    int $userId,
+    int $topupId,
+    int $amountSen
+): void {
+    if (
+        $userId < 1 ||
+        $topupId < 1 ||
+        $amountSen < 1
+    ) {
+        return;
+    }
+
+    $statement = $pdo->prepare("
+        SELECT
+            user_first_name,
+            user_last_name,
+            user_gmail
+        FROM users
+        WHERE user_id = ?
+        AND user_role = 'customer'
+        AND user_is_active = 1
+        AND user_deleted_at IS NULL
+        LIMIT 1
+    ");
+
+    $statement->execute([
+        $userId,
+    ]);
+
+    $customer =
+        $statement->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+    if (
+        !$customer ||
+        !filter_var(
+            $customer['user_gmail'],
+            FILTER_VALIDATE_EMAIL
+        )
+    ) {
+        throw new RuntimeException(
+            'Wallet top-up customer email is unavailable.'
+        );
+    }
+
+    $amount =
+        moneyFormatSen(
+            $amountSen
+        );
+
+    $topupNumber =
+        '#' .
+        str_pad(
+            (string) $topupId,
+            4,
+            '0',
+            STR_PAD_LEFT
+        );
+
+    $safeFirstName =
+        htmlspecialchars(
+            (string) $customer[
+                'user_first_name'
+            ],
+            ENT_QUOTES,
+            'UTF-8'
+        );
+
+    $safeAmount =
+        htmlspecialchars(
+            $amount,
+            ENT_QUOTES,
+            'UTF-8'
+        );
+
+    $safeTopupNumber =
+        htmlspecialchars(
+            $topupNumber,
+            ENT_QUOTES,
+            'UTF-8'
+        );
+
+    $mail = new PHPMailer(true);
+
+    $mail->isSMTP();
+    $mail->Host = MAIL_HOST;
+    $mail->SMTPAuth = true;
+    $mail->Username = MAIL_USERNAME;
+    $mail->Password = MAIL_PASSWORD;
+    $mail->SMTPSecure = 'tls';
+    $mail->Port = MAIL_PORT;
+    $mail->CharSet = 'UTF-8';
+
+    $mail->setFrom(
+        MAIL_USERNAME,
+        MAIL_FROM_NAME
+    );
+
+    $mail->addAddress(
+        (string) $customer[
+            'user_gmail'
+        ],
+        trim(
+            (string) $customer[
+                'user_first_name'
+            ] .
+            ' ' .
+            (string) $customer[
+                'user_last_name'
+            ]
+        )
+    );
+
+    $mail->Subject =
+        'Wallet Top-Up Successful ' .
+        $topupNumber .
+        ' - MangaVault';
+
+    $mail->isHTML(true);
+
+    $mail->Body = "
+        <html>
+        <body style='font-family:Arial,sans-serif;background:#F5F0EB;padding:30px;'>
+            <div style='max-width:600px;margin:auto;background:#ffffff;padding:30px;border-radius:16px;'>
+                <h2 style='color:#047857;'>
+                    Wallet Top-Up Successful
+                </h2>
+
+                <p>
+                    Hi <strong>{$safeFirstName}</strong>,
+                </p>
+
+                <p>
+                    Your MangaVault Wallet top-up
+                    <strong>{$safeTopupNumber}</strong>
+                    has been successfully verified.
+                </p>
+
+                <div style='background:#ECFDF5;border:1px solid #A7F3D0;border-radius:12px;padding:20px;margin:20px 0;'>
+                    <p style='margin:0;color:#065F46;font-size:13px;'>
+                        Amount Added
+                    </p>
+
+                    <p style='margin:6px 0 0;color:#047857;font-size:28px;font-weight:bold;'>
+                        RM {$safeAmount}
+                    </p>
+                </div>
+
+                <p>
+                    The funds are now available for eligible
+                    MangaVault purchases.
+                </p>
+
+                <p style='color:#6B7280;font-size:12px;'>
+                    Wallet top-up funds are not eligible for
+                    refund-to-bank withdrawal.
+                </p>
+            </div>
+        </body>
+        </html>
+    ";
+
+    $mail->AltBody =
+        'Wallet top-up ' .
+        $topupNumber .
+        ' was successful. RM ' .
+        $amount .
+        ' has been added to your MangaVault Wallet.';
+
+    $mail->send();
+}
+
 
 function expireWalletTopupStripeSession(
     PDO $pdo,

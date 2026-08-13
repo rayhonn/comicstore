@@ -322,6 +322,15 @@ $wallet_shortfall_sen = max(
         $wallet_available_sen
 );
 
+$wallet_suggested_topup_sen =
+    min(
+        500000,
+        max(
+            100,
+            $wallet_shortfall_sen
+        )
+    );
+
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['pay_wallet'])
@@ -814,6 +823,28 @@ if ($has_active_stripe_session) {
             </div>
         <?php endif; ?>
 
+        <?php if (
+            isset($_GET['topup_success'])
+        ): ?>
+            <div
+                class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5 max-w-2xl mx-auto"
+            >
+                Wallet top-up completed successfully.
+                Your updated balance is ready to use.
+            </div>
+        <?php endif; ?>
+
+        <?php if (
+            isset($_GET['topup_cancelled'])
+        ): ?>
+            <div
+                class="bg-gray-50 border border-gray-200 text-gray-600 text-sm px-4 py-3 rounded-xl mb-5 max-w-2xl mx-auto"
+            >
+                Wallet top-up was cancelled.
+                No funds were added to your wallet.
+            </div>
+        <?php endif; ?>
+
         <div
             class="flex flex-col lg:flex-row gap-6"
         >
@@ -1121,43 +1152,33 @@ if ($has_active_stripe_session) {
                         class="bg-emerald-50 border border-emerald-100 rounded-xl p-4 mb-5"
                     >
                         <div
-                            class="flex items-center justify-between gap-3 mb-3"
+                            class="flex items-center gap-3 mb-4"
                         >
                             <div
-                                class="flex items-center gap-3"
+                                class="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
                             >
-                                <span class="text-2xl">
-                                    👛
-                                </span>
-
-                                <div>
-                                    <p
-                                        class="font-bold text-sm text-emerald-800"
-                                    >
-                                        MangaVault Wallet
-                                    </p>
-
-                                    <p
-                                        class="text-xs text-emerald-600"
-                                    >
-                                        Instant internal payment
-                                    </p>
-                                </div>
+                                👛
                             </div>
 
-                            <a
-                                href="wallet.php"
-                                class="text-xs font-semibold text-emerald-700 hover:underline"
-                            >
-                                My Wallet
-                            </a>
-                        </div>
+                            <div class="min-w-0">
+                                <p
+                                    class="font-black text-sm text-emerald-900 leading-tight"
+                                >
+                                    MangaVault Wallet
+                                </p>
 
+                                <p
+                                    class="text-[11px] text-emerald-600 mt-1"
+                                >
+                                    Secure instant wallet payment
+                                </p>
+                            </div>
+                        </div>
                         <div
-                            class="grid grid-cols-2 gap-2 mb-3"
+                            class="grid grid-cols-2 gap-3 mb-3"
                         >
                             <div
-                                class="bg-white/70 rounded-lg px-3 py-2"
+                                class="bg-white/80 border border-emerald-100 rounded-xl px-3 py-3 min-h-[72px] flex flex-col justify-center"
                             >
                                 <p
                                     class="text-[11px] text-gray-400"
@@ -1176,7 +1197,7 @@ if ($has_active_stripe_session) {
                             </div>
 
                             <div
-                                class="bg-white/70 rounded-lg px-3 py-2"
+                                class="bg-white/80 border border-emerald-100 rounded-xl px-3 py-3 min-h-[72px] flex flex-col justify-center"
                             >
                                 <p
                                     class="text-[11px] text-gray-400"
@@ -1269,26 +1290,37 @@ if ($has_active_stripe_session) {
 
                         <?php else: ?>
                             <div
-                                class="bg-white/70 border border-emerald-100 rounded-lg p-3"
+                                class="bg-white border border-emerald-100 rounded-xl p-4"
                             >
                                 <p
-                                    class="text-xs text-gray-600"
+                                    class="text-xs text-gray-500"
                                 >
-                                    You need another
-                                    <strong>
-                                        RM
-                                        <?= moneyFormatSen(
-                                            $wallet_shortfall_sen
-                                        ) ?>
-                                    </strong>
-                                    to pay fully with Wallet.
+                                    Wallet balance is short by
+                                </p>
+
+                                <p
+                                    class="text-lg font-black text-gray-800 mt-1"
+                                >
+                                    RM
+                                    <?= moneyFormatSen(
+                                        $wallet_shortfall_sen
+                                    ) ?>
                                 </p>
 
                                 <a
-                                    href="wallet.php"
-                                    class="inline-flex mt-2 text-xs font-bold text-emerald-700 hover:underline"
+                                    href="wallet_topup.php?amount=<?= rawurlencode(
+                                        moneyFormatSen(
+                                            $wallet_suggested_topup_sen
+                                        )
+                                    ) ?>&return_to=checkout"
+                                    data-wallet-topup-link="true"
+                                    class="flex w-full items-center justify-center mt-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg transition-colors"
                                 >
-                                    Top Up Wallet →
+                                    Top Up RM
+                                    <?= moneyFormatSen(
+                                        $wallet_suggested_topup_sen
+                                    ) ?>
+                                    →
                                 </a>
                             </div>
                         <?php endif; ?>
@@ -1697,6 +1729,21 @@ if ($has_active_stripe_session) {
             pendingNavigationUrl ||
             'orders.php';
     }
+
+    const walletTopupLink =
+        document.querySelector(
+            '[data-wallet-topup-link="true"]'
+        );
+
+    if (walletTopupLink) {
+        walletTopupLink.addEventListener(
+            'click',
+            () => {
+                allowNavigation = true;
+            }
+        );
+    }
+
 
     const walletPaymentForm =
         document.getElementById(
