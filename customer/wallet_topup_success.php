@@ -40,11 +40,21 @@ try {
         current_user_id()
     );
 
+    if ($return_to === 'checkout') {
+        $_SESSION[
+            'checkout_wallet_topup_success'
+        ] = true;
+
+        redirect_to(
+            app_path(
+                'customer/payment_gateway.php'
+            )
+        );
+    }
+
     redirect_to(
         app_path(
-            $return_to === 'checkout'
-                ? 'customer/payment_gateway.php?topup_success=1'
-                : 'customer/wallet.php?topup_success=1'
+            'customer/wallet.php?topup_success=1'
         )
     );
 } catch (
