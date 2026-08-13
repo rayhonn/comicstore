@@ -58,6 +58,8 @@ $type_labels = [
     'return_refund' => 'Return Refund',
     'cancellation_refund' => 'Order Cancellation Refund',
     'payment_timeout_refund' => 'Payment Timeout Refund',
+    'order_payment' => 'Wallet Order Payment',
+    'order_payment_refund' => 'Wallet Order Refund',
     'withdrawal_reserve' => 'Bank Transfer Reserved',
     'withdrawal_release' => 'Bank Transfer Released',
     'withdrawal_complete' => 'Bank Transfer Completed',
@@ -404,6 +406,8 @@ $type_labels = [
                                         'bg-blue-100 text-blue-700',
                                     'rejected' =>
                                         'bg-red-100 text-red-700',
+                                    'failed' =>
+                                        'bg-orange-100 text-orange-700',
                                     'completed' =>
                                         'bg-green-100 text-green-700',
                                 ];
@@ -479,6 +483,29 @@ $type_labels = [
                                             </p>
                                         <?php endif; ?>
 
+                                        <?php if (
+                                            $withdrawal_status ===
+                                                'failed' &&
+                                            !empty(
+                                                $withdrawal[
+                                                    'wallet_withdrawal_failure_reason'
+                                                ]
+                                            )
+                                        ): ?>
+                                            <p
+                                                class="text-xs text-orange-600 mt-2"
+                                            >
+                                                Transfer failure:
+                                                <?= htmlspecialchars(
+                                                    (string) $withdrawal[
+                                                        'wallet_withdrawal_failure_reason'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+                                        <?php endif; ?>
+                                        
                                         <?php if (!empty(
                                             $withdrawal[
                                                 'wallet_withdrawal_transfer_reference'

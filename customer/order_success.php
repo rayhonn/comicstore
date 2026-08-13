@@ -185,7 +185,31 @@ $order_total_sen = moneyDecimalToSen(
             <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2">
                 <span>💳</span> Payment Method
             </h3>
-            <p class="text-sm text-gray-600"><?= htmlspecialchars($order['order_payment_method']) ?></p>
+            <p class="text-sm text-gray-600">
+                <?= htmlspecialchars(
+                    $order[
+                        'order_payment_method'
+                    ] === 'wallet'
+                        ? 'MangaVault Wallet'
+                        : (
+                            $order[
+                                'order_payment_method'
+                            ] === 'stripe_card'
+                                ? 'Stripe Card'
+                                : ucfirst(
+                                    str_replace(
+                                        '_',
+                                        ' ',
+                                        (string) $order[
+                                            'order_payment_method'
+                                        ]
+                                    )
+                                )
+                        ),
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?>
+            </p>
         </div>
         <?php endif; ?>
         

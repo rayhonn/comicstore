@@ -43,6 +43,25 @@ try {
     exit('Withdrawal request not found.');
 }
 
+if (
+    !in_array(
+        (string) $request[
+            'wallet_withdrawal_status'
+        ],
+        [
+            'pending',
+            'approved',
+        ],
+        true
+    )
+) {
+    http_response_code(403);
+
+    exit(
+        'Protected bank details are no longer available for this completed withdrawal workflow.'
+    );
+}
+
 $error = '';
 $account_number = null;
 
@@ -50,6 +69,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
     try {
+        $request =
+            walletWithdrawalLoadForAdmin(
+                $pdo,
+                (int) $withdrawal_id,
+                false
+            );
+
+        if (
+            !in_array(
+                (string) $request[
+                    'wallet_withdrawal_status'
+                ],
+                [
+                    'pending',
+                    'approved',
+                ],
+                true
+            )
+        ) {
+            throw new WalletWithdrawalException(
+                'Protected bank details can no longer be revealed for this withdrawal.'
+            );
+        }
+
         verifyWalletActorPassword(
             $pdo,
             current_user_id(),

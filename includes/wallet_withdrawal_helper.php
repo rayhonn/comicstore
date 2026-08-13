@@ -718,6 +718,8 @@ function getCustomerWalletWithdrawals(
             wallet_withdrawal_transfer_reference,
             wallet_withdrawal_admin_note,
             wallet_withdrawal_reviewed_at,
+            wallet_withdrawal_failed_at,
+            wallet_withdrawal_failure_reason,
             wallet_withdrawal_completed_at,
             wallet_withdrawal_receipt_file,
             wallet_withdrawal_created_at
@@ -1360,6 +1362,239 @@ function rejectWalletWithdrawalRequest(
         throw $e;
     }
 }
+
+function failApprovedWalletWithdrawalRequest(
+    PDO $pdo,
+    int $withdrawalId,
+    int $adminId,
+    string $failureReason
+): array {
+    $failureReason =
+        normalizeWalletWithdrawalAdminNote(
+            $failureReason,
+            true
+        );
+
+    try {
+        $pdo->beginTransaction();
+
+        $request =
+            walletWithdrawalLoadForAdmin(
+                $pdo,
+                $withdrawalId,
+                true
+            );
+
+        if (
+            $request[
+                'wallet_withdrawal_status'
+            ] !== 'approved'
+        ) {
+            throw new WalletWithdrawalException(
+                'Only an approved withdrawal can be marked as a failed bank transfer.'
+            );
+        }
+
+        if (
+            !empty(
+                $request[
+                    'wallet_withdrawal_debit_tx_id'
+                ]
+            ) ||
+            !empty(
+                $request[
+                    'wallet_withdrawal_release_tx_id'
+                ]
+            ) ||
+            !empty(
+                $request[
+                    'wallet_withdrawal_receipt_file'
+                ]
+            ) ||
+            !empty(
+                $request[
+                    'wallet_withdrawal_transfer_reference'
+                ]
+            )
+        ) {
+            throw new WalletWithdrawalException(
+                'This withdrawal already contains final transfer or release data.'
+            );
+        }
+
+        $userId =
+            (int) $request[
+                'wallet_withdrawal_user_id'
+            ];
+
+        $wallet =
+            lockWalletAccount(
+                $pdo,
+                $userId
+            );
+
+        $amountSen =
+            moneyDecimalToSen(
+                (string) $request[
+                    'wallet_withdrawal_amount'
+                ]
+            );
+
+        if (
+            empty(
+                $request[
+                    'wallet_withdrawal_reserved_tx_id'
+                ]
+            ) ||
+            (int) $wallet[
+                'wallet_reserved_sen'
+            ] < $amountSen
+        ) {
+            throw new WalletWithdrawalException(
+                'Withdrawal reserve is inconsistent.'
+            );
+        }
+
+        $newReservedSen =
+            (int) $wallet[
+                'wallet_reserved_sen'
+            ] -
+            $amountSen;
+
+        if ($newReservedSen < 0) {
+            throw new WalletWithdrawalException(
+                'Wallet reserve would become invalid.'
+            );
+        }
+
+        $updateWallet =
+            $pdo->prepare("
+                UPDATE wallet_accounts
+                SET wallet_reserved_amount = ?,
+                    wallet_updated_at = NOW()
+                WHERE wallet_id = ?
+                AND wallet_user_id = ?
+            ");
+
+        $updateWallet->execute([
+            moneySenToDecimal(
+                $newReservedSen
+            ),
+            (int) $wallet[
+                'wallet_id'
+            ],
+            $userId,
+        ]);
+
+        if (
+            $updateWallet->rowCount() !== 1
+        ) {
+            throw new WalletWithdrawalException(
+                'Wallet reserve could not be released.'
+            );
+        }
+
+        $releaseTransactionId =
+            insertWalletLedgerEvent(
+                $pdo,
+                (int) $wallet[
+                    'wallet_id'
+                ],
+                $userId,
+                'release',
+                'withdrawal_release',
+                $amountSen,
+                (int) $wallet[
+                    'wallet_balance_sen'
+                ],
+                $newReservedSen,
+                'wallet_withdrawal',
+                $withdrawalId,
+                'withdrawal:release:' .
+                    $withdrawalId,
+                'Released failed bank withdrawal reserve #' .
+                    str_pad(
+                        (string) $withdrawalId,
+                        4,
+                        '0',
+                        STR_PAD_LEFT
+                    )
+            );
+
+        $updateRequest =
+            $pdo->prepare("
+                UPDATE
+                    wallet_withdrawal_requests
+                SET
+                    wallet_withdrawal_status =
+                        'failed',
+                    wallet_withdrawal_failed_by = ?,
+                    wallet_withdrawal_failed_at =
+                        NOW(),
+                    wallet_withdrawal_failure_reason = ?,
+                    wallet_withdrawal_release_tx_id = ?
+                WHERE
+                    wallet_withdrawal_id = ?
+                AND
+                    wallet_withdrawal_status =
+                        'approved'
+                AND
+                    wallet_withdrawal_release_tx_id
+                        IS NULL
+                AND
+                    wallet_withdrawal_debit_tx_id
+                        IS NULL
+                AND
+                    wallet_withdrawal_receipt_file
+                        IS NULL
+                AND
+                    wallet_withdrawal_transfer_reference
+                        IS NULL
+            ");
+
+        $updateRequest->execute([
+            $adminId,
+            $failureReason,
+            $releaseTransactionId,
+            $withdrawalId,
+        ]);
+
+        if (
+            $updateRequest->rowCount() !== 1
+        ) {
+            throw new WalletWithdrawalException(
+                'Withdrawal transfer failure could not be recorded.'
+            );
+        }
+
+        walletWithdrawalInsertAdminLog(
+            $pdo,
+            $adminId,
+            'fail_wallet_withdrawal',
+            $withdrawalId,
+            'Marked approved bank withdrawal as transfer failed and released the reserved wallet funds.'
+        );
+
+        $pdo->commit();
+
+        $request[
+            'wallet_withdrawal_status'
+        ] = 'failed';
+
+        $request[
+            'wallet_withdrawal_failure_reason'
+        ] = $failureReason;
+
+        return $request;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        throw $e;
+    }
+}
+
 
 function walletWithdrawalReceiptRoot(): string
 {

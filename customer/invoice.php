@@ -236,7 +236,32 @@ $sc =
                 <?php if (!empty($order['order_payment_method'])): ?>
                 <div>
                     <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Payment Method</p>
-                    <p class="font-semibold text-gray-700">💳 <?= htmlspecialchars($order['order_payment_method']) ?></p>
+                    <p class="font-semibold text-gray-700">
+                        💳
+                        <?= htmlspecialchars(
+                            $order[
+                                'order_payment_method'
+                            ] === 'wallet'
+                                ? 'MangaVault Wallet'
+                                : (
+                                    $order[
+                                        'order_payment_method'
+                                    ] === 'stripe_card'
+                                        ? 'Stripe Card'
+                                        : ucfirst(
+                                            str_replace(
+                                                '_',
+                                                ' ',
+                                                (string) $order[
+                                                    'order_payment_method'
+                                                ]
+                                            )
+                                        )
+                                ),
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                    </p>
                 </div>
                 <?php endif; ?>
 

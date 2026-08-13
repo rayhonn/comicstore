@@ -10,6 +10,8 @@ require_once __DIR__ . '/../includes/voucher_helper.php';
 require_once __DIR__ . '/../includes/money_helper.php';
 require_once __DIR__ .
     '/../includes/payment_draft_helper.php';
+require_once __DIR__ .
+    '/../includes/wallet_order_payment_helper.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/config.php';
 
@@ -273,6 +275,143 @@ if (
             'customer/cart.php?timeout=1'
         )
     );
+}
+
+$wallet_error = null;
+
+try {
+    $wallet_summary =
+        getWalletSummary(
+            $pdo,
+            $user_id
+        );
+} catch (Throwable $e) {
+    app_error_log(
+        'Checkout wallet summary failed: ' .
+        $e->getMessage()
+    );
+
+    $wallet_summary = [
+        'balance_sen' => 0,
+        'reserved_sen' => 0,
+        'available_sen' => 0,
+    ];
+
+    $wallet_error =
+        'Unable to load your wallet balance.';
+}
+
+$wallet_balance_sen =
+    (int) $wallet_summary[
+        'balance_sen'
+    ];
+
+$wallet_reserved_sen =
+    (int) $wallet_summary[
+        'reserved_sen'
+    ];
+
+$wallet_available_sen =
+    (int) $wallet_summary[
+        'available_sen'
+    ];
+
+$wallet_shortfall_sen = max(
+    0,
+    $total_sen -
+        $wallet_available_sen
+);
+
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['pay_wallet'])
+) {
+    csrf_verify();
+
+    if ($has_active_stripe_session) {
+        $wallet_error =
+            'Wallet payment is unavailable while a Stripe payment session is active.';
+    } else {
+        try {
+            $wallet_result =
+                finalizeWalletPaymentDraft(
+                    $pdo,
+                    $payment_draft_id,
+                    $user_id,
+                    $_POST[
+                        'current_password'
+                    ] ?? null
+                );
+
+            sendWalletOrderConfirmationMessages(
+                $pdo,
+                $wallet_result
+            );
+
+            $wallet_order_id =
+                (int) $wallet_result[
+                    'order_id'
+                ];
+
+            clearCheckoutSessionState();
+
+            redirect_to(
+                app_path(
+                    'customer/order_success.php' .
+                    '?order_id=' .
+                    $wallet_order_id
+                )
+            );
+        } catch (
+            WalletOrderPaymentException |
+            WalletException $e
+        ) {
+            $wallet_error =
+                $e->getMessage();
+        } catch (Throwable $e) {
+            app_error_log(
+                'Wallet checkout payment failed: ' .
+                $e->getMessage()
+            );
+
+            $wallet_error =
+                'Unable to complete the wallet payment.';
+        }
+
+        try {
+            $wallet_summary =
+                getWalletSummary(
+                    $pdo,
+                    $user_id
+                );
+
+            $wallet_balance_sen =
+                (int) $wallet_summary[
+                    'balance_sen'
+                ];
+
+            $wallet_reserved_sen =
+                (int) $wallet_summary[
+                    'reserved_sen'
+                ];
+
+            $wallet_available_sen =
+                (int) $wallet_summary[
+                    'available_sen'
+                ];
+
+            $wallet_shortfall_sen = max(
+                0,
+                $total_sen -
+                    $wallet_available_sen
+            );
+        } catch (Throwable $e) {
+            app_error_log(
+                'Wallet summary refresh failed: ' .
+                $e->getMessage()
+            );
+        }
+    }
 }
 
 $stripe_error = null;
@@ -663,6 +802,18 @@ if ($has_active_stripe_session) {
             </div>
         <?php endif; ?>
 
+        <?php if ($wallet_error): ?>
+            <div
+                class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl mb-5 max-w-2xl mx-auto"
+            >
+                <?= htmlspecialchars(
+                    $wallet_error,
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?>
+            </div>
+        <?php endif; ?>
+
         <div
             class="flex flex-col lg:flex-row gap-6"
         >
@@ -966,6 +1117,203 @@ if ($has_active_stripe_session) {
                         Payment
                     </h2>
 
+                    <div
+                        class="bg-emerald-50 border border-emerald-100 rounded-xl p-4 mb-5"
+                    >
+                        <div
+                            class="flex items-center justify-between gap-3 mb-3"
+                        >
+                            <div
+                                class="flex items-center gap-3"
+                            >
+                                <span class="text-2xl">
+                                    👛
+                                </span>
+
+                                <div>
+                                    <p
+                                        class="font-bold text-sm text-emerald-800"
+                                    >
+                                        MangaVault Wallet
+                                    </p>
+
+                                    <p
+                                        class="text-xs text-emerald-600"
+                                    >
+                                        Instant internal payment
+                                    </p>
+                                </div>
+                            </div>
+
+                            <a
+                                href="wallet.php"
+                                class="text-xs font-semibold text-emerald-700 hover:underline"
+                            >
+                                My Wallet
+                            </a>
+                        </div>
+
+                        <div
+                            class="grid grid-cols-2 gap-2 mb-3"
+                        >
+                            <div
+                                class="bg-white/70 rounded-lg px-3 py-2"
+                            >
+                                <p
+                                    class="text-[11px] text-gray-400"
+                                >
+                                    Available
+                                </p>
+
+                                <p
+                                    class="text-sm font-black text-emerald-700"
+                                >
+                                    RM
+                                    <?= moneyFormatSen(
+                                        $wallet_available_sen
+                                    ) ?>
+                                </p>
+                            </div>
+
+                            <div
+                                class="bg-white/70 rounded-lg px-3 py-2"
+                            >
+                                <p
+                                    class="text-[11px] text-gray-400"
+                                >
+                                    Reserved
+                                </p>
+
+                                <p
+                                    class="text-sm font-bold text-gray-600"
+                                >
+                                    RM
+                                    <?= moneyFormatSen(
+                                        $wallet_reserved_sen
+                                    ) ?>
+                                </p>
+                            </div>
+                        </div>
+
+                        <?php if (
+                            $has_active_stripe_session
+                        ): ?>
+                            <div
+                                class="bg-white/70 border border-emerald-100 rounded-lg p-3"
+                            >
+                                <p
+                                    class="text-xs text-gray-600 leading-relaxed"
+                                >
+                                    Wallet payment is locked because
+                                    this checkout already has an active
+                                    Stripe payment session.
+                                </p>
+                            </div>
+
+                        <?php elseif (
+                            $wallet_available_sen >=
+                                $total_sen
+                        ): ?>
+                            <form
+                                method="POST"
+                                class="space-y-3"
+                                onsubmit="return confirm('Pay RM <?= moneyFormatSen(
+                                    $total_sen
+                                ) ?> using your MangaVault Wallet? Wallet payment is confirmed immediately and cannot be cancelled after completion.');"
+                            >
+                                <?php csrf_field(); ?>
+
+                                <input
+                                    type="hidden"
+                                    name="pay_wallet"
+                                    value="1"
+                                >
+
+                                <div>
+                                    <label
+                                        for="wallet_current_password"
+                                        class="block text-xs font-semibold text-emerald-800 mb-1.5"
+                                    >
+                                        Current Password
+                                    </label>
+
+                                    <input
+                                        type="password"
+                                        id="wallet_current_password"
+                                        name="current_password"
+                                        maxlength="72"
+                                        autocomplete="current-password"
+                                        required
+                                        placeholder="Confirm your account password"
+                                        class="w-full border border-emerald-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500"
+                                    >
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-lg text-sm transition-colors"
+                                >
+                                    Pay RM
+                                    <?= moneyFormatSen(
+                                        $total_sen
+                                    ) ?>
+                                    with Wallet
+                                </button>
+                            </form>
+
+                            <p
+                                class="text-[11px] text-emerald-700 mt-3 leading-relaxed"
+                            >
+                                Wallet payment is confirmed immediately.
+                                Reserved bank-withdrawal funds cannot be
+                                used for purchases.
+                            </p>
+
+                        <?php else: ?>
+                            <div
+                                class="bg-white/70 border border-emerald-100 rounded-lg p-3"
+                            >
+                                <p
+                                    class="text-xs text-gray-600"
+                                >
+                                    You need another
+                                    <strong>
+                                        RM
+                                        <?= moneyFormatSen(
+                                            $wallet_shortfall_sen
+                                        ) ?>
+                                    </strong>
+                                    to pay fully with Wallet.
+                                </p>
+
+                                <a
+                                    href="wallet.php"
+                                    class="inline-flex mt-2 text-xs font-bold text-emerald-700 hover:underline"
+                                >
+                                    Top Up Wallet →
+                                </a>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <div
+                        class="flex items-center gap-3 mb-5"
+                    >
+                        <div
+                            class="h-px bg-gray-100 flex-1"
+                        ></div>
+
+                        <span
+                            class="text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+                        >
+                            or
+                        </span>
+
+                        <div
+                            class="h-px bg-gray-100 flex-1"
+                        ></div>
+                    </div>
+                    
                     <div
                         class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-5"
                     >

@@ -224,6 +224,8 @@ function insertWalletLedgerEvent(
         'return_refund',
         'cancellation_refund',
         'payment_timeout_refund',
+        'order_payment',
+        'order_payment_refund',
         'withdrawal_reserve',
         'withdrawal_release',
         'withdrawal_complete',
@@ -441,6 +443,259 @@ function creditWallet(
         'reserved_after_sen' =>
             (int) $wallet['wallet_reserved_sen'],
     ];
+}
+
+function debitWallet(
+    PDO $pdo,
+    int $userId,
+    int $amountSen,
+    string $type,
+    ?string $referenceType,
+    ?int $referenceId,
+    string $idempotencyKey,
+    string $description
+): array {
+    walletRequireTransaction($pdo);
+
+    if ($amountSen < 1) {
+        throw new WalletException(
+            'Wallet debit amount must be greater than zero.'
+        );
+    }
+
+    $idempotencyKey =
+        normalizeWalletIdempotencyKey(
+            $idempotencyKey
+        );
+
+    $wallet = lockWalletAccount(
+        $pdo,
+        $userId
+    );
+
+    $existing = walletExistingTransaction(
+        $pdo,
+        $idempotencyKey,
+        true
+    );
+
+    if ($existing) {
+        $existingAmountSen =
+            moneyDecimalToSen(
+                (string) $existing[
+                    'wallet_tx_amount'
+                ]
+            );
+
+        if (
+            (int) $existing[
+                'wallet_tx_user_id'
+            ] !== $userId ||
+            $existing[
+                'wallet_tx_effect'
+            ] !== 'debit' ||
+            $existing[
+                'wallet_tx_type'
+            ] !== $type ||
+            $existingAmountSen !== $amountSen
+        ) {
+            throw new WalletException(
+                'Wallet idempotency conflict detected.'
+            );
+        }
+
+        return [
+            'created' => false,
+            'transaction_id' =>
+                (int) $existing[
+                    'wallet_tx_id'
+                ],
+            'balance_after_sen' =>
+                moneyDecimalToSen(
+                    (string) $existing[
+                        'wallet_tx_balance_after'
+                    ]
+                ),
+            'reserved_after_sen' =>
+                moneyDecimalToSen(
+                    (string) $existing[
+                        'wallet_tx_reserved_after'
+                    ]
+                ),
+        ];
+    }
+
+    if (
+        $amountSen >
+        (int) $wallet[
+            'wallet_available_sen'
+        ]
+    ) {
+        throw new WalletException(
+            'Insufficient available wallet balance.'
+        );
+    }
+
+    $newBalanceSen =
+        (int) $wallet[
+            'wallet_balance_sen'
+        ] -
+        $amountSen;
+
+    if (
+        $newBalanceSen < 0 ||
+        (int) $wallet[
+            'wallet_reserved_sen'
+        ] >
+            $newBalanceSen
+    ) {
+        throw new WalletException(
+            'Wallet balance would become inconsistent.'
+        );
+    }
+
+    $update = $pdo->prepare("
+        UPDATE wallet_accounts
+        SET wallet_balance = ?,
+            wallet_updated_at = NOW()
+        WHERE wallet_id = ?
+        AND wallet_user_id = ?
+    ");
+
+    $update->execute([
+        moneySenToDecimal(
+            $newBalanceSen
+        ),
+        (int) $wallet['wallet_id'],
+        $userId,
+    ]);
+
+    if ($update->rowCount() !== 1) {
+        throw new WalletException(
+            'Wallet balance could not be updated.'
+        );
+    }
+
+    $transactionId =
+        insertWalletLedgerEvent(
+            $pdo,
+            (int) $wallet['wallet_id'],
+            $userId,
+            'debit',
+            $type,
+            $amountSen,
+            $newBalanceSen,
+            (int) $wallet[
+                'wallet_reserved_sen'
+            ],
+            $referenceType,
+            $referenceId,
+            $idempotencyKey,
+            $description
+        );
+
+    return [
+        'created' => true,
+        'transaction_id' =>
+            $transactionId,
+        'balance_after_sen' =>
+            $newBalanceSen,
+        'reserved_after_sen' =>
+            (int) $wallet[
+                'wallet_reserved_sen'
+            ],
+    ];
+}
+
+function refundWalletOrderPayment(
+    PDO $pdo,
+    int $userId,
+    int $orderId,
+    int $originalTransactionId,
+    int $amountSen,
+    string $description
+): array {
+    walletRequireTransaction($pdo);
+
+    if (
+        $userId < 1 ||
+        $orderId < 1 ||
+        $originalTransactionId < 1 ||
+        $amountSen < 1
+    ) {
+        throw new WalletException(
+            'Invalid wallet order payment refund.'
+        );
+    }
+
+    lockWalletAccount(
+        $pdo,
+        $userId
+    );
+
+    $originalStatement =
+        $pdo->prepare("
+            SELECT
+                wallet_tx_id,
+                wallet_tx_user_id,
+                wallet_tx_effect,
+                wallet_tx_type,
+                wallet_tx_amount,
+                wallet_tx_reference_type,
+                wallet_tx_reference_id
+            FROM wallet_transactions
+            WHERE wallet_tx_id = ?
+            AND wallet_tx_user_id = ?
+            LIMIT 1
+            FOR UPDATE
+        ");
+
+    $originalStatement->execute([
+        $originalTransactionId,
+        $userId,
+    ]);
+
+    $original =
+        $originalStatement->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+    if (
+        !$original ||
+        $original[
+            'wallet_tx_effect'
+        ] !== 'debit' ||
+        $original[
+            'wallet_tx_type'
+        ] !== 'order_payment' ||
+        $original[
+            'wallet_tx_reference_type'
+        ] !== 'order' ||
+        (int) $original[
+            'wallet_tx_reference_id'
+        ] !== $orderId ||
+        moneyDecimalToSen(
+            (string) $original[
+                'wallet_tx_amount'
+            ]
+        ) !== $amountSen
+    ) {
+        throw new WalletException(
+            'Original wallet order payment could not be verified.'
+        );
+    }
+
+    return creditWallet(
+        $pdo,
+        $userId,
+        $amountSen,
+        'order_payment_refund',
+        'order',
+        $orderId,
+        'order:payment-refund:' .
+            $orderId,
+        $description
+    );
 }
 
 function creditWalletRefund(

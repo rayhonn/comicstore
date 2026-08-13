@@ -35,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             [
                 'approve',
                 'reject',
+                'fail',
                 'complete',
             ],
             true
@@ -66,6 +67,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         current_user_id(),
                         normalizeWalletWithdrawalAdminNote(
                             $_POST['admin_note'] ?? '',
+                            true
+                        )
+                    );
+            } elseif ($action === 'fail') {
+                verifyWalletActorPassword(
+                    $pdo,
+                    current_user_id(),
+                    'admin',
+                    $_POST[
+                        'current_password'
+                    ] ?? null
+                );
+
+                $request_result =
+                    failApprovedWalletWithdrawalRequest(
+                        $pdo,
+                        (int) $withdrawal_id,
+                        current_user_id(),
+                        normalizeWalletWithdrawalAdminNote(
+                            $_POST[
+                                'failure_reason'
+                            ] ?? '',
                             true
                         )
                     );
@@ -154,6 +177,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         "Your bank withdrawal request $request_number for RM $amount was rejected. Reserved funds were released back to your wallet. Reason: $reason",
                         'system'
                     );
+                } elseif ($action === 'fail') {
+                    $reason = trim(
+                        (string) (
+                            $request_result[
+                                'wallet_withdrawal_failure_reason'
+                            ] ?? ''
+                        )
+                    );
+
+                    sendNotification(
+                        $pdo,
+                        $customer_id,
+                        'Bank Transfer Failed',
+                        "The bank transfer for withdrawal request $request_number for RM $amount could not be completed. The reserved funds were released back to your MangaVault Wallet. Reason: $reason",
+                        'system'
+                    );
                 } else {
                     sendNotification(
                         $pdo,
@@ -207,6 +246,7 @@ $allowed_filters = [
     'pending',
     'approved',
     'rejected',
+    'failed',
     'completed',
 ];
 $status_filter = $_GET['status'] ?? 'pending';
@@ -234,6 +274,7 @@ $counts = [
     'pending' => 0,
     'approved' => 0,
     'rejected' => 0,
+    'failed' => 0,
     'completed' => 0,
 ];
 
@@ -288,8 +329,9 @@ $sql .= "
         CASE wr.wallet_withdrawal_status
             WHEN 'pending' THEN 0
             WHEN 'approved' THEN 1
-            WHEN 'completed' THEN 2
-            ELSE 3
+            WHEN 'failed' THEN 2
+            WHEN 'completed' THEN 3
+            ELSE 4
         END,
         wr.wallet_withdrawal_id DESC
 ";
@@ -359,7 +401,12 @@ $result_id = filter_input(
             is_string($result) &&
             in_array(
                 $result,
-                ['approve', 'reject', 'complete'],
+                [
+                    'approve',
+                    'reject',
+                    'fail',
+                    'complete',
+                ],
                 true
             ) &&
             $result_id !== false &&
@@ -379,7 +426,11 @@ $result_id = filter_input(
                         : (
                             $result === 'reject'
                                 ? 'rejected'
-                                : 'completed'
+                                : (
+                                    $result === 'fail'
+                                        ? 'marked as transfer failed'
+                                        : 'completed'
+                                )
                         ),
                     ENT_QUOTES,
                     'UTF-8'
@@ -388,7 +439,7 @@ $result_id = filter_input(
         <?php endif; ?>
 
         <div
-            class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6"
+            class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6"
         >
             <?php
             $summary = [
@@ -403,6 +454,10 @@ $result_id = filter_input(
                 'rejected' => [
                     'Rejected',
                     'bg-red-50 text-red-700 border-red-100',
+                ],
+                'failed' => [
+                    'Transfer Failed',
+                    'bg-orange-50 text-orange-700 border-orange-100',
                 ],
                 'completed' => [
                     'Completed',
@@ -450,6 +505,7 @@ $result_id = filter_input(
                         'pending' => 'Pending Review',
                         'approved' => 'Approved / Awaiting Transfer',
                         'rejected' => 'Rejected',
+                        'failed' => 'Transfer Failed',
                         'completed' => 'Completed',
                         'all' => 'All Requests',
                     ] as $value => $label): ?>
@@ -497,6 +553,8 @@ $result_id = filter_input(
                             'bg-blue-100 text-blue-700',
                         'rejected' =>
                             'bg-red-100 text-red-700',
+                        'failed' =>
+                            'bg-orange-100 text-orange-700',
                         'completed' =>
                             'bg-green-100 text-green-700',
                     ];
@@ -629,12 +687,23 @@ $result_id = filter_input(
                                 <div
                                     class="flex items-center gap-3 flex-wrap"
                                 >
-                                    <a
-                                        href="wallet_withdrawal_bank.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>"
-                                        class="inline-flex items-center bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-4 py-2 rounded-xl text-sm"
-                                    >
-                                        🔐 Reveal Protected Bank Details
-                                    </a>
+                                    <?php if (
+                                        in_array(
+                                            $status,
+                                            [
+                                                'pending',
+                                                'approved',
+                                            ],
+                                            true
+                                        )
+                                    ): ?>
+                                        <a
+                                            href="wallet_withdrawal_bank.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>"
+                                            class="inline-flex items-center bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-4 py-2 rounded-xl text-sm"
+                                        >
+                                            🔐 Reveal Protected Bank Details
+                                        </a>
+                                    <?php endif; ?>
 
                                     <?php if (
                                         $status === 'completed' &&
@@ -861,6 +930,71 @@ $result_id = filter_input(
                                         </form>
                                     </div>
 
+                                    <div
+                                        class="bg-orange-50 border border-orange-100 rounded-xl p-4 mt-4"
+                                    >
+                                        <p
+                                            class="font-bold text-orange-800 text-sm"
+                                        >
+                                            Bank Transfer Failed
+                                        </p>
+
+                                        <p
+                                            class="text-xs text-orange-700 mt-1 leading-relaxed"
+                                        >
+                                            Use this only when the external
+                                            bank transfer was not completed.
+                                            The reserved wallet funds will be
+                                            released back to the customer.
+                                        </p>
+
+                                        <form
+                                            method="POST"
+                                            class="mt-4 space-y-3"
+                                            onsubmit="return confirm('Mark this bank transfer as failed and release the reserved funds back to the customer wallet?')"
+                                        >
+                                            <?php csrf_field(); ?>
+
+                                            <input
+                                                type="hidden"
+                                                name="withdrawal_id"
+                                                value="<?= (int) $request['wallet_withdrawal_id'] ?>"
+                                            >
+
+                                            <input
+                                                type="hidden"
+                                                name="action"
+                                                value="fail"
+                                            >
+
+                                            <textarea
+                                                name="failure_reason"
+                                                maxlength="1000"
+                                                rows="3"
+                                                required
+                                                placeholder="Bank rejection, invalid account, transfer service unavailable, etc."
+                                                class="w-full px-3 py-2 border border-orange-200 rounded-lg text-sm resize-none"
+                                            ></textarea>
+
+                                            <input
+                                                type="password"
+                                                name="current_password"
+                                                maxlength="72"
+                                                autocomplete="current-password"
+                                                required
+                                                placeholder="Current admin password"
+                                                class="w-full px-3 py-2.5 border border-orange-200 rounded-lg text-sm"
+                                            >
+
+                                            <button
+                                                type="submit"
+                                                class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2.5 rounded-lg text-sm"
+                                            >
+                                                Mark Transfer Failed & Release Funds
+                                            </button>
+                                        </form>
+                                    </div>
+
                                 <?php elseif ($status === 'completed'): ?>
                                     <div
                                         class="bg-green-50 border border-green-100 rounded-xl p-5"
@@ -871,6 +1005,47 @@ $result_id = filter_input(
                                         <p class="text-xs text-green-700 mt-1 leading-relaxed">
                                             The reserved amount has been permanently debited and the transfer receipt is locked to this withdrawal record.
                                         </p>
+                                    </div>
+
+                                <?php elseif ($status === 'failed'): ?>
+                                    <div
+                                        class="bg-orange-50 border border-orange-200 rounded-xl p-5"
+                                    >
+                                        <p
+                                            class="font-bold text-orange-800 text-sm"
+                                        >
+                                            Bank Transfer Failed
+                                        </p>
+
+                                        <p
+                                            class="text-xs text-orange-700 mt-1 leading-relaxed"
+                                        >
+                                            The external bank transfer was
+                                            not completed. Reserved funds were
+                                            released back to the customer's
+                                            MangaVault Wallet.
+                                        </p>
+
+                                        <?php if (
+                                            !empty(
+                                                $request[
+                                                    'wallet_withdrawal_failure_reason'
+                                                ]
+                                            )
+                                        ): ?>
+                                            <p
+                                                class="text-xs text-orange-700 mt-3"
+                                            >
+                                                Reason:
+                                                <?= htmlspecialchars(
+                                                    (string) $request[
+                                                        'wallet_withdrawal_failure_reason'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+                                        <?php endif; ?>
                                     </div>
 
                                 <?php else: ?>

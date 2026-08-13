@@ -52,7 +52,9 @@ function reconcileApprovedCustomerReturn(
     $orderStatement = $pdo->prepare("
         SELECT
             order_discount_amount,
-            order_voucher_code
+            order_voucher_code,
+            order_payment_method,
+            order_wallet_transaction_id
         FROM orders
         WHERE order_id = ?
         AND order_user_id = ?
@@ -451,21 +453,177 @@ function reconcileApprovedCustomerReturn(
             );
     }
 
-    $walletRefund =
-        creditWalletRefund(
-            $pdo,
-            $userId,
-            'return',
-            $returnId,
-            $refundAmountSen,
-            'Refund for approved Return #' .
-                str_pad(
-                    (string) $returnId,
-                    4,
-                    '0',
-                    STR_PAD_LEFT
+    $walletRefundCreated = false;
+    $walletRefundCreditId = null;
+    $walletWithdrawalExpiresAt = null;
+
+    if (
+        (string) (
+            $order[
+                'order_payment_method'
+            ] ?? ''
+        ) === 'wallet'
+    ) {
+        $originalWalletTransactionId =
+            (int) (
+                $order[
+                    'order_wallet_transaction_id'
+                ] ?? 0
+            );
+
+        if ($originalWalletTransactionId < 1) {
+            throw new RuntimeException(
+                'Original wallet payment transaction is missing.'
+            );
+        }
+
+        $originalWalletPaymentStatement =
+            $pdo->prepare("
+                SELECT
+                    wallet_tx_amount
+                FROM wallet_transactions
+                WHERE wallet_tx_id = ?
+                AND wallet_tx_user_id = ?
+                AND wallet_tx_effect = 'debit'
+                AND wallet_tx_type =
+                    'order_payment'
+                AND wallet_tx_reference_type =
+                    'order'
+                AND wallet_tx_reference_id = ?
+                LIMIT 1
+                FOR UPDATE
+            ");
+
+        $originalWalletPaymentStatement
+            ->execute([
+                $originalWalletTransactionId,
+                $userId,
+                $orderId,
+            ]);
+
+        $originalWalletPaymentAmount =
+            $originalWalletPaymentStatement
+                ->fetchColumn();
+
+        if ($originalWalletPaymentAmount === false) {
+            throw new RuntimeException(
+                'Original wallet payment could not be verified.'
+            );
+        }
+
+        $originalWalletPaymentSen =
+            moneyDecimalToSen(
+                (string)
+                    $originalWalletPaymentAmount
+            );
+
+        $priorWalletReturnStatement =
+            $pdo->prepare("
+                SELECT
+                    COALESCE(
+                        SUM(
+                            wt.wallet_tx_amount
+                        ),
+                        0
+                    )
+                FROM wallet_transactions wt
+                INNER JOIN return_requests rr
+                    ON rr.return_id =
+                        wt.wallet_tx_reference_id
+                WHERE wt.wallet_tx_user_id = ?
+                AND wt.wallet_tx_effect =
+                    'credit'
+                AND wt.wallet_tx_type =
+                    'order_payment_refund'
+                AND wt.wallet_tx_reference_type =
+                    'return'
+                AND rr.return_order_id = ?
+                AND rr.return_id <> ?
+            ");
+
+        $priorWalletReturnStatement
+            ->execute([
+                $userId,
+                $orderId,
+                $returnId,
+            ]);
+
+        $priorWalletReturnSen =
+            moneyDecimalToSen(
+                (string) (
+                    $priorWalletReturnStatement
+                        ->fetchColumn()
+                    ?: '0.00'
                 )
-        );
+            );
+
+        if (
+            $priorWalletReturnSen +
+                $refundAmountSen >
+            $originalWalletPaymentSen
+        ) {
+            throw new RuntimeException(
+                'Wallet return refund would exceed the original wallet payment.'
+            );
+        }
+
+        if ($refundAmountSen > 0) {
+            $walletRefund =
+                creditWallet(
+                    $pdo,
+                    $userId,
+                    $refundAmountSen,
+                    'order_payment_refund',
+                    'return',
+                    $returnId,
+                    'order:wallet-return-refund:' .
+                        $returnId,
+                    'Wallet refund for approved Return #' .
+                        str_pad(
+                            (string) $returnId,
+                            4,
+                            '0',
+                            STR_PAD_LEFT
+                        )
+                );
+
+            $walletRefundCreated =
+                (bool) $walletRefund[
+                    'created'
+                ];
+        }
+    } else {
+        $walletRefund =
+            creditWalletRefund(
+                $pdo,
+                $userId,
+                'return',
+                $returnId,
+                $refundAmountSen,
+                'Refund for approved Return #' .
+                    str_pad(
+                        (string) $returnId,
+                        4,
+                        '0',
+                        STR_PAD_LEFT
+                    )
+            );
+
+        $walletRefundCreated =
+            (bool) $walletRefund[
+                'created'
+            ];
+
+        $walletRefundCreditId =
+            $walletRefund[
+                'refund_credit_id'
+            ];
+
+        $walletWithdrawalExpiresAt =
+            $walletRefund[
+                'withdrawal_expires_at'
+            ];
+    }
 
     return [
         'refund_amount_sen' =>
@@ -478,14 +636,10 @@ function reconcileApprovedCustomerReturn(
             $fullOrderReturned,
         'new_tier' => $newTier,
         'wallet_refund_credited' =>
-            (bool) $walletRefund['created'],
+            $walletRefundCreated,
         'wallet_refund_credit_id' =>
-            $walletRefund[
-                'refund_credit_id'
-            ],
+            $walletRefundCreditId,
         'wallet_withdrawal_expires_at' =>
-            $walletRefund[
-                'withdrawal_expires_at'
-            ],
+            $walletWithdrawalExpiresAt,
     ];
 }
