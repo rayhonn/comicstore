@@ -52,9 +52,13 @@ try {
         );
     }
 
+    $_SESSION[
+        'wallet_topup_success'
+    ] = true;
+
     redirect_to(
         app_path(
-            'customer/wallet.php?topup_success=1'
+            'customer/wallet.php'
         )
     );
 } catch (

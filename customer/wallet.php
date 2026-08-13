@@ -53,6 +53,19 @@ $withdrawable_refund_sen = min(
 $active_withdrawal =
     $withdrawal_summary['active_request'];
 
+$wallet_topup_success =
+    !empty(
+        $_SESSION[
+            'wallet_topup_success'
+        ]
+    );
+
+unset(
+    $_SESSION[
+        'wallet_topup_success'
+    ]
+);
+
 $type_labels = [
     'topup' => 'Wallet Top-Up',
     'return_refund' => 'Return Refund',
@@ -142,7 +155,7 @@ $type_labels = [
                     </div>
                 </div>
 
-                <?php if (isset($_GET['topup_success'])): ?>
+                <?php if ($wallet_topup_success): ?>
                     <div
                         class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5"
                     >
