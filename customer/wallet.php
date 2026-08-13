@@ -307,7 +307,7 @@ $type_labels = [
                                                 ucfirst($active_status),
                                                 ENT_QUOTES,
                                                 'UTF-8'
-                                            ) ?> · The requested amount remains reserved until completion or rejection.
+                                            ) ?> · The requested amount remains reserved until completion, rejection, or a failed transfer.
                                         </p>
                                     </div>
                                     <p class="font-black">

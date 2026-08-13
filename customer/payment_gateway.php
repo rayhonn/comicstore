@@ -1216,10 +1216,8 @@ if ($has_active_stripe_session) {
                         ): ?>
                             <form
                                 method="POST"
+                                id="walletPaymentForm"
                                 class="space-y-3"
-                                onsubmit="return confirm('Pay RM <?= moneyFormatSen(
-                                    $total_sen
-                                ) ?> using your MangaVault Wallet? Wallet payment is confirmed immediately and cannot be cancelled after completion.');"
                             >
                                 <?php csrf_field(); ?>
 
@@ -1699,6 +1697,37 @@ if ($has_active_stripe_session) {
             pendingNavigationUrl ||
             'orders.php';
     }
+
+    const walletPaymentForm =
+        document.getElementById(
+            'walletPaymentForm'
+        );
+
+    if (walletPaymentForm) {
+        walletPaymentForm.addEventListener(
+            'submit',
+            event => {
+                const confirmed =
+                    window.confirm(
+                        <?= json_encode(
+                            'Pay RM ' .
+                            moneyFormatSen(
+                                $total_sen
+                            ) .
+                            ' using your MangaVault Wallet? Wallet payment is confirmed immediately and cannot be cancelled after completion.'
+                        ) ?>
+                    );
+
+                if (!confirmed) {
+                    event.preventDefault();
+                    return;
+                }
+
+                allowNavigation = true;
+            }
+        );
+    }
+
 
     document
         .getElementById('stripePaymentForm')
