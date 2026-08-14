@@ -66,6 +66,19 @@ unset(
     ]
 );
 
+$wallet_withdrawal_submitted =
+    !empty(
+        $_SESSION[
+            'wallet_withdrawal_submitted'
+        ]
+    );
+
+unset(
+    $_SESSION[
+        'wallet_withdrawal_submitted'
+    ]
+);
+
 $type_labels = [
     'topup' => 'Wallet Top-Up',
     'return_refund' => 'Return Refund',
@@ -179,7 +192,7 @@ $type_labels = [
                     </div>
                 <?php endif; ?>
 
-                <?php if (isset($_GET['withdrawal_submitted'])): ?>
+                <?php if ($wallet_withdrawal_submitted): ?>
                     <div
                         class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5"
                     >

@@ -104,25 +104,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $amount_input
             );
 
-        $withdrawal_id =
-            createWalletWithdrawalRequest(
-                $pdo,
-                $user_id,
-                $amount_sen,
-                $bank_code_input,
-                $holder_input,
-                $_POST['account_number'] ?? null,
-                $_POST['current_password'] ?? null
-            );
+        createWalletWithdrawalRequest(
+            $pdo,
+            $user_id,
+            $amount_sen,
+            $bank_code_input,
+            $holder_input,
+            $_POST['account_number'] ?? null,
+            $_POST['current_password'] ?? null
+        );
+
+        $_SESSION[
+            'wallet_withdrawal_submitted'
+        ] = true;
 
         redirect_to(
             app_path(
-                'customer/wallet.php?' .
-                http_build_query([
-                    'withdrawal_submitted' => 1,
-                    'withdrawal_id' =>
-                        $withdrawal_id,
-                ])
+                'customer/wallet.php'
             )
         );
     } catch (WalletWithdrawalException $e) {
