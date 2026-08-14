@@ -533,8 +533,10 @@ function reconcileApprovedCustomerReturn(
                 WHERE wt.wallet_tx_user_id = ?
                 AND wt.wallet_tx_effect =
                     'credit'
-                AND wt.wallet_tx_type =
-                    'order_payment_refund'
+                AND wt.wallet_tx_type IN (
+                    'order_payment_refund',
+                    'return_refund'
+                )
                 AND wt.wallet_tx_reference_type =
                     'return'
                 AND rr.return_order_id = ?
@@ -567,63 +569,38 @@ function reconcileApprovedCustomerReturn(
             );
         }
 
-        if ($refundAmountSen > 0) {
-            $walletRefund =
-                creditWallet(
-                    $pdo,
-                    $userId,
-                    $refundAmountSen,
-                    'order_payment_refund',
-                    'return',
-                    $returnId,
-                    'order:wallet-return-refund:' .
-                        $returnId,
-                    'Wallet refund for approved Return #' .
-                        str_pad(
-                            (string) $returnId,
-                            4,
-                            '0',
-                            STR_PAD_LEFT
-                        )
-                );
-
-            $walletRefundCreated =
-                (bool) $walletRefund[
-                    'created'
-                ];
-        }
-    } else {
-        $walletRefund =
-            creditWalletRefund(
-                $pdo,
-                $userId,
-                'return',
-                $returnId,
-                $refundAmountSen,
-                'Refund for approved Return #' .
-                    str_pad(
-                        (string) $returnId,
-                        4,
-                        '0',
-                        STR_PAD_LEFT
-                    )
-            );
-
-        $walletRefundCreated =
-            (bool) $walletRefund[
-                'created'
-            ];
-
-        $walletRefundCreditId =
-            $walletRefund[
-                'refund_credit_id'
-            ];
-
-        $walletWithdrawalExpiresAt =
-            $walletRefund[
-                'withdrawal_expires_at'
-            ];
     }
+
+    $walletRefund =
+        creditWalletRefund(
+            $pdo,
+            $userId,
+            'return',
+            $returnId,
+            $refundAmountSen,
+            'Refund for approved Return #' .
+                str_pad(
+                    (string) $returnId,
+                    4,
+                    '0',
+                    STR_PAD_LEFT
+                )
+        );
+
+    $walletRefundCreated =
+        (bool) $walletRefund[
+            'created'
+        ];
+
+    $walletRefundCreditId =
+        $walletRefund[
+            'refund_credit_id'
+        ];
+
+    $walletWithdrawalExpiresAt =
+        $walletRefund[
+            'withdrawal_expires_at'
+        ];
 
     return [
         'refund_amount_sen' =>
