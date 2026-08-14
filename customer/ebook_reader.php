@@ -242,16 +242,37 @@ header('Referrer-Policy: no-referrer');
         #pdf-container {
             height: 100%;
             overflow: auto;
+            padding: 20px 20px 36px;
+            scroll-behavior: smooth;
+        }
+
+        #pdf-page-shell {
+            width: 100%;
             display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            padding: 20px;
+            flex-direction: column;
+            align-items: center;
         }
 
         #pdf-canvas {
+            display: block;
             background: white;
             box-shadow:
                 0 8px 30px rgba(0, 0, 0, 0.16);
+        }
+
+        #pdf-page-navigation {
+            max-width: 100%;
+            margin-top: 22px;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            box-shadow:
+                0 8px 24px rgba(15, 23, 42, 0.12);
         }
 
         #epub-viewer {
@@ -263,6 +284,19 @@ header('Referrer-Policy: no-referrer');
         @media (max-width: 640px) {
             #reader-area {
                 height: calc(100vh - 112px);
+            }
+
+            #pdf-container {
+                padding:
+                    12px
+                    12px
+                    24px;
+            }
+
+            #pdf-page-navigation {
+                margin-top: 16px;
+                padding: 12px;
+                gap: 10px;
             }
         }
     </style>
@@ -306,6 +340,7 @@ header('Referrer-Policy: no-referrer');
         </p>
     </div>
 
+    <?php if ($format === 'EPUB'): ?>
     <div
         class="flex items-center gap-2"
     >
@@ -332,6 +367,7 @@ header('Referrer-Policy: no-referrer');
             Next →
         </button>
     </div>
+    <?php endif; ?>
 
     <div class="w-full sm:w-auto sm:min-w-[150px]">
         <div
@@ -366,7 +402,42 @@ header('Referrer-Policy: no-referrer');
 <main id="reader-area">
     <?php if ($format === 'PDF'): ?>
         <div id="pdf-container">
-            <canvas id="pdf-canvas"></canvas>
+            <div id="pdf-page-shell">
+                <canvas id="pdf-canvas"></canvas>
+
+                <div id="pdf-page-navigation">
+                    <button
+                        type="button"
+                        id="previous-page"
+                        class="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-600 hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                        ← Previous
+                    </button>
+
+                    <div class="text-center">
+                        <div
+                            id="reading-position"
+                            class="text-sm font-bold text-gray-700"
+                        >
+                            Loading...
+                        </div>
+
+                        <p
+                            class="mt-0.5 text-[11px] text-gray-400"
+                        >
+                            Continue reading
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        id="next-page"
+                        class="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none"
+                    >
+                        Next →
+                    </button>
+                </div>
+            </div>
         </div>
     <?php else: ?>
         <div id="epub-viewer"></div>
@@ -547,7 +618,8 @@ let pendingRender = null;
 
 async function renderPdfPage(
     pageNumber,
-    saveAfterRender = true
+    saveAfterRender = true,
+    resetScroll = false
 ) {
     if (!pdfDocument) {
         return;
@@ -565,8 +637,8 @@ async function renderPdfPage(
         pendingRender = {
             pageNumber,
             saveAfterRender,
+            resetScroll,
         };
-
         return;
     }
 
@@ -640,6 +712,16 @@ async function renderPdfPage(
                 viewport.height
             )}px`;
 
+        const pageNavigation =
+            document.getElementById(
+                'pdf-page-navigation'
+            );
+
+        pageNavigation.style.width =
+            `${Math.floor(
+                viewport.width
+            )}px`;
+
         const transform =
             pixelRatio === 1
                 ? null
@@ -678,6 +760,18 @@ async function renderPdfPage(
             currentPage >=
             pdfDocument.numPages;
 
+        if (resetScroll) {
+            requestAnimationFrame(
+                () => {
+                    container.scrollTo({
+                        top: 0,
+                        left: 0,
+                        behavior: 'smooth',
+                    });
+                }
+            );
+        }
+
         if (saveAfterRender) {
             scheduleProgressSave({
                 page: currentPage,
@@ -695,7 +789,8 @@ async function renderPdfPage(
 
             renderPdfPage(
                 pending.pageNumber,
-                pending.saveAfterRender
+                pending.saveAfterRender,
+                pending.resetScroll
             );
         }
     }
@@ -706,7 +801,9 @@ previousButton.addEventListener(
     () => {
         if (currentPage > 1) {
             renderPdfPage(
-                currentPage - 1
+                currentPage - 1,
+                true,
+                true
             );
         }
     }
@@ -721,7 +818,9 @@ nextButton.addEventListener(
                 pdfDocument.numPages
         ) {
             renderPdfPage(
-                currentPage + 1
+                currentPage + 1,
+                true,
+                true
             );
         }
     }
