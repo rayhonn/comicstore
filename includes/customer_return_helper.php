@@ -288,59 +288,6 @@ function reconcileApprovedCustomerReturn(
             $netRefundBeforeSen
     );
 
-    $originalPointsStatement =
-        $pdo->prepare("
-            SELECT COALESCE(
-                SUM(log_points),
-                0
-            )
-            FROM points_log
-            WHERE log_user_id = ?
-            AND log_order_id = ?
-            AND log_type = 'earn'
-            AND log_points > 0
-        ");
-    $originalPointsStatement->execute([
-        $userId,
-        $orderId,
-    ]);
-
-    $originalPoints = max(
-        0,
-        (int) $originalPointsStatement
-            ->fetchColumn()
-    );
-
-    $eligibleOrderSpendSen = max(
-        0,
-        $subtotalSen - $discountSen
-    );
-
-    $pointsBefore = 0;
-    $pointsAfter = 0;
-
-    if (
-        $originalPoints > 0 &&
-        $eligibleOrderSpendSen > 0
-    ) {
-        $pointsBefore = intdiv(
-            $originalPoints *
-                $netRefundBeforeSen,
-            $eligibleOrderSpendSen
-        );
-
-        $pointsAfter = intdiv(
-            $originalPoints *
-                $netRefundAfterSen,
-            $eligibleOrderSpendSen
-        );
-    }
-
-    $pointsToReverse = max(
-        0,
-        $pointsAfter - $pointsBefore
-    );
-
     $currentLifetimeSpendingSen =
         moneyDecimalToSen(
             (string) (
@@ -388,44 +335,17 @@ function reconcileApprovedCustomerReturn(
 
     $updateUser = $pdo->prepare("
         UPDATE users
-        SET user_points = user_points - ?,
-            user_lifetime_spending = ?,
+        SET user_lifetime_spending = ?,
             user_tier = ?
         WHERE user_id = ?
     ");
     $updateUser->execute([
-        $pointsToReverse,
         moneySenToDecimal(
             $newLifetimeSpendingSen
         ),
         $newTier,
         $userId,
     ]);
-
-    if ($pointsToReverse > 0) {
-        $insertPointsLog = $pdo->prepare("
-            INSERT INTO points_log (
-                log_user_id,
-                log_points,
-                log_type,
-                log_description,
-                log_order_id
-            )
-            VALUES (?, ?, 'redeem', ?, ?)
-        ");
-        $insertPointsLog->execute([
-            $userId,
-            -$pointsToReverse,
-            'Reversed for Return #' .
-                str_pad(
-                    (string) $returnId,
-                    4,
-                    '0',
-                    STR_PAD_LEFT
-                ),
-            $orderId,
-        ]);
-    }
 
     $fullOrderReturned =
         count($approvedItemIds) ===
@@ -604,8 +524,7 @@ function reconcileApprovedCustomerReturn(
     return [
         'refund_amount_sen' =>
             $refundAmountSen,
-        'points_reversed' =>
-            $pointsToReverse,
+        'points_reversed' => 0,
         'voucher_restored' =>
             $voucherRestored,
         'full_order_returned' =>
