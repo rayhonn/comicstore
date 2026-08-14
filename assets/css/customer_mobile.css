@@ -1,0 +1,651 @@
+/*
+ * MangaVault shared customer mobile refinement.
+ *
+ * This stylesheet contains responsive-only presentation rules.
+ * Business logic remains inside the individual PHP pages.
+ */
+
+@media (max-width: 767px) {
+    html,
+    body {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    /*
+     * Shared page shells
+     */
+    body .max-w-7xl.mx-auto.px-6.py-8 {
+        padding:
+            1.25rem
+            1rem
+            2rem !important;
+    }
+
+    body .max-w-7xl.mx-auto.px-6 {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    body .max-w-7xl.mx-auto > p.text-sm.text-gray-400.mb-6 {
+        margin-bottom: 1rem !important;
+        padding-bottom: 0.2rem;
+        overflow-x: auto;
+        font-size: 0.75rem !important;
+        white-space: nowrap;
+        scrollbar-width: none;
+    }
+
+    body
+        .max-w-7xl.mx-auto
+        > p.text-sm.text-gray-400.mb-6::-webkit-scrollbar {
+        display: none;
+    }
+
+    body .p-12.text-center {
+        padding:
+            2rem
+            1.25rem !important;
+    }
+
+    /*
+     * Customer account pages.
+     *
+     * The desktop sidebar stays hidden below md.
+     * Account navigation is provided by the shared
+     * customer mobile drawer.
+     */
+    body:is(
+        [data-customer-page="dashboard"],
+        [data-customer-page="orders"],
+        [data-customer-page="wishlist"],
+        [data-customer-page="collection"],
+        [data-customer-page="returns"],
+        [data-customer-page="wallet"],
+        [data-customer-page="addresses"],
+        [data-customer-page="notifications"],
+        [data-customer-page="vouchers"],
+        [data-customer-page="my_reviews"],
+        [data-customer-page="profile"]
+    )
+        .max-w-7xl
+        > .flex.gap-8.items-start {
+        width: 100%;
+        gap: 1rem !important;
+    }
+
+    body:is(
+        [data-customer-page="dashboard"],
+        [data-customer-page="orders"],
+        [data-customer-page="wishlist"],
+        [data-customer-page="collection"],
+        [data-customer-page="returns"],
+        [data-customer-page="wallet"],
+        [data-customer-page="addresses"],
+        [data-customer-page="notifications"],
+        [data-customer-page="vouchers"],
+        [data-customer-page="my_reviews"],
+        [data-customer-page="profile"]
+    )
+        .max-w-7xl
+        > .flex.gap-8.items-start
+        > .flex-1 {
+        width: 100%;
+        min-width: 0;
+    }
+
+    /*
+     * Account page heading + action.
+     */
+    body:is(
+        [data-customer-page="returns"],
+        [data-customer-page="wallet"],
+        [data-customer-page="addresses"],
+        [data-customer-page="wishlist"],
+        [data-customer-page="collection"],
+        [data-customer-page="notifications"],
+        [data-customer-page="my_reviews"]
+    )
+        .max-w-7xl
+        > .flex
+        > .flex-1
+        > .flex.justify-between.items-center,
+    body:is(
+        [data-customer-page="returns"],
+        [data-customer-page="wallet"],
+        [data-customer-page="addresses"],
+        [data-customer-page="wishlist"],
+        [data-customer-page="collection"],
+        [data-customer-page="notifications"],
+        [data-customer-page="my_reviews"]
+    )
+        .max-w-7xl
+        > .flex
+        > .flex-1
+        > .flex.items-center.justify-between {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 0.75rem !important;
+    }
+
+    body:is(
+        [data-customer-page="returns"],
+        [data-customer-page="addresses"],
+        [data-customer-page="wishlist"],
+        [data-customer-page="collection"],
+        [data-customer-page="notifications"],
+        [data-customer-page="my_reviews"]
+    )
+        .max-w-7xl
+        > .flex
+        > .flex-1
+        > .flex.justify-between.items-center
+        > a,
+    body:is(
+        [data-customer-page="returns"],
+        [data-customer-page="addresses"],
+        [data-customer-page="wishlist"],
+        [data-customer-page="collection"],
+        [data-customer-page="notifications"],
+        [data-customer-page="my_reviews"]
+    )
+        .max-w-7xl
+        > .flex
+        > .flex-1
+        > .flex.justify-between.items-center
+        > button {
+        display: flex;
+        width: 100%;
+        min-height: 44px;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+
+    /*
+     * Dashboard
+     */
+    body[data-customer-page="dashboard"]
+        .max-w-7xl
+        > .flex
+        > .flex-1
+        > .bg-gradient-to-r {
+        padding: 1.25rem !important;
+    }
+
+    body[data-customer-page="dashboard"]
+        .max-w-7xl
+        > .flex
+        > .flex-1
+        > .grid.grid-cols-2 {
+        gap: 0.75rem !important;
+    }
+
+    body[data-customer-page="dashboard"]
+        .grid.grid-cols-1.lg\:grid-cols-2
+        > .bg-white {
+        padding: 1rem !important;
+    }
+
+    body[data-customer-page="dashboard"]
+        .space-y-3
+        > .flex.items-center.justify-between {
+        gap: 0.75rem;
+    }
+
+    /*
+     * Orders
+     */
+    body[data-customer-page="orders"]
+        .space-y-4
+        > .bg-white
+        > .border-b {
+        padding:
+            1rem
+            1rem !important;
+        align-items: flex-start !important;
+    }
+
+    body[data-customer-page="orders"]
+        .space-y-4
+        > .bg-white
+        > .border-b
+        > .flex.items-center.gap-4 {
+        min-width: 0;
+        flex-wrap: wrap;
+        gap: 0.5rem !important;
+    }
+
+    body[data-customer-page="orders"]
+        .space-y-4
+        > .bg-white
+        > .border-b
+        > p.font-bold.text-red-600 {
+        width: 100%;
+        text-align: right;
+    }
+
+    body[data-customer-page="orders"]
+        .space-y-4
+        > .bg-white
+        > .px-6.py-4 {
+        padding:
+            0.75rem
+            1rem !important;
+    }
+
+    body[data-customer-page="orders"]
+        .space-y-4
+        > .bg-white
+        > .px-6.py-4
+        > .flex.items-center.gap-4 {
+        align-items: flex-start !important;
+        gap: 0.75rem !important;
+    }
+
+    body[data-customer-page="orders"]
+        .space-y-4
+        .truncate {
+        overflow: visible !important;
+        white-space: normal !important;
+        text-overflow: clip !important;
+    }
+
+    body[data-customer-page="orders"]
+        .space-y-4
+        > .bg-white
+        > .px-6.py-3.border-t {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 0.75rem !important;
+        padding:
+            0.875rem
+            1rem !important;
+    }
+
+    body[data-customer-page="orders"]
+        .space-y-4
+        > .bg-white
+        > .px-6.py-3.border-t
+        > .flex {
+        flex-wrap: wrap;
+        gap: 0.75rem !important;
+    }
+
+    body[data-customer-page="orders"]
+        .space-y-4
+        > .bg-white
+        > .px-6.py-3.border-t
+        > p {
+        width: 100%;
+    }
+
+    body[data-customer-page="orders"]
+        .bg-gray-50.border-t.border-gray-100 {
+        padding:
+            1rem
+            0.75rem !important;
+    }
+
+    body[data-customer-page="orders"]
+        .bg-gray-50.border-t.border-gray-100
+        .flex.flex-col.items-center
+        p {
+        font-size: 0.625rem !important;
+    }
+
+    /*
+     * Wallet
+     */
+    body[data-customer-page="wallet"]
+        .flex-1
+        > .flex.items-center.justify-between
+        > .flex {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+
+    body[data-customer-page="wallet"]
+        .flex-1
+        > .flex.items-center.justify-between
+        > .flex
+        > a {
+        width: 100%;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+
+    body[data-customer-page="wallet"]
+        .text-4xl.font-black {
+        font-size: 2rem !important;
+    }
+
+    body[data-customer-page="wallet"]
+        .bg-white.rounded-2xl.shadow-sm.p-6 {
+        padding: 1rem !important;
+    }
+
+    /*
+     * Returns
+     */
+    body[data-customer-page="returns"]
+        .space-y-4
+        > .bg-white
+        > .px-6 {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    body[data-customer-page="returns"]
+        .space-y-4
+        > .bg-white
+        > .px-6.py-4.flex.items-center.gap-4 {
+        align-items: flex-start !important;
+        gap: 0.75rem !important;
+    }
+
+    body[data-customer-page="returns"]
+        .space-y-4
+        .flex-1
+        > p {
+        overflow-wrap: anywhere;
+    }
+
+    /*
+     * Addresses
+     */
+    body[data-customer-page="addresses"]
+        #addressModal,
+    body[data-customer-page="addresses"]
+        #deleteModal {
+        padding:
+            0.75rem
+            1rem !important;
+    }
+
+    body[data-customer-page="addresses"]
+        #addressModal
+        > div
+        > .p-6 {
+        padding: 1rem !important;
+    }
+
+    body[data-customer-page="addresses"]
+        #addressModal
+        form.p-6 {
+        padding: 1rem !important;
+    }
+
+    body[data-customer-page="addresses"]
+        .grid.grid-cols-1.md\:grid-cols-2 {
+        gap: 0.75rem !important;
+    }
+
+    /*
+     * Vouchers & Points
+     */
+    body[data-customer-page="vouchers"]
+        .flex.gap-1.bg-white.rounded-2xl.shadow-sm.p-1.w-fit {
+        width: 100% !important;
+        overflow-x: auto;
+    }
+
+    body[data-customer-page="vouchers"]
+        .flex.gap-1.bg-white.rounded-2xl.shadow-sm.p-1.w-fit
+        > button {
+        flex: 1 0 auto;
+        min-height: 42px;
+        white-space: nowrap;
+    }
+
+    body[data-customer-page="vouchers"]
+        .voucher-card {
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+    }
+
+    body[data-customer-page="vouchers"]
+        .voucher-card::before,
+    body[data-customer-page="vouchers"]
+        .voucher-card::after {
+        display: none;
+    }
+
+    body[data-customer-page="vouchers"]
+        .voucher-card
+        > .flex
+        > .flex-1.flex.items-stretch {
+        min-width: 0;
+        flex-direction: column !important;
+    }
+
+    body[data-customer-page="vouchers"]
+        .voucher-card
+        .voucher-divider {
+        width: calc(100% - 2rem) !important;
+        height: 0 !important;
+        margin:
+            0
+            1rem !important;
+        border-left: 0 !important;
+        border-top:
+            2px
+            dashed
+            #e5e7eb !important;
+    }
+
+    body[data-customer-page="vouchers"]
+        .voucher-card
+        .w-40 {
+        width: 100% !important;
+    }
+
+    body[data-customer-page="vouchers"]
+        .voucher-card
+        .p-5 {
+        padding: 1rem !important;
+    }
+
+    /*
+     * Checkout
+     */
+    body[data-customer-page="checkout"]
+        .flex-1.w-full.space-y-6
+        > :not([hidden])
+        ~ :not([hidden]) {
+        margin-top: 1rem !important;
+    }
+
+    body[data-customer-page="checkout"]
+        .bg-white.rounded-2xl.shadow-sm.p-6 {
+        padding: 1rem !important;
+    }
+
+    body[data-customer-page="checkout"]
+        .sticky.top-24 {
+        position: static !important;
+        top: auto !important;
+    }
+
+    body[data-customer-page="checkout"]
+        #speedSection
+        .grid.grid-cols-2 {
+        gap: 0.75rem !important;
+    }
+
+    body[data-customer-page="checkout"]
+        .courier-option {
+        gap: 0.75rem;
+        padding: 0.875rem !important;
+    }
+
+    body[data-customer-page="checkout"]
+        .courier-option
+        > div {
+        min-width: 0;
+    }
+
+    body[data-customer-page="checkout"]
+        .courier-option
+        p {
+        overflow-wrap: anywhere;
+    }
+
+    /*
+     * Catalog
+     */
+    body[data-customer-page="home"]
+        .catalog-hero
+        > .relative.mx-auto.grid {
+        gap: 1.75rem !important;
+        padding:
+            2.5rem
+            1rem !important;
+    }
+
+    body[data-customer-page="home"]
+        #catalog-title {
+        font-size: 2rem !important;
+        line-height: 1 !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-hero-ring {
+        display: none;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-summary-grid {
+        gap: 0.5rem !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-stat-card {
+        padding: 0.75rem !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-filter-panel {
+        border-radius: 1.25rem !important;
+        padding: 1rem !important;
+    }
+
+    body[data-customer-page="home"]
+        #catalogProductGrid {
+        gap: 0.75rem !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-card-body {
+        min-height: 190px !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-product-card:hover {
+        transform: none;
+    }
+
+    body[data-customer-page="home"]
+        footer {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+    }
+
+    /*
+     * Product detail
+     */
+    body[data-customer-page="product_detail"]
+        .product-detail-cover-column {
+        padding: 1rem !important;
+    }
+
+    body[data-customer-page="product_detail"]
+        .product-detail-cover-frame {
+        width: 100% !important;
+        max-width: 280px !important;
+        height: 360px !important;
+    }
+
+    body[data-customer-page="product_detail"]
+        .product-detail-main-row
+        > .flex-1.p-8 {
+        padding: 1.25rem !important;
+    }
+
+    body[data-customer-page="product_detail"]
+        .product-detail-main-row
+        h1 {
+        font-size: 1.25rem !important;
+        line-height: 1.3 !important;
+    }
+
+    body[data-customer-page="product_detail"]
+        .product-actions-row {
+        align-items: flex-start;
+    }
+
+    body[data-customer-page="product_detail"]
+        .product-actions-row
+        > form:not(#productWishlistForm) {
+        min-width: 0;
+        flex-direction: column !important;
+    }
+
+    body[data-customer-page="product_detail"]
+        .product-actions-row
+        .product-quantity-stepper {
+        width: 100% !important;
+    }
+
+    body[data-customer-page="product_detail"]
+        .product-actions-row
+        > form:not(#productWishlistForm)
+        > button[type="submit"] {
+        width: 100%;
+        min-height: 48px;
+    }
+
+    body[data-customer-page="product_detail"]
+        .related-volumes-section,
+    body[data-customer-page="product_detail"]
+        #customer-reviews {
+        padding: 1rem !important;
+    }
+
+    /*
+     * General modal behaviour
+     */
+    body [class*="fixed"][class*="inset-0"] {
+        overscroll-behavior: contain;
+    }
+}
+
+@media (max-width: 359px) {
+    body[data-customer-page="checkout"]
+        #speedSection
+        .grid.grid-cols-2 {
+        grid-template-columns: 1fr !important;
+    }
+
+    body[data-customer-page="product_detail"]
+        .product-detail-cover-frame {
+        height: 320px !important;
+    }
+
+    body[data-customer-page="product_detail"]
+        .grid.grid-cols-2 {
+        grid-template-columns: 1fr !important;
+    }
+
+    body[data-customer-page="dashboard"]
+        .max-w-7xl
+        > .flex
+        > .flex-1
+        > .grid.grid-cols-2 {
+        grid-template-columns: 1fr !important;
+    }
+}

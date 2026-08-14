@@ -278,6 +278,14 @@ $nav_mobile_account_links = [
 ?>
 
 <style>
+    @import url("<?= htmlspecialchars(
+        app_path(
+            'assets/css/customer_mobile.css?v=1'
+        ),
+        ENT_QUOTES,
+        'UTF-8'
+    ) ?>");
+
     @keyframes bellRing {
         0%,
         100% {
@@ -310,7 +318,7 @@ $nav_mobile_account_links = [
 
 <nav class="sticky top-0 z-50 bg-white shadow-sm">
     <div
-        class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4"
+        class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 sm:py-4"
     >
         <a
             href="<?= htmlspecialchars(
@@ -318,7 +326,7 @@ $nav_mobile_account_links = [
                 ENT_QUOTES,
                 'UTF-8'
             ) ?>"
-            class="text-xl font-black tracking-wide text-gray-900"
+            class="text-lg font-black tracking-wide text-gray-900 sm:text-xl"
         >
             MANGA<span class="text-red-600">VAULT</span>
         </a>
@@ -382,7 +390,7 @@ $nav_mobile_account_links = [
             </a>
         </div>
 
-        <div class="flex items-center gap-4 text-sm">
+        <div class="flex items-center gap-3 text-sm sm:gap-4">
             <?php if (isset($_SESSION['user_id'])): ?>
                 <a
                     href="<?= htmlspecialchars(
@@ -502,7 +510,7 @@ $nav_mobile_account_links = [
             <button
                 id="navMenuBtn"
                 type="button"
-                class="flex flex-col gap-1.5 p-1 focus:outline-none lg:hidden"
+                class="flex h-10 w-10 flex-col items-center justify-center gap-1.5 rounded-xl p-2 focus:outline-none focus:ring-2 focus:ring-red-100 lg:hidden"
                 aria-label="Open navigation menu"
                 aria-expanded="false"
                 aria-controls="navMobileMenu"
@@ -522,10 +530,37 @@ $nav_mobile_account_links = [
 
     <div
         id="navMobileMenu"
-        class="overflow-hidden border-t border-gray-100 bg-white transition-[max-height] duration-300 lg:hidden"
-        style="max-height: 0;"
+        class="fixed right-0 top-0 z-[60] h-[100dvh] w-[min(88vw,380px)] translate-x-full overflow-y-auto bg-white shadow-2xl transition-transform duration-300 ease-out lg:hidden"
+        aria-hidden="true"
     >
-        <div class="space-y-2 px-6 py-4">
+        <div
+            class="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 bg-white/95 px-5 py-4 backdrop-blur"
+        >
+            <div>
+                <p
+                    class="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400"
+                >
+                    MangaVault
+                </p>
+
+                <p
+                    class="mt-0.5 text-base font-black text-gray-800"
+                >
+                    Navigation
+                </p>
+            </div>
+
+            <button
+                type="button"
+                id="navMenuCloseBtn"
+                class="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-50 text-xl text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                aria-label="Close navigation menu"
+            >
+                ×
+            </button>
+        </div>
+
+        <div class="space-y-2 px-5 py-4 pb-8">
             <a
                 href="<?= htmlspecialchars(
                     $nav_home_url,
@@ -672,27 +707,95 @@ $nav_mobile_account_links = [
 
     <div
         id="navOverlay"
-        class="fixed inset-0 z-40 hidden bg-black/30 lg:hidden"
+        class="fixed inset-0 z-[55] hidden bg-black/40 backdrop-blur-[1px] lg:hidden"
     ></div>
 </nav>
 
 <?php include __DIR__ . '/chatbot_widget.php'; ?>
 
 <script>
+    const customerPageFile =
+        window.location.pathname
+            .split('/')
+            .pop() || 'index.php';
+
+    document.body.dataset.customerPage =
+        customerPageFile.replace(
+            /\.php$/i,
+            ''
+        );
+
     const navMenuButton =
         document.getElementById('navMenuBtn');
     const navMobileMenu =
         document.getElementById('navMobileMenu');
     const navOverlay =
-        document.getElementById('navOverlay');
+        document.getElementById(
+            'navOverlay'
+        );
 
-    function closeNavMenu() {
-        if (!navMobileMenu || !navOverlay) {
+    const navMenuCloseButton =
+        document.getElementById(
+            'navMenuCloseBtn'
+        );
+
+    function openNavMenu() {
+        if (
+            !navMobileMenu ||
+            !navOverlay
+        ) {
             return;
         }
 
-        navMobileMenu.style.maxHeight = '0px';
-        navOverlay.classList.add('hidden');
+        navMobileMenu.classList.remove(
+            'translate-x-full'
+        );
+
+        navMobileMenu.setAttribute(
+            'aria-hidden',
+            'false'
+        );
+
+        navOverlay.classList.remove(
+            'hidden'
+        );
+
+        document.body.classList.add(
+            'overflow-hidden'
+        );
+
+        if (navMenuButton) {
+            navMenuButton.setAttribute(
+                'aria-expanded',
+                'true'
+            );
+        }
+    }
+
+    function closeNavMenu() {
+        if (
+            !navMobileMenu ||
+            !navOverlay
+        ) {
+            return;
+        }
+
+        navMobileMenu.classList.add(
+            'translate-x-full'
+        );
+
+        navMobileMenu.setAttribute(
+            'aria-hidden',
+            'true'
+        );
+
+        navOverlay.classList.add(
+            'hidden'
+        );
+
+        document.body.classList.remove(
+            'overflow-hidden'
+        );
 
         if (navMenuButton) {
             navMenuButton.setAttribute(
@@ -711,28 +814,40 @@ $nav_mobile_account_links = [
             'click',
             () => {
                 const isOpen =
-                    navMobileMenu.style.maxHeight !==
-                    '0px' &&
-                    navMobileMenu.style.maxHeight !== '';
+                    !navMobileMenu.classList
+                        .contains(
+                            'translate-x-full'
+                        );
 
                 if (isOpen) {
                     closeNavMenu();
-                    return;
+                } else {
+                    openNavMenu();
                 }
-
-                navMobileMenu.style.maxHeight =
-                    navMobileMenu.scrollHeight + 'px';
-                navOverlay.classList.remove('hidden');
-                navMenuButton.setAttribute(
-                    'aria-expanded',
-                    'true'
-                );
             }
         );
 
         navOverlay.addEventListener(
             'click',
             closeNavMenu
+        );
+
+        navMenuCloseButton
+            ?.addEventListener(
+                'click',
+                closeNavMenu
+            );
+
+        document.addEventListener(
+            'keydown',
+            event => {
+                if (
+                    event.key ===
+                    'Escape'
+                ) {
+                    closeNavMenu();
+                }
+            }
         );
     }
 
