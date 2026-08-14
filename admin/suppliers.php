@@ -414,7 +414,24 @@ $suppliers = $pdo->query("
                         </td>
                         <td class="px-5 py-4 text-center">
                             <div class="flex flex-col items-center gap-1">
-                                <a href="supplier_performance.php?id=<?= (int) $s['supplier_id'] ?>" class="text-xs text-purple-600 hover:underline font-semibold">History</a>
+                                <div class="flex items-center gap-2">
+                                    <a
+                                        href="supplier_performance.php?id=<?= (int) $s['supplier_id'] ?>"
+                                        class="text-xs text-purple-600 hover:underline font-semibold"
+                                    >
+                                        History
+                                    </a>
+
+                                    <span class="text-gray-300">|</span>
+
+                                    <a
+                                        href="supplier_products.php?id=<?= (int) $s['supplier_id'] ?>"
+                                        class="text-xs text-red-600 hover:underline font-semibold"
+                                    >
+                                        Products
+                                    </a>
+                                </div>
+
                                 <div class="flex items-center gap-2">
                                     <button onclick='openEditModal(<?= json_encode($s) ?>)'
                                             class="text-xs text-blue-600 hover:underline font-semibold">Edit</button>
