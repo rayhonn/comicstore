@@ -257,15 +257,36 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     function proceedCheckout() {
-        const selected = document.getElementById('selectedItemsInput').value;
+        recalculate();
+
+        const selected =
+            document.getElementById(
+                'selectedItemsInput'
+            ).value.trim();
+
         if (!selected) {
-            document.getElementById('noItemModal').classList.remove('hidden');
+            document.getElementById(
+                'noItemModal'
+            ).classList.remove(
+                'hidden'
+            );
+
             return;
         }
-        document.getElementById('checkoutForm').submit();
+
+        document.getElementById(
+            'checkoutForm'
+        ).submit();
     }
 
     recalculate();
+
+    window.addEventListener(
+        'pageshow',
+        () => {
+            recalculate();
+        }
+    );
     </script>
 
 </body>

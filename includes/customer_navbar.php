@@ -19,6 +19,16 @@ $nav_dashboard_url = app_path('customer/dashboard.php');
 $nav_login_url = app_path('login.php');
 $nav_register_url = app_path('register.php');
 
+$nav_session_activity_url =
+    app_path(
+        'customer/session_activity.php'
+    );
+
+$nav_session_expired_url =
+    app_path(
+        'session_expired.php?idle=1'
+    );
+
 // Auto-check one expired pending confirmation order.
 if (isset($_SESSION['user_id'])) {
     $user_id = (int) $_SESSION['user_id'];
@@ -663,4 +673,131 @@ if (isset($_SESSION['user_id'])) {
             }
         );
     });
+
+    <?php if (isset($_SESSION['user_id'])): ?>
+
+        const sessionIdleTimeoutMs =
+            <?= APP_SESSION_IDLE_TIMEOUT_SECONDS * 1000 ?>;
+
+        const sessionHeartbeatIntervalMs =
+            5 * 60 * 1000;
+
+        const sessionActivityUrl =
+            <?= json_encode(
+                $nav_session_activity_url
+            ) ?>;
+
+        const sessionExpiredUrl =
+            <?= json_encode(
+                $nav_session_expired_url
+            ) ?>;
+
+        let sessionIdleTimer = null;
+
+        let lastSessionHeartbeatAt =
+            Date.now();
+
+        let lastHandledActivityAt = 0;
+
+        function scheduleSessionExpiry() {
+            if (sessionIdleTimer) {
+                window.clearTimeout(
+                    sessionIdleTimer
+                );
+            }
+
+            sessionIdleTimer =
+                window.setTimeout(
+                    () => {
+                        window.location.href =
+                            sessionExpiredUrl;
+                    },
+                    sessionIdleTimeoutMs
+                );
+        }
+
+        function sendSessionHeartbeat() {
+            fetch(
+                sessionActivityUrl,
+                {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    headers: {
+                        'X-Requested-With':
+                            'XMLHttpRequest',
+                        'Accept':
+                            'application/json',
+                    },
+                }
+            )
+            .then(response => {
+                if (
+                    response.status === 401
+                ) {
+                    window.location.href =
+                        sessionExpiredUrl;
+                }
+            })
+            .catch(() => {
+                /*
+                 * A temporary network failure should
+                 * not expose an application error.
+                 * The server-side timeout remains
+                 * authoritative.
+                 */
+            });
+        }
+
+        function registerSessionActivity() {
+            const now = Date.now();
+
+            if (
+                now -
+                    lastHandledActivityAt <
+                1000
+            ) {
+                return;
+            }
+
+            lastHandledActivityAt = now;
+
+            scheduleSessionExpiry();
+
+            if (
+                now -
+                    lastSessionHeartbeatAt >=
+                sessionHeartbeatIntervalMs
+            ) {
+                lastSessionHeartbeatAt =
+                    now;
+
+                sendSessionHeartbeat();
+            }
+        }
+
+        [
+            'mousemove',
+            'mousedown',
+            'keydown',
+            'touchstart',
+        ].forEach(eventName => {
+            window.addEventListener(
+                eventName,
+                registerSessionActivity
+            );
+        });
+
+        window.addEventListener(
+            'scroll',
+            registerSessionActivity,
+            {
+                passive: true,
+            }
+        );
+
+        scheduleSessionExpiry();
+
+    <?php endif; ?>
+    
 </script>

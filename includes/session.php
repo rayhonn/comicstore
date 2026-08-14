@@ -2,7 +2,7 @@
 
 require_once __DIR__ . '/logger.php';
 
-const APP_SESSION_IDLE_TIMEOUT_SECONDS = 1800;
+const APP_SESSION_IDLE_TIMEOUT_SECONDS = 900;
 
 /**
  * Determine whether the current request is using HTTPS.
@@ -176,6 +176,18 @@ function app_enforce_session_idle_timeout(): void
             session_destroy();
             return;
         }
+
+        $_SESSION[
+            'auth_session_expired'
+        ] = true;
+
+        $_SESSION[
+            'auth_expired_role'
+        ] = $role;
+
+        $_SESSION[
+            'auth_expired_at'
+        ] = $now;
 
         app_log(
             'INFO',

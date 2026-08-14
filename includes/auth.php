@@ -50,6 +50,27 @@ function redirect_to(string $url): void
 }
 
 /**
+ * Redirect an account whose authenticated session
+ * expired because of inactivity.
+ */
+function redirect_if_session_expired(): void
+{
+    if (
+        !empty(
+            $_SESSION[
+                'auth_session_expired'
+            ]
+        )
+    ) {
+        redirect_to(
+            app_path(
+                'session_expired.php'
+            )
+        );
+    }
+}
+
+/**
  * Validate a redirect destination.
  *
  * Only approved internal PHP pages are accepted.
@@ -276,6 +297,8 @@ function safe_redirect_target(string $target, string $default): string
  */
 function require_customer(): void
 {
+    redirect_if_session_expired();
+
     if (
         empty($_SESSION['user_id']) ||
         ($_SESSION['role'] ?? '') !== 'customer'
@@ -363,6 +386,8 @@ function require_customer(): void
  */
 function require_admin(): void
 {
+    redirect_if_session_expired();
+
     if (
         empty($_SESSION['user_id']) ||
         ($_SESSION['role'] ?? '') !== 'admin'
@@ -379,6 +404,8 @@ function require_admin(): void
  */
 function require_staff(): void
 {
+    redirect_if_session_expired();
+
     if (
         empty($_SESSION['user_id']) ||
         ($_SESSION['role'] ?? '') !== 'staff'
@@ -392,6 +419,8 @@ function require_staff(): void
  */
 function require_admin_or_staff(): void
 {
+    redirect_if_session_expired();
+
     $role = $_SESSION['role'] ?? '';
 
     if (
@@ -420,6 +449,8 @@ function require_senior_admin(): void
  */
 function require_supplier(): void
 {
+    redirect_if_session_expired();
+
     if (
         empty($_SESSION['supplier_id']) ||
         ($_SESSION['role'] ?? '') !== 'supplier'
@@ -443,7 +474,10 @@ function regenerate_session(): void
         $_SESSION['supplier_name'],
         $_SESSION['admin_level'],
         $_SESSION['role'],
-        $_SESSION['auth_last_activity_at']
+        $_SESSION['auth_last_activity_at'],
+        $_SESSION['auth_session_expired'],
+        $_SESSION['auth_expired_role'],
+        $_SESSION['auth_expired_at']
     );
 }
 
