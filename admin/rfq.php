@@ -147,34 +147,126 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_rfq'])) {
                 }
             }
 
-            $product_placeholders = implode(',', array_fill(0, count($items_data), '?'));
+            $supplier_placeholders = implode(
+                ',',
+                array_fill(0, count($clean_supplier_ids), '?')
+            );
+
+            $valid_suppliers = $pdo->prepare("
+                SELECT
+                    supplier_id,
+                    supplier_name
+                FROM suppliers
+                WHERE supplier_id IN ($supplier_placeholders)
+                AND supplier_status = 'active'
+                ORDER BY supplier_id
+                FOR UPDATE
+            ");
+            $valid_suppliers->execute($clean_supplier_ids);
+
+            $locked_suppliers = $valid_suppliers->fetchAll(PDO::FETCH_ASSOC);
+
+            if (count($locked_suppliers) !== count($clean_supplier_ids)) {
+                throw new RuntimeException(
+                    'One or more selected suppliers are no longer active.'
+                );
+            }
+
+            $supplier_names = [];
+
+            foreach ($locked_suppliers as $supplier) {
+                $supplier_names[(int) $supplier['supplier_id']] =
+                    $supplier['supplier_name'];
+            }
+
+            $product_ids_for_rfq = array_column(
+                $items_data,
+                'product_id'
+            );
+
+            $product_placeholders = implode(
+                ',',
+                array_fill(0, count($product_ids_for_rfq), '?')
+            );
+
             $valid_products = $pdo->prepare("
                 SELECT product_id
                 FROM products
                 WHERE product_id IN ($product_placeholders)
                 AND product_type = 'physical'
                 AND product_is_available = 1
+                ORDER BY product_id
                 FOR UPDATE
             ");
-            $valid_products->execute(array_column($items_data, 'product_id'));
-            if (count($valid_products->fetchAll(PDO::FETCH_COLUMN)) !== count($items_data)) {
+            $valid_products->execute($product_ids_for_rfq);
+
+            if (
+                count($valid_products->fetchAll(PDO::FETCH_COLUMN)) !==
+                count($items_data)
+            ) {
                 throw new RuntimeException(
                     'One or more selected products are no longer available.'
                 );
             }
 
-            $supplier_placeholders = implode(',', array_fill(0, count($clean_supplier_ids), '?'));
-            $valid_suppliers = $pdo->prepare("
-                SELECT supplier_id
-                FROM suppliers
-                WHERE supplier_id IN ($supplier_placeholders)
-                AND supplier_status = 'active'
+            $mapping_stmt = $pdo->prepare("
+                SELECT
+                    supplier_product_supplier_id,
+                    supplier_product_product_id
+                FROM supplier_products
+                WHERE supplier_product_supplier_id IN ($supplier_placeholders)
+                AND supplier_product_product_id IN ($product_placeholders)
+                AND supplier_product_status = 'active'
+                ORDER BY
+                    supplier_product_supplier_id,
+                    supplier_product_product_id
                 FOR UPDATE
             ");
-            $valid_suppliers->execute($clean_supplier_ids);
-            if (count($valid_suppliers->fetchAll(PDO::FETCH_COLUMN)) !== count($clean_supplier_ids)) {
+
+            $mapping_stmt->execute(
+                array_merge(
+                    $clean_supplier_ids,
+                    $product_ids_for_rfq
+                )
+            );
+
+            $mapping_rows = $mapping_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $supplier_product_coverage = [];
+
+            foreach ($mapping_rows as $mapping) {
+                $mapping_supplier_id =
+                    (int) $mapping['supplier_product_supplier_id'];
+
+                $mapping_product_id =
+                    (int) $mapping['supplier_product_product_id'];
+
+                $supplier_product_coverage[$mapping_supplier_id][$mapping_product_id] =
+                    true;
+            }
+
+            $ineligible_supplier_names = [];
+
+            foreach ($clean_supplier_ids as $supplier_id) {
+                foreach ($product_ids_for_rfq as $product_id) {
+                    if (
+                        !isset(
+                            $supplier_product_coverage[$supplier_id][$product_id]
+                        )
+                    ) {
+                        $ineligible_supplier_names[] =
+                            $supplier_names[$supplier_id] ?? 'Unknown supplier';
+
+                        break;
+                    }
+                }
+            }
+
+            if ($ineligible_supplier_names) {
                 throw new RuntimeException(
-                    'One or more selected suppliers are no longer active.'
+                    'The following supplier(s) do not supply every selected product: ' .
+                    implode(', ', $ineligible_supplier_names) .
+                    '.'
                 );
             }
 
@@ -288,6 +380,34 @@ $suppliers = $pdo->query("
     GROUP BY s.supplier_id
     ORDER BY s.supplier_name
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+$supplier_product_rows = $pdo->query("
+    SELECT
+        sp.supplier_product_supplier_id,
+        sp.supplier_product_product_id
+    FROM supplier_products sp
+    INNER JOIN suppliers s
+        ON s.supplier_id = sp.supplier_product_supplier_id
+    INNER JOIN products p
+        ON p.product_id = sp.supplier_product_product_id
+    WHERE sp.supplier_product_status = 'active'
+    AND s.supplier_status = 'active'
+    AND p.product_type = 'physical'
+    AND p.product_is_available = 1
+    ORDER BY
+        sp.supplier_product_supplier_id,
+        sp.supplier_product_product_id
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$supplier_product_map = [];
+
+foreach ($supplier_product_rows as $mapping) {
+    $mapping_supplier_id =
+        (int) $mapping['supplier_product_supplier_id'];
+
+    $supplier_product_map[$mapping_supplier_id][] =
+        (int) $mapping['supplier_product_product_id'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -401,23 +521,77 @@ $suppliers = $pdo->query("
                 </div>
 
                 <div class="mb-5">
-                    <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Send To Suppliers *</label>
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            Send To Suppliers *
+                        </label>
+
+                        <?php if (count($suppliers) > 0): ?>
+                        <span id="eligibleSupplierCount" class="text-xs text-gray-400 font-semibold">
+                            Select products first
+                        </span>
+                        <?php endif; ?>
+                    </div>
+
                     <?php if (count($suppliers) === 0): ?>
-                    <p class="text-sm text-gray-400">No active suppliers. <a href="suppliers.php" class="text-red-600 hover:underline">Add a supplier first.</a></p>
+                    <p class="text-sm text-gray-400">
+                        No active suppliers.
+                        <a href="suppliers.php" class="text-red-600 hover:underline">
+                            Add a supplier first.
+                        </a>
+                    </p>
                     <?php else: ?>
-                    <div class="grid grid-cols-2 gap-2">
+
+                    <div
+                        id="supplierSelectionHint"
+                        class="bg-blue-50 border border-blue-100 text-blue-700 text-xs px-4 py-3 rounded-xl"
+                    >
+                        Select one or more products to see suppliers that can supply every selected item.
+                    </div>
+
+                    <div
+                        id="noEligibleSuppliers"
+                        class="hidden bg-yellow-50 border border-yellow-200 text-yellow-700 text-xs px-4 py-3 rounded-xl"
+                    >
+                        No active supplier is mapped to every selected product.
+                        Update the supplier product mapping before creating this RFQ.
+                    </div>
+
+                    <div
+                        id="supplierGrid"
+                        class="hidden grid grid-cols-1 sm:grid-cols-2 gap-2"
+                    >
                         <?php foreach ($suppliers as $s): ?>
-                        <label class="flex items-center gap-2 p-3 border-2 border-gray-100 rounded-xl cursor-pointer hover:border-red-300 transition-colors has-[:checked]:border-red-500 has-[:checked]:bg-red-50">
-                            <input type="checkbox" name="supplier_ids[]" value="<?= (int) $s['supplier_id'] ?>" class="accent-red-600">
+                        <label
+                            class="supplier-card hidden flex items-center gap-3 p-3 border-2 border-gray-100 rounded-xl cursor-pointer hover:border-red-300 transition-colors has-[:checked]:border-red-500 has-[:checked]:bg-red-50"
+                            data-supplier-id="<?= (int) $s['supplier_id'] ?>"
+                        >
+                            <input
+                                type="checkbox"
+                                name="supplier_ids[]"
+                                value="<?= (int) $s['supplier_id'] ?>"
+                                class="supplier-checkbox accent-red-600"
+                            >
+
                             <div class="min-w-0">
-                                <span class="text-sm text-gray-700"><?= htmlspecialchars($s['supplier_name']) ?></span>
+                                <span class="text-sm font-semibold text-gray-700 block truncate">
+                                    <?= htmlspecialchars($s['supplier_name']) ?>
+                                </span>
+
                                 <?php if ($s['avg_lead_time'] !== null): ?>
-                                <span class="text-xs text-gray-400 block">~<?= round($s['avg_lead_time'], 1) ?> days lead time</span>
+                                <span class="text-xs text-gray-400 block">
+                                    ~<?= round($s['avg_lead_time'], 1) ?> days lead time
+                                </span>
+                                <?php else: ?>
+                                <span class="text-xs text-gray-300 block">
+                                    No lead time data
+                                </span>
                                 <?php endif; ?>
                             </div>
                         </label>
                         <?php endforeach; ?>
                     </div>
+
                     <?php endif; ?>
                 </div>
 
@@ -452,6 +626,14 @@ $suppliers = $pdo->query("
         ];
     }, $products)) ?>;
 
+    const supplierProductMap = <?= json_encode(
+        $supplier_product_map,
+        JSON_HEX_TAG |
+        JSON_HEX_AMP |
+        JSON_HEX_APOS |
+        JSON_HEX_QUOT
+    ) ?>;
+
     let rowCounter = 0;
 
     function openRfqModal() {
@@ -463,6 +645,116 @@ $suppliers = $pdo->query("
     function closeRfqModal() {
         document.getElementById('rfqModal').classList.add('hidden');
     }
+
+    function getSelectedProductIds() {
+        const selectedIds = Array.from(
+            document.querySelectorAll('input[name="product_id[]"]')
+        )
+            .map((input) => Number.parseInt(input.value, 10))
+            .filter((productId) =>
+                Number.isInteger(productId) &&
+                productId > 0
+            );
+
+        return [...new Set(selectedIds)];
+    }
+
+    function updateEligibleSuppliers() {
+        const supplierGrid =
+            document.getElementById('supplierGrid');
+
+        if (!supplierGrid) {
+            return;
+        }
+
+        const supplierCards = Array.from(
+            document.querySelectorAll('.supplier-card')
+        );
+
+        const selectionHint =
+            document.getElementById('supplierSelectionHint');
+
+        const noEligibleSuppliers =
+            document.getElementById('noEligibleSuppliers');
+
+        const eligibleSupplierCount =
+            document.getElementById('eligibleSupplierCount');
+
+        const selectedProductIds =
+            getSelectedProductIds();
+
+        if (selectedProductIds.length === 0) {
+            supplierCards.forEach((card) => {
+                card.classList.add('hidden');
+
+                const checkbox =
+                    card.querySelector('.supplier-checkbox');
+
+                checkbox.checked = false;
+            });
+
+            supplierGrid.classList.add('hidden');
+            selectionHint.classList.remove('hidden');
+            noEligibleSuppliers.classList.add('hidden');
+
+            eligibleSupplierCount.textContent =
+                'Select products first';
+
+            return;
+        }
+
+        let eligibleCount = 0;
+
+        supplierCards.forEach((card) => {
+            const supplierId =
+                card.dataset.supplierId;
+
+            const suppliedProducts = new Set(
+                (supplierProductMap[supplierId] || []).map(
+                    (productId) =>
+                        Number.parseInt(productId, 10)
+                )
+            );
+
+            const isEligible = selectedProductIds.every(
+                (productId) =>
+                    suppliedProducts.has(productId)
+            );
+
+            card.classList.toggle(
+                'hidden',
+                !isEligible
+            );
+
+            const checkbox =
+                card.querySelector('.supplier-checkbox');
+
+            if (!isEligible) {
+                checkbox.checked = false;
+            }
+
+            if (isEligible) {
+                eligibleCount++;
+            }
+        });
+
+        selectionHint.classList.add('hidden');
+
+        supplierGrid.classList.toggle(
+            'hidden',
+            eligibleCount === 0
+        );
+
+        noEligibleSuppliers.classList.toggle(
+            'hidden',
+            eligibleCount !== 0
+        );
+
+        eligibleSupplierCount.textContent =
+            eligibleCount +
+            ' eligible supplier' +
+            (eligibleCount === 1 ? '' : 's');
+    }    
 
     function addProductRow() {
         rowCounter++;
@@ -492,6 +784,7 @@ $suppliers = $pdo->query("
         `;
         container.appendChild(row);
         renderDropdownList(rid, allProducts);
+        updateEligibleSuppliers();
     }
 
     function renderDropdownList(rid, products) {
@@ -547,12 +840,19 @@ $suppliers = $pdo->query("
         }
 
         document.getElementById('dropdown-' + rid).classList.add('hidden');
+        updateEligibleSuppliers();
     }
 
     function removeRow(rid) {
-        const rows = document.querySelectorAll('.product-row');
+        const rows =
+            document.querySelectorAll('.product-row');
+
         if (rows.length > 1) {
-            document.querySelector(`.product-row[data-rid="${rid}"]`).remove();
+            document
+                .querySelector(`.product-row[data-rid="${rid}"]`)
+                .remove();
+
+            updateEligibleSuppliers();
         }
     }
 
@@ -573,11 +873,25 @@ $suppliers = $pdo->query("
     <?php if ($from_pr): ?>
     window.addEventListener('DOMContentLoaded', function() {
         openRfqModal();
-        document.getElementById('pid-1').value = <?= (int) $from_pr['pr_product_id'] ?>;
-        document.getElementById('label-1').textContent = <?= json_encode($from_pr['product_title']) ?>;
-        document.getElementById('label-1').classList.remove('text-gray-400');
-        document.getElementById('label-1').classList.add('text-gray-800');
-        document.querySelector('input[name="quantity[]"]').value = <?= (int) $from_pr['pr_suggested_quantity'] ?>;
+
+        document.getElementById('pid-1').value =
+            <?= (int) $from_pr['pr_product_id'] ?>;
+
+        document.getElementById('label-1').textContent =
+            <?= json_encode($from_pr['product_title']) ?>;
+
+        document
+            .getElementById('label-1')
+            .classList.remove('text-gray-400');
+
+        document
+            .getElementById('label-1')
+            .classList.add('text-gray-800');
+
+        document.querySelector('input[name="quantity[]"]').value =
+            <?= (int) $from_pr['pr_suggested_quantity'] ?>;
+
+        updateEligibleSuppliers();
     });
     <?php endif; ?>
     </script>
