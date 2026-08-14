@@ -49,7 +49,7 @@ if (!$order_id) {
     exit;
 }
 
-// Cancel expired order, restore stock and restore voucher atomically
+// Cancel expired payment confirmation, restore stock and voucher, and refund atomically
 try {
     $pdo->beginTransaction();
 
@@ -160,9 +160,11 @@ try {
 
 // Send notification
 $order_num = '#' . str_pad($order['order_id'], 4, '0', STR_PAD_LEFT);
-sendNotification($pdo, $user_id,
-    '⏰ Payment Timeout',
-    "Your order $order_num has been cancelled due to payment timeout. The paid amount has been refunded to your MangaVault Wallet, and stock and vouchers have been restored.",
+sendNotification(
+    $pdo,
+    $user_id,
+    '⏰ Payment Confirmation Timeout',
+    "Your order $order_num has been cancelled because the payment confirmation link expired. The paid amount has been refunded to your MangaVault Wallet, and stock and any applied voucher have been restored.",
     'order'
 );
 
@@ -180,19 +182,19 @@ $email_body = "
     <div style='max-width:600px; margin:30px auto; background:white; border-radius:16px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.08);'>
         <div style='background:linear-gradient(135deg, #1e2d4a, #2c3e6b); padding:32px; text-align:center;'>
             <h1 style='color:white; font-size:24px; font-weight:900; margin:0 0 4px 0;'>Manga<span style='color:#ef4444;'>Vault</span></h1>
-            <p style='color:rgba(255,255,255,0.6); font-size:13px; margin:0;'>Payment Timeout</p>
+            <p style='color:rgba(255,255,255,0.6); font-size:13px; margin:0;'>Payment Confirmation Timeout</p>
         </div>
         <div style='padding:32px;'>
             <table style='background:#fef2f2; border:1px solid #fecaca; border-radius:12px; width:100%; margin-bottom:24px;' cellpadding='0' cellspacing='0'>
                 <tr>
                     <td style='padding:16px 8px 16px 16px; width:40px; vertical-align:middle; font-size:24px;'>⏰</td>
                     <td style='padding:16px 16px 16px 4px; vertical-align:middle;'>
-                        <p style='font-weight:700; color:#991b1b; margin:0 0 4px 0; font-size:15px;'>Payment Timeout</p>
-                        <p style='color:#dc2626; font-size:13px; margin:0;'>Your order has been cancelled due to payment timeout.</p>
+                        <p style='font-weight:700; color:#991b1b; margin:0 0 4px 0; font-size:15px;'>Payment Confirmation Timeout</p>
+                        <p style='color:#dc2626; font-size:13px; margin:0;'>Your order has been cancelled because the confirmation link expired.</p>
                     </td>
                 </tr>
             </table>
-            <p style='color:#374151; font-size:15px; margin:0 0 24px 0;'>Hi <strong>$first_name</strong>, your order <strong>$order_num</strong> has been cancelled because payment was not completed within 5 minutes.</p>
+            <p style='color:#374151; font-size:15px; margin:0 0 24px 0;'>Hi <strong>$first_name</strong>, your order <strong>$order_num</strong> has been cancelled because payment confirmation was not completed within 5 minutes.</p>
             <div style='background:#f9fafb; border-radius:12px; padding:16px; margin-bottom:24px;'>
                 <p style='color:#6b7280; font-size:13px; margin:0 0 8px 0;'>✅ Stock has been restored</p>
                 <p style='color:#6b7280; font-size:13px; margin:0 0 8px 0;'>✅ Your voucher has been restored (if any)</p>

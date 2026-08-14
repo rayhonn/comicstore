@@ -72,8 +72,14 @@ $order_num = '#' . str_pad($order_id, 4, '0', STR_PAD_LEFT);
             </div>
 
             <h2 class="text-xl font-black text-gray-800 mb-2">Check Your Email!</h2>
-            <p class="text-gray-500 text-sm mb-1">We've sent a confirmation link to your email.</p>
-            <p class="text-gray-400 text-xs mb-6">Click the <strong>Confirm My Payment</strong> button in the email to complete your order.</p>
+            <p class="text-gray-500 text-sm mb-1">
+                Your Stripe payment was received successfully.
+            </p>
+            <p class="text-gray-400 text-xs mb-6">
+                Check your email and click
+                <strong>Confirm Payment</strong>
+                within 5 minutes to complete your order.
+            </p>
 
             <!-- Order info -->
             <div class="bg-gray-50 rounded-xl p-4 mb-6 text-left">

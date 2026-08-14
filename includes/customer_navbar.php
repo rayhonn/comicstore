@@ -3,6 +3,7 @@
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/voucher_helper.php';
 require_once __DIR__ . '/stock_helper.php';
+require_once __DIR__ . '/wallet_helper.php';
 require_once __DIR__ . '/notifications.php';
 require_once __DIR__ . '/logger.php';
 require_once __DIR__ . '/birthday_helper.php';
@@ -29,6 +30,7 @@ if (isset($_SESSION['user_id'])) {
         $expired_orders = $pdo->prepare("
             SELECT
                 order_id,
+                order_total_amount,
                 order_voucher_code
             FROM orders
             WHERE order_user_id = ?
@@ -87,6 +89,25 @@ if (isset($_SESSION['user_id'])) {
                 $order_id,
                 $user_id
             );
+
+            creditWalletRefund(
+                $pdo,
+                $user_id,
+                'payment_timeout',
+                $order_id,
+                moneyDecimalToSen(
+                    (string) $expired_order[
+                        'order_total_amount'
+                    ]
+                ),
+                'Refund for expired payment confirmation Order #' .
+                    str_pad(
+                        (string) $order_id,
+                        4,
+                        '0',
+                        STR_PAD_LEFT
+                    )
+            );
         }
 
         $pdo->commit();
@@ -116,8 +137,8 @@ if (isset($_SESSION['user_id'])) {
             sendNotification(
                 $pdo,
                 $user_id,
-                'Payment Timeout',
-                "Your order $order_number has been cancelled due to payment timeout. Stock and vouchers have been restored.",
+                'Payment Confirmation Timeout',
+                "Your order $order_number has been cancelled because the payment confirmation link expired. The paid amount has been refunded to your MangaVault Wallet. Stock and any applied voucher have been restored.",
                 'order'
             );
         } catch (Throwable $e) {
