@@ -573,7 +573,7 @@ $pay_again_error_message =
                                             $order[
                                                 'order_pay_again_available'
                                             ] ?? 0
-                                        ) === 1;                                    
+                                        ) === 1;
                                     ?>
                                     <span class="<?= $color ?> text-xs px-3 py-1 rounded-full font-semibold capitalize">
                                         <?= $order['order_status'] ?>
@@ -605,7 +605,7 @@ $pay_again_error_message =
                                                 Pay Again
                                             </button>
                                         </form>
-                                    <?php endif; ?>                                    
+                                    <?php endif; ?>
 
                                     <?php if ($order['order_payment_status'] === 'pending_confirmation'): ?>
                                         <a
