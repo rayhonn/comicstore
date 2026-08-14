@@ -334,7 +334,8 @@ $sql = "
             AS product_title,
         p.product_cover_image,
         oi.order_item_quantity,
-        oi.order_item_price
+        oi.order_item_price,
+        re.return_evidence_id
     FROM return_requests rr
     JOIN users u
         ON rr.return_user_id = u.user_id
@@ -342,6 +343,9 @@ $sql = "
         ON rr.return_item_id = oi.order_item_id
     JOIN products p
         ON oi.order_item_product_id = p.product_id
+    LEFT JOIN return_request_evidence re
+        ON re.return_evidence_return_id =
+            rr.return_id
 ";
 
 $params = [];
@@ -459,6 +463,21 @@ foreach (
                         <div class="bg-gray-50 rounded-xl p-3">
                             <p class="text-xs font-semibold text-gray-500 mb-1">Reason:</p>
                             <p class="text-sm text-gray-700"><?= nl2br(htmlspecialchars($r['return_reason'])) ?></p>
+                        </div>
+                        <div class="bg-purple-50 rounded-xl p-3 mt-2">
+                            <p class="text-xs font-semibold text-purple-600 mb-1">Supporting Evidence:</p>
+                            <?php if (!empty($r['return_evidence_id'])): ?>
+                            <a
+                                href="../admin/return_evidence.php?return_id=<?= (int) $r['return_id'] ?>"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="inline-flex items-center gap-1 text-sm font-semibold text-purple-700 hover:text-purple-900 transition-colors"
+                            >
+                                View Evidence Image ↗
+                            </a>
+                            <?php else: ?>
+                            <p class="text-sm text-purple-600">No evidence image is available for this legacy request.</p>
+                            <?php endif; ?>
                         </div>
                         <?php if ($r['return_admin_note']): ?>
                         <div class="bg-blue-50 rounded-xl p-3 mt-2">
