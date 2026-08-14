@@ -219,6 +219,41 @@ $addresses->execute([$user_id]);
 $addresses =
     $addresses->fetchAll(PDO::FETCH_ASSOC);
 
+$malaysian_states = [
+    'Johor',
+    'Kedah',
+    'Kelantan',
+    'Melaka',
+    'Negeri Sembilan',
+    'Pahang',
+    'Perak',
+    'Perlis',
+    'Pulau Pinang',
+    'Sabah',
+    'Sarawak',
+    'Selangor',
+    'Terengganu',
+    'Wilayah Persekutuan Kuala Lumpur',
+    'Wilayah Persekutuan Labuan',
+    'Wilayah Persekutuan Putrajaya',
+];
+
+function checkoutDeliveryZoneForState(
+    string $state
+): string {
+    return in_array(
+        $state,
+        [
+            'Sabah',
+            'Sarawak',
+            'Wilayah Persekutuan Labuan',
+        ],
+        true
+    )
+        ? 'east_malaysia'
+        : 'peninsular';
+}
+
 function findAvailableVoucher(
     PDO $pdo,
     string $voucher_code,
@@ -504,11 +539,104 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         )
     );
 
-    $shipping_zone = trim(
-        (string) (
-            $_POST['shipping_zone'] ?? ''
-        )
-    );
+    $shipping_zone = 'peninsular';
+    $shipping_state = '';
+
+    if (
+        $has_physical &&
+        $error === ''
+    ) {
+        $zone_address_option =
+            $_POST['address_option'] ?? '';
+
+        if (!is_string($zone_address_option)) {
+            $error =
+                'Please select a valid shipping address.';
+        } elseif (
+            $zone_address_option === 'saved'
+        ) {
+            $zone_address_id = filter_var(
+                $_POST['address_id'] ?? null,
+                FILTER_VALIDATE_INT,
+                [
+                    'options' => [
+                        'min_range' => 1,
+                    ],
+                ]
+            );
+
+            if (
+                $zone_address_id === false ||
+                $zone_address_id === null
+            ) {
+                $error =
+                    'Please select a valid shipping address.';
+            } else {
+                $zone_address_statement =
+                    $pdo->prepare("
+                        SELECT address_state
+                        FROM addresses
+                        WHERE address_id = ?
+                        AND address_user_id = ?
+                        LIMIT 1
+                    ");
+
+                $zone_address_statement->execute([
+                    $zone_address_id,
+                    $user_id,
+                ]);
+
+                $saved_shipping_state =
+                    $zone_address_statement
+                        ->fetchColumn();
+
+                if (
+                    $saved_shipping_state ===
+                    false
+                ) {
+                    $error =
+                        'The selected shipping address is invalid.';
+                } else {
+                    $shipping_state = trim(
+                        (string)
+                            $saved_shipping_state
+                    );
+                }
+            }
+        } elseif (
+            $zone_address_option === 'new'
+        ) {
+            $shipping_state = trim(
+                (string) (
+                    $_POST[
+                        'address_state'
+                    ] ?? ''
+                )
+            );
+        } else {
+            $error =
+                'Please select a valid shipping address.';
+        }
+
+        if (
+            $error === '' &&
+            !in_array(
+                $shipping_state,
+                $malaysian_states,
+                true
+            )
+        ) {
+            $error =
+                'Please select a valid Malaysian state.';
+        }
+
+        if ($error === '') {
+            $shipping_zone =
+                checkoutDeliveryZoneForState(
+                    $shipping_state
+                );
+        }
+    }
 
     $shipping_type = 'std';
     $zone_key = 'peninsular';
@@ -517,18 +645,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $shipping_fee_sen = 0;
     $original_shipping_fee_sen = 0;
 
-    if ($has_physical) {
+    if (
+        $has_physical &&
+        $error === ''
+    ) {
         $valid_courier =
-            isset($couriers[$shipping_courier]);
-
-        $valid_zone = in_array(
-            $shipping_zone,
-            [
-                'peninsular',
-                'east_malaysia',
-            ],
-            true
-        );
+            isset(
+                $couriers[
+                    $shipping_courier
+                ]
+            );
 
         $valid_method = in_array(
             $shipping_method,
@@ -543,7 +669,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (
             !$valid_courier ||
-            !$valid_zone ||
             !$valid_method
         ) {
             $error =
@@ -583,7 +708,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ? 'express'
                     : 'standard';
         }
-    } else {
+    } elseif (!$has_physical) {
         $shipping_method = 'standard';
         $shipping_courier = null;
         $shipping_zone = 'peninsular';
@@ -733,7 +858,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $discount_amount_sen
         );
 
-    if ($has_physical) {
+    if (
+        $has_physical &&
+        $error === ''
+    ) {
         $address_option =
             $_POST['address_option'] ?? '';
 
@@ -900,6 +1028,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ) {
                 $error =
                     'Please fill in all required shipping fields.';
+            } elseif (
+                !in_array(
+                    $state,
+                    $malaysian_states,
+                    true
+                )
+            ) {
+                $error =
+                    'Please select a valid Malaysian state.';
+            } elseif (
+                $country !== 'Malaysia'
+            ) {
+                $error =
+                    'Country must be Malaysia.';
             } elseif (
                 !preg_match('/\A\d{5}\z/', $postal)
             ) {
@@ -1134,9 +1276,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <span class="text-sm font-medium text-gray-700">Use saved address</span>
                         </label>
                         <div id="saved_address_div" class="pl-4">
-                            <select name="address_id" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-500 transition-colors">
+                            <select
+                                name="address_id"
+                                id="savedAddressSelect"
+                                onchange="syncDeliveryZoneFromAddress()"
+                                class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-500 transition-colors"
+                            >
                                 <?php foreach ($addresses as $addr): ?>
-                                    <option value="<?= $addr['address_id'] ?>">
+                                    <option
+                                        value="<?= (int) $addr['address_id'] ?>"
+                                        data-state="<?= htmlspecialchars(
+                                            (string) $addr['address_state'],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                    >
                                         <?= htmlspecialchars($addr['address_recipient_name']) ?> —
                                         <?= htmlspecialchars($addr['address_street']) ?>
                                         <?php if ($addr['address_taman']): ?>, <?= htmlspecialchars($addr['address_taman']) ?><?php endif; ?>,
@@ -1192,7 +1346,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">State *</label>
-                                <select name="address_state" required onchange="autoPostcode(this.value)"
+                                <select
+                                    name="address_state"
+                                    required
+                                    onchange="
+                                        autoPostcode(this.value);
+                                        syncDeliveryZoneFromAddress();
+                                    "
                                         class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-red-500 transition-colors bg-white">
                                     <option value="">Select state</option>
                                     <option>Johor</option>
@@ -1239,24 +1399,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <!-- Step 1: Zone -->
                     <div class="mb-5">
-                        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Step 1 — Delivery Zone</p>
-                        <div class="grid grid-cols-2 gap-3">
-                            <button type="button" onclick="selectZone('peninsular')" id="zone_peninsular"
-                                    class="flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left">
-                                <span class="text-2xl">🇲🇾</span>
+                        <p
+                            class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3"
+                        >
+                            Step 1 — Delivery Zone
+                        </p>
+
+                        <div
+                            class="flex items-center justify-between gap-4 p-4 border-2 border-blue-100 bg-blue-50 rounded-xl"
+                        >
+                            <div
+                                class="flex items-center gap-3"
+                            >
+                                <span
+                                    class="text-2xl"
+                                >
+                                    📍
+                                </span>
+
                                 <div>
-                                    <p class="font-semibold text-sm text-gray-800">Peninsular</p>
-                                    <p class="text-xs text-gray-400">West Malaysia</p>
+                                    <p
+                                        id="deliveryZoneName"
+                                        class="font-bold text-sm text-gray-800"
+                                    >
+                                        Detecting from address...
+                                    </p>
+
+                                    <p
+                                        id="deliveryZoneHint"
+                                        class="text-xs text-gray-500 mt-0.5"
+                                    >
+                                        The delivery zone is determined automatically from your shipping state.
+                                    </p>
                                 </div>
-                            </button>
-                            <button type="button" onclick="selectZone('east_malaysia')" id="zone_east"
-                                    class="flex items-center gap-3 p-4 border-2 border-gray-100 rounded-xl hover:border-red-300 transition-colors text-left">
-                                <span class="text-2xl">🌴</span>
-                                <div>
-                                    <p class="font-semibold text-sm text-gray-800">East Malaysia</p>
-                                    <p class="text-xs text-gray-400">Sabah & Sarawak</p>
-                                </div>
-                            </button>
+                            </div>
+
+                            <span
+                                class="flex-shrink-0 bg-blue-100 text-blue-700 text-[11px] font-bold px-2.5 py-1 rounded-full"
+                            >
+                                Automatic
+                            </span>
+                        </div>
+
+                        <div
+                            class="hidden"
+                            aria-hidden="true"
+                        >
+                            <button
+                                type="button"
+                                id="zone_peninsular"
+                                tabindex="-1"
+                            ></button>
+
+                            <button
+                                type="button"
+                                id="zone_east"
+                                tabindex="-1"
+                            ></button>
                         </div>
                     </div>
 
@@ -1303,7 +1502,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <input type="hidden" name="shipping_method" id="shippingMethodInput" value="">
                     <input type="hidden" name="shipping_courier" id="shippingCourierInput" value="">
-                    <input type="hidden" name="shipping_zone" id="shippingZoneInput" value="">
+                    <input
+                        type="hidden"
+                        id="shippingZoneInput"
+                        value=""
+                    >
                 </div>
                 
                 <?php else: ?>
@@ -1610,11 +1813,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     function toggleAddress(option) {
-        const savedDiv = document.getElementById('saved_address_div');
-        const newDiv = document.getElementById('new_address_div');
-        if (savedDiv) savedDiv.style.display = option === 'saved' ? 'block' : 'none';
-        if (newDiv) newDiv.style.display = option === 'new' ? 'block' : 'none';
+        const savedDiv =
+            document.getElementById(
+                'saved_address_div'
+            );
+
+        const newDiv =
+            document.getElementById(
+                'new_address_div'
+            );
+
+        if (savedDiv) {
+            savedDiv.style.display =
+                option === 'saved'
+                    ? 'block'
+                    : 'none';
+        }
+
+        if (newDiv) {
+            newDiv.style.display =
+                option === 'new'
+                    ? 'block'
+                    : 'none';
+        }
+
+        syncDeliveryZoneFromAddress();
     }
+
+    window.addEventListener(
+        'DOMContentLoaded',
+        () => {
+            if (hasPhysical) {
+                syncDeliveryZoneFromAddress();
+            }
+        }
+    );
 
     let appliedDiscount = 0;
     let currentShipping = 0;
@@ -1796,13 +2029,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // Check zone
+        // Check automatically derived delivery zone
         if (!currentZone) {
-            const modal = document.getElementById('deliveryWarningModal');
-            modal.querySelector('h3').textContent = 'Select Delivery Zone';
-            modal.querySelector('p').textContent = 'Please select a delivery zone before placing your order.';
-            modal.querySelector('span.text-3xl').textContent = '🗺️';
-            modal.classList.remove('hidden');
+            const modal =
+                document.getElementById(
+                    'deliveryWarningModal'
+                );
+
+            modal.querySelector(
+                'h3'
+            ).textContent =
+                'Shipping Address Required';
+
+            modal.querySelector(
+                'p'
+            ).textContent =
+                'Please select a saved shipping address or choose a valid Malaysian state. The delivery zone will be detected automatically.';
+
+            modal.querySelector(
+                'span.text-3xl'
+            ).textContent =
+                '📍';
+
+            modal.classList.remove(
+                'hidden'
+            );
+
             return;
         }
 
@@ -1915,6 +2167,116 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     let currentZone = null;
     let currentSpeed = null;
     let currentCourier = null;
+
+    const eastMalaysiaStates = new Set([
+        'Sabah',
+        'Sarawak',
+        'Wilayah Persekutuan Labuan',
+    ]);
+
+    function getCurrentShippingState() {
+        const checkedAddressOption =
+            document.querySelector(
+                'input[name="address_option"]:checked'
+            );
+
+        const hiddenAddressOption =
+            document.querySelector(
+                'input[name="address_option"][type="hidden"]'
+            );
+
+        const addressOption =
+            checkedAddressOption?.value ||
+            hiddenAddressOption?.value ||
+            'new';
+
+        if (addressOption === 'saved') {
+            const savedAddressSelect =
+                document.getElementById(
+                    'savedAddressSelect'
+                );
+
+            return (
+                savedAddressSelect
+                    ?.selectedOptions?.[0]
+                    ?.dataset?.state || ''
+            );
+        }
+
+        const stateSelect =
+            document.querySelector(
+                'select[name="address_state"]'
+            );
+
+        return stateSelect?.value || '';
+    }
+
+    function updateDeliveryZoneDisplay(
+        zone
+    ) {
+        const zoneName =
+            document.getElementById(
+                'deliveryZoneName'
+            );
+
+        const zoneHint =
+            document.getElementById(
+                'deliveryZoneHint'
+            );
+
+        if (!zoneName || !zoneHint) {
+            return;
+        }
+
+        if (zone === 'east_malaysia') {
+            zoneName.textContent =
+                'East Malaysia';
+
+            zoneHint.textContent =
+                'Sabah, Sarawak & Labuan';
+        } else if (zone === 'peninsular') {
+            zoneName.textContent =
+                'Peninsular Malaysia';
+
+            zoneHint.textContent =
+                'West Malaysia';
+        } else {
+            zoneName.textContent =
+                'Select a shipping address';
+
+            zoneHint.textContent =
+                'The delivery zone will be detected automatically from the selected state.';
+        }
+    }
+
+    function syncDeliveryZoneFromAddress() {
+        if (!hasPhysical) {
+            return;
+        }
+
+        const state =
+            getCurrentShippingState();
+
+        if (!state) {
+            if (currentZone !== null) {
+                selectZone(currentZone);
+            }
+
+            updateDeliveryZoneDisplay(null);
+            return;
+        }
+
+        const zone =
+            eastMalaysiaStates.has(state)
+                ? 'east_malaysia'
+                : 'peninsular';
+
+        if (currentZone !== zone) {
+            selectZone(zone);
+        }
+
+        updateDeliveryZoneDisplay(zone);
+    }
 
     function selectZone(zone) {
         // Toggle — re-click same zone to deselect
