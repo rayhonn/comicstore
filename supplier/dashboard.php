@@ -141,7 +141,10 @@ $total_credit = array_sum(array_column($credits, 'return_credit_note_amount'));
                 <?php endforeach; ?>
             </div>
             <div class="px-6 py-3 bg-orange-50">
-                <p class="text-xs text-orange-700">These will be automatically deducted from a future invoice payment.</p>
+                <p class="text-xs text-orange-700">
+                    These credit notes can be applied by an administrator
+                    when reviewing an unpaid supplier invoice.
+                </p>
             </div>
         </div>
         <?php endif; ?>

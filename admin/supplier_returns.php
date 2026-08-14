@@ -1136,7 +1136,7 @@ unset($r);
                             'dispute_rejected'  => '⚖️ Dispute Rejected — Stock Restored (Senior Admin)',
                         ][$ret['return_resolution_type']] ?? $ret['return_resolution_type'] ?>
                     </p>
-                    <?php if ($ret['return_resolution_type'] === 'credit_note'): ?>
+                    <?php if (!empty($ret['return_credit_note_number'])): ?>
                     <p class="text-sm text-gray-700">
                         Credit Note
                         <strong><?= htmlspecialchars(
@@ -1151,8 +1151,18 @@ unset($r);
                             )
                         ) ?>
                     </p>
-                    <?php elseif ($ret['return_resolution_type'] === 'replacement' && !empty($ret['replacement_po_number'])): ?>
-                    <p class="text-sm text-gray-700">Replacement order: <a href="purchase_orders.php" class="text-blue-600 font-semibold hover:underline"><?= htmlspecialchars($ret['replacement_po_number']) ?></a></p>
+                    <?php elseif (!empty($ret['replacement_po_number'])): ?>
+                    <p class="text-sm text-gray-700">
+                        Replacement order:
+                        <a
+                            href="purchase_orders.php"
+                            class="text-blue-600 font-semibold hover:underline"
+                        >
+                            <?= htmlspecialchars(
+                                $ret['replacement_po_number']
+                            ) ?>
+                        </a>
+                    </p>
                     <?php endif; ?>
                     <?php if ($ret['return_resolution_notes']): ?>
                     <p class="text-xs text-gray-500 mt-1">"<?= htmlspecialchars($ret['return_resolution_notes']) ?>"</p>
