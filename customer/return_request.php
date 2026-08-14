@@ -5,6 +5,7 @@ require_customer();
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/money_helper.php';
+require_once __DIR__ . '/../includes/return_evidence_helper.php';
 
 $user_id = (int) $_SESSION['user_id'];
 $order_id = filter_input(INPUT_GET, 'order_id', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -92,63 +93,290 @@ $existing = $pdo->prepare("SELECT return_id, return_status, return_admin_note FR
 $existing->execute([$item_id]);
 $existing = $existing->fetch(PDO::FETCH_ASSOC);
 
-$order_num = '#' . str_pad((string) $order_id, 4, '0', STR_PAD_LEFT);
-$return_amount_sen = moneyDecimalToSen((string) $order['order_item_price']) * (int) $order['order_item_quantity'];
-$error = '';
-$submitted = false;
+$order_num =
+    '#' .
+    str_pad(
+        (string) $order_id,
+        4,
+        '0',
+        STR_PAD_LEFT
+    );
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$existing && $within_window) {
-    csrf_verify();
-    $reason_type = $_POST['reason_type'] ?? null;
-    $reason_detail_raw = $_POST['reason_detail'] ?? '';
-    $reason_options = [
-        'Wrong item received',
-        'Item damaged / defective',
-        'Item not as described',
-        'Missing item / incomplete order',
-        'Other',
-    ];
-
-    if (!is_string($reason_type) || !in_array($reason_type, $reason_options, true) || !is_string($reason_detail_raw)) {
-        $error = 'Please select a valid reason for return.';
-        $reason_detail = '';
-    } else {
-        $reason_detail = trim($reason_detail_raw);
-        $reason_detail_length = function_exists('mb_strlen') ? mb_strlen($reason_detail, 'UTF-8') : strlen($reason_detail);
-        if ($reason_detail_length > 2000) {
-            $error = 'Additional details cannot exceed 2000 characters.';
-        } elseif ($reason_type === 'Other' && $reason_detail === '') {
-            $error = 'Please provide details for the selected reason.';
-        }
-    }
-
-    if ($error !== '') {
-        // Validation error already set.
-    } elseif (empty($reason_type)) {
-        $error = 'Please select a reason for return.';
-    } else {
-        $full_reason = $reason_type;
-        if ($reason_type === 'Other' && !empty($reason_detail)) {
-            $full_reason = 'Other: ' . $reason_detail;
-        } elseif (!empty($reason_detail)) {
-            $full_reason = $reason_type . ' — ' . $reason_detail;
-        }
-
-        $pdo->prepare("INSERT INTO return_requests (return_order_id, return_user_id, return_item_id, return_reason) VALUES (?, ?, ?, ?)")
-            ->execute([$order_id, $user_id, $item_id, $full_reason]);
-
-        $submitted = true;
-        $existing = ['return_status' => 'pending', 'return_admin_note' => null];
-    }
-}
+$return_amount_sen =
+    moneyDecimalToSen(
+        (string) $order['order_item_price']
+    ) *
+    (int) $order['order_item_quantity'];
 
 $reason_options = [
     'Wrong item received',
     'Item damaged / defective',
     'Item not as described',
     'Missing item / incomplete order',
-    'Other',
 ];
+
+$error = '';
+$submitted = false;
+$selected_reason = '';
+$reason_detail_value = '';
+
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    !$existing &&
+    $within_window
+) {
+    csrf_verify();
+
+    $reason_type =
+        $_POST['reason_type'] ?? null;
+
+    $reason_detail_raw =
+        $_POST['reason_detail'] ?? '';
+
+    $evidence_file =
+        $_FILES['evidence_image'] ?? null;
+
+    if (is_string($reason_type)) {
+        $selected_reason =
+            $reason_type;
+    }
+
+    if (is_string($reason_detail_raw)) {
+        $reason_detail_value =
+            trim($reason_detail_raw);
+    }
+
+    $reason_detail = '';
+
+    if (
+        !is_string($reason_type) ||
+        !in_array(
+            $reason_type,
+            $reason_options,
+            true
+        )
+    ) {
+        $error =
+            'Please select a valid return reason.';
+    } elseif (!is_string($reason_detail_raw)) {
+        $error =
+            'Additional details are invalid.';
+    } else {
+        $reason_detail =
+            trim($reason_detail_raw);
+
+        $reason_detail_length =
+            function_exists('mb_strlen')
+                ? mb_strlen(
+                    $reason_detail,
+                    'UTF-8'
+                )
+                : strlen($reason_detail);
+
+        if ($reason_detail_length > 2000) {
+            $error =
+                'Additional details cannot exceed 2000 characters.';
+        }
+    }
+
+    $stored_evidence = null;
+
+    if ($error === '') {
+        if (!is_array($evidence_file)) {
+            $error =
+                'A supporting return evidence image is required.';
+        } else {
+            try {
+                $stored_evidence =
+                    storeReturnEvidenceImage(
+                        $evidence_file
+                    );
+            } catch (RuntimeException $e) {
+                $error =
+                    $e->getMessage();
+            } catch (Throwable $e) {
+                app_error_log(
+                    'Return evidence upload failed: ' .
+                    $e->getMessage()
+                );
+
+                $error =
+                    'Unable to upload the return evidence image. Please try again.';
+            }
+        }
+    }
+
+    if (
+        $error === '' &&
+        is_array($stored_evidence)
+    ) {
+        $full_reason =
+            $reason_type;
+
+        if ($reason_detail !== '') {
+            $full_reason .=
+                ' — ' .
+                $reason_detail;
+        }
+
+        try {
+            $pdo->beginTransaction();
+
+            $eligibility_statement =
+                $pdo->prepare("
+                    SELECT
+                        oi.order_item_id
+                    FROM orders o
+                    INNER JOIN order_items oi
+                        ON oi.order_item_order_id =
+                            o.order_id
+                    WHERE
+                        o.order_id = ?
+                        AND o.order_user_id = ?
+                        AND oi.order_item_id = ?
+                        AND o.order_status =
+                            'delivered'
+                        AND oi.order_item_type =
+                            'physical'
+                        AND o.order_delivered_at
+                            IS NOT NULL
+                        AND NOW() >=
+                            o.order_delivered_at
+                        AND NOW() <= DATE_ADD(
+                            o.order_delivered_at,
+                            INTERVAL 7 DAY
+                        )
+                    LIMIT 1
+                    FOR UPDATE
+                ");
+
+            $eligibility_statement->execute([
+                $order_id,
+                $user_id,
+                $item_id,
+            ]);
+
+            if (
+                $eligibility_statement
+                    ->fetchColumn() === false
+            ) {
+                throw new DomainException(
+                    'This item is no longer eligible for return.'
+                );
+            }
+
+            $duplicate_statement =
+                $pdo->prepare("
+                    SELECT return_id
+                    FROM return_requests
+                    WHERE return_item_id = ?
+                    LIMIT 1
+                    FOR UPDATE
+                ");
+
+            $duplicate_statement->execute([
+                $item_id,
+            ]);
+
+            if (
+                $duplicate_statement
+                    ->fetchColumn() !== false
+            ) {
+                throw new DomainException(
+                    'A return request has already been submitted for this item.'
+                );
+            }
+
+            $insert_return =
+                $pdo->prepare("
+                    INSERT INTO return_requests (
+                        return_order_id,
+                        return_user_id,
+                        return_item_id,
+                        return_reason
+                    )
+                    VALUES (?, ?, ?, ?)
+                ");
+
+            $insert_return->execute([
+                $order_id,
+                $user_id,
+                $item_id,
+                $full_reason,
+            ]);
+
+            $return_id =
+                (int) $pdo->lastInsertId();
+
+            if ($return_id < 1) {
+                throw new RuntimeException(
+                    'Return request ID was not generated.'
+                );
+            }
+
+            $insert_evidence =
+                $pdo->prepare("
+                    INSERT INTO return_request_evidence (
+                        return_evidence_return_id,
+                        return_evidence_file_name,
+                        return_evidence_file_sha256,
+                        return_evidence_mime_type,
+                        return_evidence_file_size
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                ");
+
+            $insert_evidence->execute([
+                $return_id,
+                $stored_evidence['file_name'],
+                $stored_evidence['sha256'],
+                $stored_evidence['mime_type'],
+                $stored_evidence['file_size'],
+            ]);
+
+            $pdo->commit();
+
+            $submitted = true;
+
+            $existing = [
+                'return_id' => $return_id,
+                'return_status' => 'pending',
+                'return_admin_note' => null,
+            ];
+        } catch (DomainException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            deleteReturnEvidenceImage(
+                (string) $stored_evidence[
+                    'file_name'
+                ]
+            );
+
+            $error =
+                $e->getMessage();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            deleteReturnEvidenceImage(
+                (string) $stored_evidence[
+                    'file_name'
+                ]
+            );
+
+            app_error_log(
+                'Return request submission failed: ' .
+                $e->getMessage()
+            );
+
+            $error =
+                'Unable to submit the return request. Please try again later.';
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -299,29 +527,70 @@ $reason_options = [
             </div>
             <?php endif; ?>
 
-            <form method="POST" id="returnForm">
+            <form
+                method="POST"
+                enctype="multipart/form-data"
+                id="returnForm"
+            >
                 <?php csrf_field(); ?>
-<!-- Reason Options -->
+
+                <!-- Reason Options -->
                 <div class="mb-5">
                     <label class="block text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Reason for Return *</label>
                     <div class="space-y-2">
                         <?php foreach ($reason_options as $reason): ?>
                         <label class="flex items-center gap-3 p-3 border-2 border-gray-100 rounded-xl cursor-pointer hover:border-red-300 transition-colors has-[:checked]:border-red-500 has-[:checked]:bg-red-50">
-                            <input type="radio" name="reason_type" value="<?= htmlspecialchars($reason) ?>"
-                                   class="accent-red-600"
-                                   onchange="toggleOtherField(this.value)">
-                            <span class="text-sm text-gray-700"><?= htmlspecialchars($reason) ?></span>
+                            <input
+                                type="radio"
+                                name="reason_type"
+                                value="<?= htmlspecialchars(
+                                    $reason,
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>"
+                                class="accent-red-600"
+                                required
+                                <?= $selected_reason === $reason
+                                    ? 'checked'
+                                    : '' ?>
+                            >
+                            <span class="text-sm text-gray-700"><?= htmlspecialchars(
+                                $reason,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?></span>
                         </label>
                         <?php endforeach; ?>
                     </div>
                 </div>
 
                 <!-- Additional Details -->
-                <div class="mb-5" id="detailsField">
+                <div class="mb-5">
                     <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Additional Details <span class="text-gray-300 normal-case font-normal">(optional)</span></label>
-                    <textarea name="reason_detail" rows="3" maxlength="2000"
-                              placeholder="Provide more details about your return..."
-                              class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none bg-gray-50 focus:bg-white"></textarea>
+                    <textarea
+                        name="reason_detail"
+                        rows="3"
+                        maxlength="2000"
+                        placeholder="Provide more details about the issue..."
+                        class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none bg-gray-50 focus:bg-white"
+                    ><?= htmlspecialchars(
+                        $reason_detail_value,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?></textarea>
+                </div>
+
+                <!-- Supporting Evidence -->
+                <div class="mb-5">
+                    <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Supporting Evidence Image *</label>
+                    <input
+                        type="file"
+                        name="evidence_image"
+                        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                        required
+                        class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm text-gray-600 bg-gray-50 file:mr-4 file:rounded-lg file:border-0 file:bg-red-50 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-red-600 hover:file:bg-red-100"
+                    >
+                    <p class="text-xs text-gray-400 mt-2">Upload one clear JPG, JPEG, PNG, or WEBP image. Maximum 5MB and at least 300 × 300 pixels.</p>
                 </div>
 
                 <!-- Info Box -->
@@ -330,33 +599,20 @@ $reason_options = [
                         <span class="text-amber-500 text-lg flex-shrink-0">ℹ️</span>
                         <div class="text-xs text-amber-700 leading-relaxed">
                             <p class="font-semibold mb-1">Return Policy</p>
-                            <p>Returns are only accepted for physical items within 7 days of delivery. Our team will review your request within <strong>3 working days</strong>. If approved, the eligible refund will be credited to your MangaVault Wallet.</p>
+                            <p>Returns are accepted only for eligible physical-item issues within 7 days of delivery. A clear supporting image is required. Our team will review the request within <strong>3 working days</strong>.</p>
                         </div>
                     </div>
                 </div>
 
-                <button type="submit"
-                        class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 rounded-xl text-sm transition-colors">
+                <button
+                    type="submit"
+                    class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 rounded-xl text-sm transition-colors"
+                >
                     Submit Return Request
                 </button>
             </form>
         </div>
         <?php endif; ?>
     </div>
-
-    <script>
-    function toggleOtherField(value) {
-        const field = document.getElementById('detailsField');
-        const textarea = field.querySelector('textarea');
-        if (value === 'Other') {
-            textarea.placeholder = 'Please describe your reason...';
-            textarea.required = true;
-        } else {
-            textarea.placeholder = 'Provide more details about your return...';
-            textarea.required = false;
-        }
-    }
-    </script>
-
 </body>
 </html>
