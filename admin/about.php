@@ -51,26 +51,6 @@ function normalizeAboutId(mixed $value, string $label): int
     return $id;
 }
 
-function normalizeAboutOrder(mixed $value): int
-{
-    $order = filter_var(
-        $value,
-        FILTER_VALIDATE_INT,
-        [
-            'options' => [
-                'min_range' => 0,
-                'max_range' => 1000000,
-            ],
-        ]
-    );
-
-    if ($order === false || $order === null) {
-        throw new RuntimeException('Display order must be a non-negative integer.');
-    }
-
-    return $order;
-}
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
@@ -166,9 +146,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 100,
                 true
             );
-            $order = normalizeAboutOrder($_POST['award_order'] ?? 0);
-
             if ($action === 'add_award') {
+                $next_award_order = (int) $pdo->query(
+                    'SELECT COALESCE(MAX(award_order), -1) + 1
+                     FROM about_awards'
+                )->fetchColumn();
+
                 $insert_award = $pdo->prepare(
                     'INSERT INTO about_awards (
                         award_emoji,
@@ -183,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $title,
                     $organization,
                     $result,
-                    $order,
+                    $next_award_order,
                 ]);
                 $success = 'Award added!';
             } else {
@@ -192,8 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      SET award_emoji = ?,
                          award_title = ?,
                          award_organization = ?,
-                         award_result = ?,
-                         award_order = ?
+                         award_result = ?
                      WHERE award_id = ?'
                 );
                 $update_award->execute([
@@ -201,7 +183,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $title,
                     $organization,
                     $result,
-                    $order,
                     $award_id,
                 ]);
                 $success = 'Award updated!';
@@ -270,9 +251,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($color === '') {
                 $color = 'linear-gradient(135deg, #1e2d4a, #2c3e6b)';
             }
-            $order = normalizeAboutOrder($_POST['team_order'] ?? 0);
-
             if ($action === 'add_team') {
+                $next_team_order = (int) $pdo->query(
+                    'SELECT COALESCE(MAX(team_order), -1) + 1
+                     FROM about_team'
+                )->fetchColumn();
+
                 $insert_team = $pdo->prepare(
                     'INSERT INTO about_team (
                         team_name,
@@ -289,7 +273,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $bio,
                     $initials,
                     $color,
-                    $order,
+                    $next_team_order,
                 ]);
                 $success = 'Team member added!';
             } else {
@@ -299,8 +283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                          team_role = ?,
                          team_bio = ?,
                          team_initials = ?,
-                         team_color = ?,
-                         team_order = ?
+                         team_color = ?
                      WHERE team_id = ?'
                 );
                 $update_team->execute([
@@ -309,7 +292,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $bio,
                     $initials,
                     $color,
-                    $order,
                     $team_id,
                 ]);
                 $success = 'Team member updated!';
@@ -558,17 +540,10 @@ $team = $pdo->query(
                 <?php csrf_field(); ?>
                 <input type="hidden" name="action" id="awardAction" value="add_award">
                 <input type="hidden" name="award_id" id="awardId">
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5">Emoji</label>
-                        <input type="text" name="award_emoji" id="awardEmoji" value="🏆" maxlength="10"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-500 mb-1.5">Order</label>
-                        <input type="number" name="award_order" id="awardOrder" value="0"
-                               class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
-                    </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-500 mb-1.5">Emoji</label>
+                    <input type="text" name="award_emoji" id="awardEmoji" value="🏆" maxlength="10"
+                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5">Award Title *</label>
@@ -637,11 +612,6 @@ $team = $pdo->query(
                     <input type="text" name="team_color" maxlength="50" id="teamColor" value="linear-gradient(135deg, #1e2d4a, #2c3e6b)"
                            class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
                 </div>
-                <div>
-                    <label class="block text-xs font-semibold text-gray-500 mb-1.5">Display Order</label>
-                    <input type="number" name="team_order" id="teamOrder" value="0"
-                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 bg-gray-50 focus:bg-white">
-                </div>
                 <div class="flex gap-3">
                     <button type="button" onclick="closeTeamModal()"
                             class="flex-1 py-3 border-2 border-gray-100 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
@@ -669,7 +639,6 @@ $team = $pdo->query(
         document.getElementById('awardTitle').value = '';
         document.getElementById('awardOrg').value = '';
         document.getElementById('awardResult').value = '';
-        document.getElementById('awardOrder').value = '0';
         document.getElementById('awardModal').classList.add('active');
     }
     function openEditAwardModal(a) {
@@ -680,7 +649,6 @@ $team = $pdo->query(
         document.getElementById('awardTitle').value = a.award_title;
         document.getElementById('awardOrg').value = a.award_organization;
         document.getElementById('awardResult').value = a.award_result;
-        document.getElementById('awardOrder').value = a.award_order;
         document.getElementById('awardModal').classList.add('active');
     }
     function closeAwardModal() { document.getElementById('awardModal').classList.remove('active'); }
@@ -694,7 +662,6 @@ $team = $pdo->query(
         document.getElementById('teamRole').value = '';
         document.getElementById('teamBio').value = '';
         document.getElementById('teamColor').value = 'linear-gradient(135deg, #1e2d4a, #2c3e6b)';
-        document.getElementById('teamOrder').value = '0';
         document.getElementById('teamModal').classList.add('active');
     }
     function openEditTeamModal(m) {
@@ -706,7 +673,6 @@ $team = $pdo->query(
         document.getElementById('teamRole').value = m.team_role;
         document.getElementById('teamBio').value = m.team_bio || '';
         document.getElementById('teamColor').value = m.team_color;
-        document.getElementById('teamOrder').value = m.team_order;
         document.getElementById('teamModal').classList.add('active');
     }
     function closeTeamModal() { document.getElementById('teamModal').classList.remove('active'); }
