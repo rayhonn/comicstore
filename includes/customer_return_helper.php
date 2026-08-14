@@ -568,7 +568,6 @@ function reconcileApprovedCustomerReturn(
                 'Wallet return refund would exceed the original wallet payment.'
             );
         }
-
     }
 
     $walletRefund =
