@@ -36,7 +36,9 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     <?php include '../includes/customer_navbar.php'; ?>
 
-    <div class="max-w-7xl mx-auto px-6 py-8">
+    <div
+    class="max-w-7xl mx-auto px-4 py-5 sm:px-6 sm:py-8"
+>
         <p class="text-sm text-gray-400 mb-6">
             <a href="../index.php" class="hover:text-red-600 transition-colors">Home</a>
             <span class="mx-2">›</span>
@@ -58,21 +60,21 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <!-- Cart Items -->
                 <div class="flex-1 w-full">
                     <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-                        <div class="px-6 py-4 border-b border-gray-50 flex items-center gap-3">
+                        <div class="px-4 py-4 border-b border-gray-50 flex items-center gap-3 sm:px-6">
                             <input type="checkbox" id="selectAll" onchange="toggleAll(this)"
                                    class="w-4 h-4 rounded accent-red-600 cursor-pointer">
                             <h2 class="font-bold text-gray-800">Cart Items <span class="text-gray-400 font-normal text-sm">(<?= count($items) ?>)</span></h2>
                         </div>
 
                         <?php foreach ($items as $item): ?>
-                        <div class="px-6 py-4 border-b border-gray-50 last:border-0 flex items-center gap-4 cart-row"
+                        <div class="px-4 py-4 border-b border-gray-50 last:border-0 flex flex-wrap items-start gap-3 sm:px-6 sm:flex-nowrap sm:items-center sm:gap-4 cart-row"
                              data-id="<?= $item['cart_item_id'] ?>"
                              data-price="<?= $item['product_price'] ?>"
                              data-qty="<?= $item['cart_item_quantity'] ?>"
                              data-type="<?= $item['product_type'] ?>">
 
                             <input type="checkbox"
-                                   class="item-checkbox w-4 h-4 rounded accent-red-600 cursor-pointer flex-shrink-0"
+                                   class="item-checkbox mt-2 w-4 h-4 rounded accent-red-600 cursor-pointer flex-shrink-0 sm:mt-0"
                                    onchange="recalculate()">
 
                             <a href="product_detail.php?id=<?= $item['product_id'] ?>" class="flex-shrink-0">
@@ -86,50 +88,111 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                             <div class="flex-1 min-w-0">
                                 <a href="product_detail.php?id=<?= $item['product_id'] ?>">
-                                    <p class="font-semibold text-sm text-gray-800 hover:text-red-600 transition-colors truncate"><?= htmlspecialchars($item['product_title']) ?></p>
+                                    <p
+                                        class="font-semibold text-sm leading-snug text-gray-800 hover:text-red-600 transition-colors break-words sm:truncate">
+                                        <?= htmlspecialchars($item['product_title']) ?>
+                                    </p>
                                 </a>
                                 <p class="text-xs text-gray-400 mt-0.5"><?= $item['product_type'] === 'ebook' ? '📱 E-Book' : '📦 Physical' ?></p>
                                 <p class="text-red-600 font-bold text-sm mt-1">RM <?= number_format($item['product_price'], 2) ?></p>
                             </div>
 
-                            <div class="flex-shrink-0">
-                                <?php if ($item['product_type'] === 'physical'): ?>
-                                    <div class="flex items-center border border-gray-200 rounded-lg overflow-hidden">
-                                        <button type="button"
+                            <div
+                                class="ml-7 flex w-[calc(100%-1.75rem)] items-center justify-between gap-3 border-t border-gray-50 pt-3 sm:ml-0 sm:contents sm:border-0 sm:pt-0"
+                            >
+                                <div class="flex-shrink-0">
+                                    <?php if ($item['product_type'] === 'physical'): ?>
+                                        <div
+                                            class="flex items-center overflow-hidden rounded-lg border border-gray-200"
+                                        >
+                                            <button
+                                                type="button"
                                                 onclick="changeQty(<?= $item['cart_item_id'] ?>, -1, <?= $item['product_price'] ?>, <?= $item['physical_stock_quantity'] ?>)"
-                                                class="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-50 transition-colors text-lg">−</button>
-                                        <span id="qty-<?= $item['cart_item_id'] ?>"
-                                              class="w-10 h-8 flex items-center justify-center text-sm font-medium border-x border-gray-200">
-                                            <?= $item['cart_item_quantity'] ?>
-                                        </span>
-                                        <button type="button"
+                                                class="flex h-9 w-9 items-center justify-center text-lg text-gray-500 transition-colors hover:bg-gray-50 sm:h-8 sm:w-8"
+                                            >
+                                                −
+                                            </button>
+
+                                            <span
+                                                id="qty-<?= $item['cart_item_id'] ?>"
+                                                class="flex h-9 w-10 items-center justify-center border-x border-gray-200 text-sm font-medium sm:h-8"
+                                            >
+                                                <?= $item['cart_item_quantity'] ?>
+                                            </span>
+
+                                            <button
+                                                type="button"
                                                 onclick="changeQty(<?= $item['cart_item_id'] ?>, 1, <?= $item['product_price'] ?>, <?= $item['physical_stock_quantity'] ?>)"
-                                                class="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-50 transition-colors text-lg">+</button>
-                                    </div>
-                                <?php else: ?>
-                                    <span class="text-sm text-gray-500">×1</span>
-                                <?php endif; ?>
-                            </div>
+                                                class="flex h-9 w-9 items-center justify-center text-lg text-gray-500 transition-colors hover:bg-gray-50 sm:h-8 sm:w-8"
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+                                    <?php else: ?>
+                                        <span
+                                            class="text-sm font-medium text-gray-500"
+                                        >
+                                            ×1
+                                        </span>
+                                    <?php endif; ?>
+                                </div>
 
-                            <div class="flex-shrink-0 text-right min-w-16">
-                                <p id="subtotal-<?= $item['cart_item_id'] ?>" class="font-bold text-sm text-gray-800">
-                                    RM <?= number_format($item['product_price'] * $item['cart_item_quantity'], 2) ?>
-                                </p>
-                            </div>
+                                <div
+                                    class="min-w-20 flex-shrink-0 text-right"
+                                >
+                                    <p
+                                        id="subtotal-<?= $item['cart_item_id'] ?>"
+                                        class="text-sm font-bold text-gray-800"
+                                    >
+                                        RM <?= number_format(
+                                            $item['product_price'] *
+                                            $item['cart_item_quantity'],
+                                            2
+                                        ) ?>
+                                    </p>
+                                </div>
 
-                            <!-- Remove — POST form instead of GET link -->
-                            <form method="POST" action="cart_action.php" class="flex-shrink-0"
-                                  onsubmit="return confirm('Remove this item?')">
-                                <?php csrf_field() ?>
-                                <input type="hidden" name="action" value="remove">
-                                <input type="hidden" name="cart_item_id" value="<?= $item['cart_item_id'] ?>">
-                                <button type="submit"
-                                        class="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all duration-200">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                    </svg>
-                                </button>
-                            </form>
+                                <form
+                                    method="POST"
+                                    action="cart_action.php"
+                                    class="flex-shrink-0"
+                                    onsubmit="return confirm('Remove this item?')"
+                                >
+                                    <?php csrf_field() ?>
+
+                                    <input
+                                        type="hidden"
+                                        name="action"
+                                        value="remove"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        name="cart_item_id"
+                                        value="<?= $item['cart_item_id'] ?>"
+                                    >
+
+                                    <button
+                                        type="submit"
+                                        class="flex h-9 w-9 items-center justify-center rounded-lg text-gray-300 transition-all duration-200 hover:bg-red-50 hover:text-red-500"
+                                        aria-label="Remove item"
+                                    >
+                                        <svg
+                                            class="h-4 w-4"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"
+                                            ></path>
+                                        </svg>
+                                    </button>
+                                </form>
+                            </div>
                         </div>
                         <?php endforeach; ?>
                     </div>
@@ -141,7 +204,7 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                 <!-- Order Summary -->
                 <div class="w-full lg:w-80 flex-shrink-0">
-                    <div class="bg-white rounded-2xl shadow-sm p-6 sticky top-24">
+                    <div class="bg-white rounded-2xl shadow-sm p-5 sm:p-6 lg:sticky lg:top-24">
                         <h3 class="font-bold text-gray-800 mb-4">Order Summary</h3>
 
                         <div id="summaryList" class="space-y-3 mb-4 text-sm text-gray-500"></div>
@@ -169,8 +232,13 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
 
     <!-- No Item Selected Modal -->
-    <div id="noItemModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-6">
-        <div class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center">
+    <div
+        id="noItemModal"
+        class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-4 sm:px-6"
+    >
+        <div
+            class="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl text-center"
+        >
             <div class="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span class="text-3xl">🛒</span>
             </div>

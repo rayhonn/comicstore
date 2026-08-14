@@ -207,6 +207,74 @@ if (isset($_SESSION['user_id'])) {
     $notification_count =
         (int) $notification_count_stmt->fetchColumn();
 }
+
+$nav_mobile_account_links = [
+    [
+        'label' => 'Dashboard',
+        'url' => app_path(
+            'customer/dashboard.php'
+        ),
+    ],
+    [
+        'label' => 'Order History',
+        'url' => app_path(
+            'customer/orders.php'
+        ),
+    ],
+    [
+        'label' => 'Wishlist',
+        'url' => app_path(
+            'customer/wishlist.php'
+        ),
+    ],
+    [
+        'label' => 'My Collection',
+        'url' => app_path(
+            'customer/collection.php'
+        ),
+    ],
+    [
+        'label' => 'Returns',
+        'url' => app_path(
+            'customer/returns.php'
+        ),
+    ],
+    [
+        'label' => 'My Wallet',
+        'url' => app_path(
+            'customer/wallet.php'
+        ),
+    ],
+    [
+        'label' => 'My Addresses',
+        'url' => app_path(
+            'customer/addresses.php'
+        ),
+    ],
+    [
+        'label' => 'Vouchers & Points',
+        'url' => app_path(
+            'customer/vouchers.php'
+        ),
+    ],
+    [
+        'label' => 'My Reviews',
+        'url' => app_path(
+            'customer/my_reviews.php'
+        ),
+    ],
+    [
+        'label' => 'My Profile',
+        'url' => app_path(
+            'customer/profile.php'
+        ),
+    ],
+    [
+        'label' => 'Notifications',
+        'url' => $nav_notifications_url,
+        'badge' => $notification_count,
+    ],
+];
 ?>
 
 <style>
@@ -514,29 +582,68 @@ if (isset($_SESSION['user_id'])) {
             </a>
 
             <?php if (isset($_SESSION['user_id'])): ?>
-                <a
-                    href="<?= htmlspecialchars(
-                        $nav_dashboard_url,
-                        ENT_QUOTES,
-                        'UTF-8'
-                    ) ?>"
-                    class="block py-2 text-sm text-gray-600 hover:text-red-600"
+                <div
+                    class="mt-2 border-t border-gray-100 pt-4"
                 >
-                    My Account
-                </a>
+                    <div
+                        class="mb-2 flex items-center justify-between"
+                    >
+                        <p
+                            class="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-400"
+                        >
+                            My Account
+                        </p>
 
-                <a
-                    href="<?= htmlspecialchars(
-                        $nav_notifications_url,
-                        ENT_QUOTES,
-                        'UTF-8'
-                    ) ?>"
-                    class="block py-2 text-sm text-gray-600 hover:text-red-600"
-                >
-                    Notifications<?= $notification_count > 0
-                        ? ' (' . $notification_count . ')'
-                        : '' ?>
-                </a>
+                        <span
+                            class="rounded-full bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600"
+                        >
+                            Customer
+                        </span>
+                    </div>
+
+                    <div
+                        class="grid grid-cols-2 gap-2"
+                    >
+                        <?php foreach (
+                            $nav_mobile_account_links
+                            as $account_link
+                        ): ?>
+                            <a
+                                href="<?= htmlspecialchars(
+                                    $account_link['url'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>"
+                                class="flex min-h-[44px] items-center justify-between rounded-xl bg-gray-50 px-3 py-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-red-50 hover:text-red-600"
+                            >
+                                <span>
+                                    <?= htmlspecialchars(
+                                        $account_link['label'],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </span>
+
+                                <?php if (
+                                    !empty(
+                                        $account_link[
+                                            'badge'
+                                        ]
+                                    )
+                                ): ?>
+                                    <span
+                                        class="ml-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] text-white"
+                                    >
+                                        <?= (int)
+                                            $account_link[
+                                                'badge'
+                                            ] ?>
+                                    </span>
+                                <?php endif; ?>
+                            </a>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
             <?php else: ?>
                 <a
                     href="<?= htmlspecialchars(

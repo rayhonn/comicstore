@@ -2,7 +2,7 @@
 
 require_once __DIR__ . '/logger.php';
 
-const APP_SESSION_IDLE_TIMEOUT_SECONDS = 900;
+const APP_SESSION_IDLE_TIMEOUT_SECONDS = 1800;
 
 /**
  * Determine whether the current request is using HTTPS.
