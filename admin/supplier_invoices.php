@@ -9,15 +9,34 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/money_helper.php';
 
 $success = '';
+$error = '';
 
 if (isset($_SESSION['flash_success'])) {
-    $success = $_SESSION['flash_success'];
+    $success = (string) $_SESSION[
+        'flash_success'
+    ];
+
     unset($_SESSION['flash_success']);
 }
 
-function redirectInvoicePage(string $message): void
-{
-    $_SESSION['flash_success'] = $message;
+if (isset($_SESSION['flash_error'])) {
+    $error = (string) $_SESSION[
+        'flash_error'
+    ];
+
+    unset($_SESSION['flash_error']);
+}
+
+function redirectInvoicePage(
+    string $message,
+    bool $isError = false
+): void {
+    $_SESSION[
+        $isError
+            ? 'flash_error'
+            : 'flash_success'
+    ] = $message;
+
     header('Location: supplier_invoices.php');
     exit;
 }
@@ -39,7 +58,10 @@ function requirePositiveRequestId(
     );
 
     if ($value === false || $value === null) {
-        redirectInvoicePage($error_message);
+        redirectInvoicePage(
+            $error_message,
+            true
+        );
     }
 
     return (int) $value;
@@ -52,7 +74,8 @@ function requireInvoiceText(
 ): string {
     if (!is_string($value)) {
         redirectInvoicePage(
-            "$label is invalid."
+            "$label is invalid.",
+            true
         );
     }
 
@@ -60,7 +83,8 @@ function requireInvoiceText(
 
     if ($normalized === '') {
         redirectInvoicePage(
-            "$label is required."
+            "$label is required.",
+            true
         );
     }
 
@@ -70,7 +94,8 @@ function requireInvoiceText(
 
     if ($length > $max_length) {
         redirectInvoicePage(
-            "$label cannot exceed $max_length characters."
+            "$label cannot exceed $max_length characters.",
+            true
         );
     }
 
@@ -89,7 +114,8 @@ if (
         'senior_admin'
     ) {
         redirectInvoicePage(
-            'Only senior admin can approve mismatched payments.'
+            'Only senior admin can approve mismatched payments.',
+            true
         );
     }
 
@@ -122,10 +148,13 @@ if (
         $invoice_id,
     ]);
 
+    $was_updated = $stmt->rowCount() === 1;
+
     redirectInvoicePage(
-        $stmt->rowCount() === 1
+        $was_updated
             ? 'Invoice marked as paid.'
-            : 'Invoice could not be processed.'
+            : 'Invoice could not be processed.',
+        !$was_updated
     );
 }
 
@@ -153,10 +182,13 @@ if (
 
     $stmt->execute([$invoice_id]);
 
+    $was_updated = $stmt->rowCount() === 1;
+
     redirectInvoicePage(
-        $stmt->rowCount() === 1
+        $was_updated
             ? 'Invoice marked as paid.'
-            : 'Invoice could not be processed.'
+            : 'Invoice could not be processed.',
+        !$was_updated
     );
 }
 
@@ -192,10 +224,13 @@ if (
         $invoice_id,
     ]);
 
+    $was_rejected = $stmt->rowCount() === 1;
+
     redirectInvoicePage(
-        $stmt->rowCount() === 1
+        $was_rejected
             ? 'Invoice rejected. The supplier has been notified to resubmit.'
-            : 'Invoice could not be rejected.'
+            : 'Invoice could not be rejected.',
+        !$was_rejected
     );
 }
 
@@ -244,11 +279,20 @@ if (
         }
 
         $credit_stmt = $pdo->prepare(
-            "SELECT sr.return_credit_note_amount
+            "SELECT
+                sr.return_credit_note_number,
+                sr.return_credit_note_amount
              FROM supplier_returns sr
              JOIN purchase_orders po
                ON po.po_id = sr.return_po_id
              WHERE sr.return_id = ?
+             AND sr.return_status = 'resolved'
+             AND sr.return_resolution_type IN (
+                 'credit_note',
+                 'dispute_upheld'
+             )
+             AND sr.return_credit_note_number IS NOT NULL
+             AND sr.return_credit_note_amount > 0
              AND sr.return_credit_note_used_invoice_id IS NULL
              AND po.po_supplier_id = ?
              FOR UPDATE"
@@ -259,9 +303,11 @@ if (
             $invoice['invoice_supplier_id'],
         ]);
 
-        $credit_amount = $credit_stmt->fetchColumn();
+        $credit_note = $credit_stmt->fetch(
+            PDO::FETCH_ASSOC
+        );
 
-        if ($credit_amount === false) {
+        if (!$credit_note) {
             throw new RuntimeException(
                 'This credit note is not available for this supplier.'
             );
@@ -269,7 +315,9 @@ if (
 
         $credit_amount_sen =
             moneyDecimalToSen(
-                (string) $credit_amount
+                (string) $credit_note[
+                    'return_credit_note_amount'
+                ]
             );
 
         $invoice_amount_sen =
@@ -279,10 +327,37 @@ if (
                 ]
             );
 
-        $applied_sen = min(
-            $credit_amount_sen,
+        if (
+            $credit_amount_sen < 1 ||
+            $invoice_amount_sen < 1
+        ) {
+            throw new RuntimeException(
+                'The invoice or credit note amount is invalid.'
+            );
+        }
+
+        if (
+            $credit_amount_sen >
             $invoice_amount_sen
-        );
+        ) {
+            throw new RuntimeException(
+                'Credit Note ' .
+                $credit_note[
+                    'return_credit_note_number'
+                ] .
+                ' is RM ' .
+                moneyFormatSen(
+                    $credit_amount_sen
+                ) .
+                ' and cannot be partially applied to this RM ' .
+                moneyFormatSen(
+                    $invoice_amount_sen
+                ) .
+                ' invoice. Choose an invoice with an equal or higher amount.'
+            );
+        }
+
+        $applied_sen = $credit_amount_sen;
 
         $applied = moneySenToDecimal(
             $applied_sen
@@ -341,7 +416,8 @@ if (
         redirectInvoicePage(
             $e instanceof RuntimeException
                 ? $e->getMessage()
-                : 'Unable to apply the credit note.'
+                : 'Unable to apply the credit note.',
+            true
         );
     }
 }
@@ -430,7 +506,8 @@ if (
         redirectInvoicePage(
             $e instanceof RuntimeException
                 ? $e->getMessage()
-                : 'Unable to remove the credit note.'
+                : 'Unable to remove the credit note.',
+            true
         );
     }
 }
@@ -582,11 +659,25 @@ $available_pos = $pdo->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $available_credits = $pdo->query("
-    SELECT sr.return_id, sr.return_number, sr.return_credit_note_number, sr.return_credit_note_amount, po.po_supplier_id
+    SELECT
+        sr.return_id,
+        sr.return_number,
+        sr.return_credit_note_number,
+        sr.return_credit_note_amount,
+        po.po_supplier_id
     FROM supplier_returns sr
-    JOIN purchase_orders po ON po.po_id = sr.return_po_id
-    WHERE sr.return_credit_note_number IS NOT NULL
+    JOIN purchase_orders po
+        ON po.po_id = sr.return_po_id
+    WHERE sr.return_status = 'resolved'
+    AND sr.return_resolution_type IN (
+        'credit_note',
+        'dispute_upheld'
+    )
+    AND sr.return_credit_note_number IS NOT NULL
+    AND sr.return_credit_note_amount > 0
     AND sr.return_credit_note_used_invoice_id IS NULL
+    ORDER BY sr.return_resolved_at ASC,
+             sr.return_id ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $credits_by_supplier = [];
@@ -616,6 +707,19 @@ foreach ($available_credits as $c) {
         <?php if ($success): ?>
         <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-6">
             ✅ <?= htmlspecialchars($success) ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($error): ?>
+        <div
+            class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-6"
+        >
+            ❌
+            <?= htmlspecialchars(
+                $error,
+                ENT_QUOTES,
+                'UTF-8'
+            ) ?>
         </div>
         <?php endif; ?>
 
