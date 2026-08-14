@@ -133,6 +133,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_quote'])) {
             );
         }
 
+        $rfq_product_ids = [];
+
+        foreach ($locked_items as $item) {
+            $product_id =
+                (int) $item['rfq_item_product_id'];
+
+            if ($product_id <= 0) {
+                throw new RuntimeException(
+                    'This RFQ contains invalid product data.'
+                );
+            }
+
+            $rfq_product_ids[$product_id] = true;
+        }
+
+        $rfq_product_ids = array_keys(
+            $rfq_product_ids
+        );
+
+        $product_placeholders = implode(
+            ',',
+            array_fill(0, count($rfq_product_ids), '?')
+        );
+
+        $supplier_mapping_stmt = $pdo->prepare("
+            SELECT sp.supplier_product_product_id
+            FROM supplier_products sp
+            INNER JOIN suppliers s
+                ON s.supplier_id =
+                    sp.supplier_product_supplier_id
+            WHERE sp.supplier_product_supplier_id = ?
+            AND sp.supplier_product_product_id IN ($product_placeholders)
+            AND sp.supplier_product_status = 'active'
+            AND s.supplier_status = 'active'
+        ");
+
+        $supplier_mapping_stmt->execute(
+            array_merge(
+                [$supplier_id],
+                $rfq_product_ids
+            )
+        );
+
+        $mapped_product_ids = $supplier_mapping_stmt->fetchAll(
+            PDO::FETCH_COLUMN
+        );
+
+        if (
+            count($mapped_product_ids) !==
+            count($rfq_product_ids)
+        ) {
+            throw new RuntimeException(
+                'Your supplier account is no longer eligible to quote every product in this RFQ. Please contact MangaVault.'
+            );
+        }
+
         // Re-check after locking to prevent two requests from creating two quotes.
         $duplicate_quote = $pdo->prepare("
             SELECT quotation_id

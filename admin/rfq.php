@@ -754,7 +754,7 @@ foreach ($supplier_product_rows as $mapping) {
             eligibleCount +
             ' eligible supplier' +
             (eligibleCount === 1 ? '' : 's');
-    }    
+    }
 
     function addProductRow() {
         rowCounter++;

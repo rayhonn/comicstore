@@ -188,7 +188,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
 
             // Lock and verify the selected quotation belongs to this RFQ.
             $selected_quote_stmt = $pdo->prepare("
-                SELECT q.*, s.supplier_name
+                SELECT
+                    q.*,
+                    s.supplier_name,
+                    s.supplier_status
                 FROM quotations q
                 JOIN suppliers s ON s.supplier_id = q.quotation_supplier_id
                 WHERE q.quotation_id = ?
@@ -207,6 +210,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
             if ($selected_quote['quotation_status'] !== 'submitted') {
                 throw new RuntimeException(
                     'This quotation is no longer available for selection.'
+                );
+            }
+
+            if ($selected_quote['supplier_status'] !== 'active') {
+                throw new RuntimeException(
+                    'The selected supplier is no longer active and cannot receive a new purchase order.'
                 );
             }
 
@@ -241,6 +250,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_po'])) {
             if (!$quote_items) {
                 throw new RuntimeException(
                     'No items were found for the selected quotation.'
+                );
+            }
+
+            $quote_product_ids = [];
+
+            foreach ($quote_items as $item) {
+                $product_id =
+                    (int) $item['quotation_item_product_id'];
+
+                if ($product_id <= 0) {
+                    throw new RuntimeException(
+                        'The selected quotation contains invalid product data.'
+                    );
+                }
+
+                $quote_product_ids[$product_id] = true;
+            }
+
+            $quote_product_ids = array_keys(
+                $quote_product_ids
+            );
+
+            $product_placeholders = implode(
+                ',',
+                array_fill(0, count($quote_product_ids), '?')
+            );
+
+            $supplier_mapping_stmt = $pdo->prepare("
+                SELECT supplier_product_product_id
+                FROM supplier_products
+                WHERE supplier_product_supplier_id = ?
+                AND supplier_product_product_id IN ($product_placeholders)
+                AND supplier_product_status = 'active'
+            ");
+
+            $supplier_mapping_stmt->execute(
+                array_merge(
+                    [
+                        (int) $selected_quote[
+                            'quotation_supplier_id'
+                        ],
+                    ],
+                    $quote_product_ids
+                )
+            );
+
+            $mapped_product_ids = $supplier_mapping_stmt->fetchAll(
+                PDO::FETCH_COLUMN
+            );
+
+            if (
+                count($mapped_product_ids) !==
+                count($quote_product_ids)
+            ) {
+                throw new RuntimeException(
+                    'The selected supplier is no longer approved to supply every product in this quotation.'
                 );
             }
 
