@@ -195,7 +195,7 @@ $continue_payment_url =
                         ) ?>"
                         class="block w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm transition-colors"
                     >
-                        Pay Again
+                        Continue Payment
                     </a>
 
                     <a
@@ -281,7 +281,7 @@ $continue_payment_url =
                         ) ?>"
                         class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl text-sm transition-colors text-center"
                     >
-                        Pay Again
+                        Back to Cart
                     </a>
 
                     <a

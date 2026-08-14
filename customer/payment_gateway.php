@@ -1270,16 +1270,55 @@ unset(
                                         Current Password
                                     </label>
 
-                                    <input
-                                        type="password"
-                                        id="wallet_current_password"
-                                        name="current_password"
-                                        maxlength="72"
-                                        autocomplete="current-password"
-                                        required
-                                        placeholder="Confirm your account password"
-                                        class="w-full border border-emerald-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500"
-                                    >
+                                    <div class="relative">
+                                        <input
+                                            type="password"
+                                            id="wallet_current_password"
+                                            name="current_password"
+                                            maxlength="72"
+                                            autocomplete="current-password"
+                                            required
+                                            placeholder="Confirm your account password"
+                                            class="w-full border border-emerald-200 rounded-lg px-3 py-2.5 pr-11 text-sm bg-white focus:outline-none focus:border-emerald-500"
+                                        >
+
+                                        <button
+                                            type="button"
+                                            id="toggle_wallet_password"
+                                            aria-label="Show password"
+                                            aria-controls="wallet_current_password"
+                                            aria-pressed="false"
+                                            class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-emerald-700 focus:outline-none focus:text-emerald-700"
+                                        >
+                                            <svg
+                                                class="w-5 h-5"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    d="M2.25 12s3.5-6 9.75-6 9.75 6 9.75 6-3.5 6-9.75 6S2.25 12 2.25 12Z"
+                                                />
+
+                                                <circle
+                                                    cx="12"
+                                                    cy="12"
+                                                    r="3"
+                                                />
+
+                                                <path
+                                                    id="wallet_password_slash"
+                                                    class="hidden"
+                                                    stroke-linecap="round"
+                                                    d="M4 4l16 16"
+                                                />
+                                            </svg>
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <button
@@ -1758,7 +1797,64 @@ unset(
         );
     }
 
+    const walletPasswordInput =
+        document.getElementById(
+            'wallet_current_password'
+        );
 
+    const walletPasswordToggle =
+        document.getElementById(
+            'toggle_wallet_password'
+        );
+
+    const walletPasswordSlash =
+        document.getElementById(
+            'wallet_password_slash'
+        );
+
+    if (
+        walletPasswordInput &&
+        walletPasswordToggle &&
+        walletPasswordSlash
+    ) {
+        walletPasswordToggle.addEventListener(
+            'click',
+            () => {
+                const passwordIsVisible =
+                    walletPasswordInput.type ===
+                    'text';
+
+                walletPasswordInput.type =
+                    passwordIsVisible
+                        ? 'password'
+                        : 'text';
+
+                walletPasswordToggle.setAttribute(
+                    'aria-label',
+                    passwordIsVisible
+                        ? 'Show password'
+                        : 'Hide password'
+                );
+
+                walletPasswordToggle.setAttribute(
+                    'aria-pressed',
+                    passwordIsVisible
+                        ? 'false'
+                        : 'true'
+                );
+
+                walletPasswordSlash
+                    .classList
+                    .toggle(
+                        'hidden',
+                        passwordIsVisible
+                    );
+
+                walletPasswordInput.focus();
+            }
+        );
+    }
+    
     const walletPaymentForm =
         document.getElementById(
             'walletPaymentForm'

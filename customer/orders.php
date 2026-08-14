@@ -176,6 +176,19 @@ $stmt = $pdo->prepare("
             AS address_street,
         o.order_address_city
             AS address_city,
+        CASE
+            WHEN
+                o.order_status = 'cancelled'
+                AND o.order_payment_status =
+                    'cancelled'
+                AND o.order_updated_at >=
+                    DATE_SUB(
+                        NOW(),
+                        INTERVAL 24 HOUR
+                    )
+            THEN 1
+            ELSE 0
+        END AS order_pay_again_available,
         cr.cancel_request_reason,
         cr.cancel_request_details,
         cr.cancel_request_created_at,
@@ -237,6 +250,29 @@ if ($filter !== 'all') {
             $filter
     );
 }
+
+$pay_again_error_code =
+    is_string(
+        $_GET['pay_again_error'] ?? null
+    )
+        ? $_GET['pay_again_error']
+        : '';
+
+$pay_again_error_messages = [
+    'expired' =>
+        'Pay Again is only available for 24 hours after payment cancellation.',
+    'checkout_active' =>
+        'Please finish or cancel your current checkout before using Pay Again.',
+    'unavailable' =>
+        'One or more items are unavailable, out of stock, or already owned.',
+    'system' =>
+        'Unable to prepare Pay Again. Please try again.',
+];
+
+$pay_again_error_message =
+    $pay_again_error_messages[
+        $pay_again_error_code
+    ] ?? null;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -304,6 +340,20 @@ if ($filter !== 'all') {
                     >
                         Your Stripe payment is being processed. The order will
                         appear here after server confirmation.
+                    </div>
+                <?php endif; ?>
+
+                <?php if (
+                    $pay_again_error_message !== null
+                ): ?>
+                    <div
+                        class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl mb-5"
+                    >
+                        <?= htmlspecialchars(
+                            $pay_again_error_message,
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
                     </div>
                 <?php endif; ?>
 
@@ -517,6 +567,13 @@ if ($filter !== 'all') {
                                         'cancelled'            => '❌ Payment Cancelled',
                                     ];
                                     $payment_label = $payment_labels[$order['order_payment_status']] ?? $order['order_payment_status'];
+
+                                    $pay_again_available =
+                                        (int) (
+                                            $order[
+                                                'order_pay_again_available'
+                                            ] ?? 0
+                                        ) === 1;                                    
                                     ?>
                                     <span class="<?= $color ?> text-xs px-3 py-1 rounded-full font-semibold capitalize">
                                         <?= $order['order_status'] ?>
@@ -524,6 +581,32 @@ if ($filter !== 'all') {
                                     <span class="<?= $payment_color ?> text-xs px-3 py-1 rounded-full font-semibold">
                                         <?= $payment_label ?>
                                     </span>
+
+                                    <?php if (
+                                        $pay_again_available
+                                    ): ?>
+                                        <form
+                                            method="POST"
+                                            action="pay_again.php"
+                                            class="inline-flex"
+                                        >
+                                            <?php csrf_field(); ?>
+
+                                            <input
+                                                type="hidden"
+                                                name="order_id"
+                                                value="<?= (int) $order['order_id'] ?>"
+                                            >
+
+                                            <button
+                                                type="submit"
+                                                class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded-full font-semibold transition-colors"
+                                            >
+                                                Pay Again
+                                            </button>
+                                        </form>
+                                    <?php endif; ?>                                    
+
                                     <?php if ($order['order_payment_status'] === 'pending_confirmation'): ?>
                                         <a
                                             href="payment_waiting.php?order_id=<?= (int) $order['order_id'] ?>"
