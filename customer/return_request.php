@@ -19,13 +19,56 @@ date_default_timezone_set('Asia/Kuala_Lumpur');
 
 // Verify order belongs to user, delivered, physical, within 7 days
 $stmt = $pdo->prepare("
-    SELECT o.*, oi.order_item_id, oi.order_item_type, oi.order_item_price, oi.order_item_quantity,
-    oi.order_item_product_title AS product_title, p.product_cover_image
+    SELECT
+        o.*,
+        oi.order_item_id,
+        oi.order_item_type,
+        oi.order_item_price,
+        oi.order_item_quantity,
+        oi.order_item_product_title
+            AS product_title,
+        p.product_cover_image,
+        CASE
+            WHEN
+                o.order_delivered_at IS NOT NULL
+                AND NOW() >=
+                    o.order_delivered_at
+                AND NOW() <= DATE_ADD(
+                    o.order_delivered_at,
+                    INTERVAL 7 DAY
+                )
+            THEN 1
+            ELSE 0
+        END AS return_window_open,
+        GREATEST(
+            0,
+            CEIL(
+                COALESCE(
+                    TIMESTAMPDIFF(
+                        SECOND,
+                        NOW(),
+                        DATE_ADD(
+                            o.order_delivered_at,
+                            INTERVAL 7 DAY
+                        )
+                    ),
+                    0
+                ) / 86400
+            )
+        ) AS return_days_remaining
     FROM orders o
-    JOIN order_items oi ON oi.order_item_order_id = o.order_id
-    JOIN products p ON oi.order_item_product_id = p.product_id
-    WHERE o.order_id = ? AND o.order_user_id = ? AND oi.order_item_id = ?
-    AND o.order_status = 'delivered' AND oi.order_item_type = 'physical'
+    JOIN order_items oi
+        ON oi.order_item_order_id =
+            o.order_id
+    JOIN products p
+        ON oi.order_item_product_id =
+            p.product_id
+    WHERE
+        o.order_id = ?
+        AND o.order_user_id = ?
+        AND oi.order_item_id = ?
+        AND o.order_status = 'delivered'
+        AND oi.order_item_type = 'physical'
 ");
 $stmt->execute([$order_id, $user_id, $item_id]);
 $order = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -35,11 +78,14 @@ if (!$order) {
     exit;
 }
 
-// Check 7 day window
-$delivered_at = new DateTime($order['order_delivered_at']);
-$now = new DateTime();
-$days_since = $now->diff($delivered_at)->days;
-$within_window = $days_since <= 7;
+// Enforce the exact 7-day return window using the database time.
+$within_window =
+    (int) $order['return_window_open'] === 1;
+
+$days_remaining = max(
+    0,
+    (int) $order['return_days_remaining']
+);
 
 // Check if return already submitted
 $existing = $pdo->prepare("SELECT return_id, return_status, return_admin_note FROM return_requests WHERE return_item_id = ?");
@@ -224,7 +270,7 @@ $reason_options = [
                 <span class="text-4xl">⏰</span>
             </div>
             <h2 class="text-xl font-black text-gray-800 mb-2">Return Window Expired</h2>
-            <p class="text-gray-500 text-sm mb-6 max-w-sm mx-auto">Returns are only accepted within <strong>7 days</strong> of delivery. This order was delivered <?= $days_since ?> days ago.</p>
+            <p class="text-gray-500 text-sm mb-6 max-w-sm mx-auto">Returns are only accepted within <strong>7 days</strong> of delivery. The exact 7-day return deadline for this order has passed.</p>
             <a href="orders.php" class="inline-block bg-red-600 hover:bg-red-700 text-white font-bold px-8 py-3 rounded-xl text-sm transition-colors">
                 Back to Orders
             </a>
@@ -234,7 +280,7 @@ $reason_options = [
         <!-- RETURN FORM -->
         <div class="bg-white rounded-2xl shadow-sm p-8">
             <h2 class="text-xl font-black text-gray-800 mb-1">Request a Return</h2>
-            <p class="text-sm text-gray-400 mb-6">Order <?= $order_num ?> · <?= 7 - $days_since ?> day(s) remaining to request</p>
+            <p class="text-sm text-gray-400 mb-6">Order <?= $order_num ?> · <?= $days_remaining ?> day(s) remaining to request</p>
 
             <!-- Product Info -->
             <div class="flex items-center gap-4 bg-gray-50 rounded-xl p-4 mb-6">

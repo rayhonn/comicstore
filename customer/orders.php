@@ -178,7 +178,19 @@ $stmt = $pdo->prepare("
             AS address_city,
         cr.cancel_request_reason,
         cr.cancel_request_details,
-        cr.cancel_request_created_at
+        cr.cancel_request_created_at,
+        CASE
+            WHEN
+                o.order_delivered_at IS NOT NULL
+                AND NOW() >=
+                    o.order_delivered_at
+                AND NOW() <= DATE_ADD(
+                    o.order_delivered_at,
+                    INTERVAL 7 DAY
+                )
+            THEN 1
+            ELSE 0
+        END AS order_return_window_open
     FROM orders o
     LEFT JOIN order_cancellation_requests cr
         ON cr.cancel_request_order_id =
@@ -607,19 +619,20 @@ if ($filter !== 'all') {
                                             $return_req = $return_check->fetch();
                                             ?>
                                             <?php
-                                            $days_since_delivery = 999;
-                                            if (!empty($order['order_delivered_at'])) {
-                                                $delivered = new DateTime($order['order_delivered_at']);
-                                                $now = new DateTime();
-                                                $days_since_delivery = $now->diff($delivered)->days;
-                                            }
+                                            $return_window_open =
+                                                (int) $order[
+                                                    'order_return_window_open'
+                                                ] === 1;
                                             ?>
-                                            <?php if (!$return_req && $days_since_delivery <= 7): ?>
+                                            <?php if (
+                                                !$return_req &&
+                                                $return_window_open
+                                            ): ?>
                                                 <a href="return_request.php?order_id=<?= $order['order_id'] ?>&item_id=<?= $item['order_item_id'] ?>"
-                                                class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors duration-200 inline-block">
+                                                   class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors duration-200 inline-block">
                                                     ↩ Return
                                                 </a>
-                                            <?php elseif (!$return_req && $days_since_delivery > 7): ?>
+                                            <?php elseif (!$return_req): ?>
                                                 <span class="text-xs text-gray-400">Return expired</span>
                                             <?php else: ?>
                                                 <span class="text-xs <?= $return_req['return_status'] === 'approved' ? 'text-green-600' : ($return_req['return_status'] === 'rejected' ? 'text-red-500' : 'text-orange-500') ?> font-medium capitalize">
