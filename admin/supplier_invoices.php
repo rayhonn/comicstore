@@ -211,27 +211,98 @@ if (
         2000
     );
 
-    $stmt = $pdo->prepare(
-        "UPDATE supplier_invoices
-         SET invoice_status = 'rejected',
-             invoice_reject_reason = ?
-         WHERE invoice_id = ?
-         AND invoice_status = 'unpaid'"
-    );
+    try {
+        $pdo->beginTransaction();
 
-    $stmt->execute([
-        $reason,
-        $invoice_id,
-    ]);
+        $invoice_stmt = $pdo->prepare(
+            "SELECT invoice_credit_note_id
+             FROM supplier_invoices
+             WHERE invoice_id = ?
+             AND invoice_status = 'unpaid'
+             FOR UPDATE"
+        );
 
-    $was_rejected = $stmt->rowCount() === 1;
+        $invoice_stmt->execute([$invoice_id]);
 
-    redirectInvoicePage(
-        $was_rejected
-            ? 'Invoice rejected. The supplier has been notified to resubmit.'
-            : 'Invoice could not be rejected.',
-        !$was_rejected
-    );
+        $invoice = $invoice_stmt->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$invoice) {
+            throw new RuntimeException(
+                'Invoice not found or no longer unpaid.'
+            );
+        }
+
+        $return_id =
+            $invoice['invoice_credit_note_id'] !== null
+                ? (int) $invoice[
+                    'invoice_credit_note_id'
+                ]
+                : null;
+
+        $invoice_update = $pdo->prepare(
+            "UPDATE supplier_invoices
+             SET invoice_status = 'rejected',
+                 invoice_reject_reason = ?,
+                 invoice_credit_note_id = NULL,
+                 invoice_credit_applied_amount = 0
+             WHERE invoice_id = ?
+             AND invoice_status = 'unpaid'"
+        );
+
+        $invoice_update->execute([
+            $reason,
+            $invoice_id,
+        ]);
+
+        if ($invoice_update->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Invoice could not be rejected.'
+            );
+        }
+
+        if ($return_id !== null) {
+            $credit_update = $pdo->prepare(
+                "UPDATE supplier_returns
+                 SET return_credit_note_used_invoice_id = NULL
+                 WHERE return_id = ?
+                 AND return_credit_note_used_invoice_id = ?"
+            );
+
+            $credit_update->execute([
+                $return_id,
+                $invoice_id,
+            ]);
+
+            if ($credit_update->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Unable to release the applied credit note.'
+                );
+            }
+        }
+
+        $pdo->commit();
+
+        $message = $return_id !== null
+            ? 'Invoice rejected. The applied credit note ' .
+                'was released and is available again.'
+            : 'Invoice rejected. The supplier has been ' .
+                'notified to resubmit.';
+
+        redirectInvoicePage($message);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        redirectInvoicePage(
+            $e instanceof RuntimeException
+                ? $e->getMessage()
+                : 'Unable to reject the invoice.',
+            true
+        );
+    }
 }
 
 // Apply credit note
