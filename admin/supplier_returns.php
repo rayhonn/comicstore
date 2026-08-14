@@ -76,6 +76,16 @@ function normalizeResolutionNotes(
     return $notes;
 }
 
+function buildCreditNoteNumber(
+    int $return_id
+): string {
+    return sprintf(
+        'CN-%s-%06d',
+        date('Y'),
+        $return_id
+    );
+}
+
 // ------------------------------------------------------------
 // Action: Issue Credit Note (resolves an acknowledged return)
 // ------------------------------------------------------------
@@ -95,12 +105,6 @@ if (
         ]
     );
 
-    $cn_seq = trim(
-        (string) (
-            $_POST['credit_note_seq'] ?? ''
-        )
-    );
-
     $notes = normalizeResolutionNotes(
         $_POST['resolution_notes'] ?? ''
     );
@@ -113,19 +117,9 @@ if (
         exit;
     }
 
-    if (
-        !ctype_digit($cn_seq) ||
-        strlen($cn_seq) !== 4
-    ) {
-        $_SESSION['flash_error'] =
-            'Credit note number must be 4 digits.';
-
-        header('Location: supplier_returns.php');
-        exit;
-    }
-
-    $cn_number =
-        'CN-' . date('Y') . '-' . $cn_seq;
+    $cn_number = buildCreditNoteNumber(
+        (int) $return_id
+    );
 
     try {
         $pdo->beginTransaction();
@@ -201,6 +195,26 @@ if (
         ) {
             throw new RuntimeException(
                 'This return has already been resolved.'
+            );
+        }
+
+        $number_stmt = $pdo->prepare(
+            "SELECT 1
+             FROM supplier_returns
+             WHERE return_credit_note_number = ?
+             AND return_id <> ?
+             LIMIT 1
+             FOR UPDATE"
+        );
+
+        $number_stmt->execute([
+            $cn_number,
+            $return_id,
+        ]);
+
+        if ($number_stmt->fetchColumn() !== false) {
+            throw new RuntimeException(
+                'Unable to generate a unique credit note number.'
             );
         }
 
@@ -1206,17 +1220,53 @@ unset($r);
                             <input type="hidden" name="issue_credit_note" value="1">
                             <input type="hidden" name="return_id" value="<?= (int) $ret['return_id'] ?>">
                             <div class="border-2 border-gray-100 rounded-xl p-4">
-                                <p class="text-sm font-bold text-gray-700 mb-2">💳 Issue Credit Note</p>
+                                <p class="text-sm font-bold text-gray-700 mb-2">
+                                    💳 Issue Credit Note
+                                </p>
+
+                                <p class="text-xs text-gray-400 mb-2">
+                                    The Credit Note Number is generated automatically.
+                                </p>
+
                                 <div class="grid grid-cols-2 gap-2 mb-2">
-                                   <div class="flex items-center border-2 border-gray-100 rounded-lg overflow-hidden focus-within:border-blue-400">
-                                        <span class="px-3 py-2 bg-gray-50 text-gray-500 text-sm font-mono">CN-<?= date('Y') ?>-</span>
-                                        <input type="text" name="credit_note_seq" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="0001" required
-                                            class="flex-1 px-3 py-2 text-sm focus:outline-none" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,4)">
+                                    <div>
+                                        <label
+                                            class="block text-xs font-semibold text-gray-500 mb-1"
+                                        >
+                                            Credit Note Number
+                                        </label>
+
+                                        <input
+                                            type="text"
+                                            value="<?= htmlspecialchars(
+                                                buildCreditNoteNumber(
+                                                    (int) $ret['return_id']
+                                                ),
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>"
+                                            readonly
+                                            class="w-full px-3 py-2 border-2 border-gray-100 rounded-lg bg-gray-50 text-sm font-mono text-gray-600"
+                                        >
                                     </div>
-                                    <input type="number" step="0.01" name="credit_note_amount" value="<?= moneySenToDecimal(
+
+                                    <div>
+                                        <label
+                                            class="block text-xs font-semibold text-gray-500 mb-1"
+                                        >
+                                            Credit Amount
+                                        </label>
+
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            value="<?= moneySenToDecimal(
                                                 $ret['total_value_sen']
-                                            ) ?>" readonly required
-                                           class="px-3 py-2 border-2 border-gray-100 rounded-lg text-sm focus:outline-none focus:border-blue-400">
+                                            ) ?>"
+                                            readonly
+                                            class="w-full px-3 py-2 border-2 border-gray-100 rounded-lg bg-gray-50 text-sm text-gray-600"
+                                        >
+                                    </div>
                                 </div>
                                 <?php if ($ret['return_status'] === 'escalated'): ?>
                                 <textarea name="resolution_notes" rows="2" maxlength="2000" required placeholder="Justification for upholding the dispute (required)"
