@@ -1,3 +1,4 @@
 .env
 vendor/
 private_storage/wallet_withdrawal_receipts/
+private_storage/return_evidence/
