@@ -156,6 +156,7 @@ function safe_redirect_target(string $target, string $default): string
         'admin/index.php',
         'admin/dashboard.php',
         'admin/admins.php',
+        'admin/register.php',
         'admin/account_deletion_requests.php',
         'admin/identity_conflicts.php',
         'admin/identity_verification_requests.php',

@@ -176,6 +176,7 @@ $management_pages = [
     'tiers.php',
     'staff.php',
     'admins.php',
+    'register.php',
     'homepage.php',
     'faq.php',
     'about.php',
@@ -732,6 +733,15 @@ $admin_access_label =
                     ) ?> block px-3 py-2 rounded-lg text-xs transition-colors"
                 >
                     Admin Accounts
+                </a>
+
+                <a
+                    href="register.php"
+                    class="<?= adminSidebarSubLinkClass(
+                        $admin_current === 'register.php'
+                    ) ?> block px-3 py-2 rounded-lg text-xs transition-colors"
+                >
+                    Register Admin
                 </a>
                 <?php endif; ?>
 
