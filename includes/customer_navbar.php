@@ -314,6 +314,83 @@ $nav_mobile_account_links = [
         transform-origin: top center;
         animation: bellRing 1.2s ease infinite;
     }
+
+    @media (max-width: 1023px) {
+        #navMobileMenu {
+            position: absolute !important;
+            top: 100% !important;
+            right: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            max-height: 0;
+            overflow: hidden;
+            border-top: 1px solid #f3f4f6;
+            background: #ffffff;
+            opacity: 0;
+            box-shadow:
+                0 18px 35px
+                rgba(15, 23, 42, 0.12);
+            transform: none !important;
+            transition:
+                max-height 0.3s ease,
+                opacity 0.2s ease;
+        }
+
+        #navMobileMenu[aria-hidden="false"] {
+            max-height: calc(100vh - 64px);
+            overflow-y: auto;
+            opacity: 1;
+            transform: none !important;
+        }
+
+        #navMobileMenu
+        > div:first-child {
+            display: none;
+        }
+
+        #navOverlay {
+            display: none !important;
+        }
+
+        #navMenuBtn > span {
+            transform-origin: center;
+            transition:
+                transform 0.3s ease,
+                opacity 0.2s ease;
+        }
+
+        #navMenuBtn[aria-expanded="true"]
+        > span:nth-child(1) {
+            transform:
+                translateY(8px)
+                rotate(45deg);
+        }
+
+        #navMenuBtn[aria-expanded="true"]
+        > span:nth-child(2) {
+            opacity: 0;
+        }
+
+        #navMenuBtn[aria-expanded="true"]
+        > span:nth-child(3) {
+            transform:
+                translateY(-8px)
+                rotate(-45deg);
+        }
+
+        #navMenuBtn[aria-expanded="false"]
+        > span:nth-child(1),
+        #navMenuBtn[aria-expanded="false"]
+        > span:nth-child(3) {
+            transform: none;
+        }
+
+        #navMenuBtn[aria-expanded="false"]
+        > span:nth-child(2) {
+            opacity: 1;
+        }
+    }
 </style>
 
 <nav class="sticky top-0 z-[70] bg-white shadow-sm">
