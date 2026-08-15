@@ -529,9 +529,34 @@ $admins = $pdo->query("
             Only Super Admins can create, deactivate or reactivate standard Admin accounts. Super Admin accounts are protected.
         </div>
 
+        <?php
+        $createdStaffAdminId =
+            $_GET['staff_id'] ?? '';
+
+        $hasCreatedStaffAdminId =
+            is_string(
+                $createdStaffAdminId
+            ) &&
+            preg_match(
+                '/^\d{7}$/',
+                $createdStaffAdminId
+            ) === 1;
+        ?>
+
         <?php if (isset($_GET['created'])): ?>
         <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-5">
             ✅ Administrator account created successfully.
+
+            <?php if ($hasCreatedStaffAdminId): ?>
+                <span class="font-bold">
+                    Staff/Admin ID:
+                    <?= htmlspecialchars(
+                        $createdStaffAdminId,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </span>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
 

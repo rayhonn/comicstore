@@ -46,7 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $password = $_POST['password'] ?? null;
 
     if (!is_string($identifier_raw)) {
-        $error = 'Please enter a valid username or email.';
+        $error =
+            'Please enter a valid Staff/Admin ID or Super Admin identifier.';
     } else {
         $identifier_value = trim($identifier_raw);
     }
@@ -236,7 +237,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         maxlength="100"
                         required
                         autocomplete="username"
-                        inputmode="numeric"
                         value="<?= htmlspecialchars(
                             $identifier_value,
                             ENT_QUOTES,
