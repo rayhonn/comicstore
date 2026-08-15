@@ -12,6 +12,9 @@ require_once __DIR__ .
 require_once __DIR__ .
     '/../includes/logger.php';
 
+require_once __DIR__ .
+    '/../includes/staff_admin_id_helper.php';
+
 require_senior_admin();
 
 $error = '';
@@ -251,6 +254,11 @@ if (
         $pdo->beginTransaction();
 
         try {
+            $staffAdminId =
+                allocateStaffAdminId(
+                    $pdo
+                );
+
             $insert =
                 $pdo->prepare("
                     INSERT INTO users (
@@ -262,6 +270,7 @@ if (
                         user_phone,
                         user_role,
                         user_admin_level,
+                        user_staff_id,
                         user_is_active
                     )
                     VALUES (
@@ -273,6 +282,7 @@ if (
                         ?,
                         'admin',
                         'staff_admin',
+                        ?,
                         1
                     )
                 ");
@@ -287,6 +297,7 @@ if (
                 $firstName,
                 $lastName,
                 $phone,
+                $staffAdminId,
             ]);
 
             $newAdminId =
@@ -336,7 +347,10 @@ if (
             app_path(
                 'admin/admins.php'
             ) .
-            '?created=1'
+            '?created=1&staff_id=' .
+            urlencode(
+                $staffAdminId
+            )
         );
     } catch (
         RuntimeException $e

@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/staff_admin_id_helper.php';
 
 require_admin();
 
@@ -193,27 +194,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
             }
 
-            do {
-                $staffId =
-                    date('ym') .
-                    str_pad(
-                        (string) random_int(0, 999),
-                        3,
-                        '0',
-                        STR_PAD_LEFT
-                    );
-
-                $checkId = $pdo->prepare(
-                    'SELECT user_id
-                     FROM users
-                     WHERE user_staff_id = ?'
-                );
-                $checkId->execute([$staffId]);
-            } while ($checkId->fetchColumn());
-
             $pdo->beginTransaction();
 
             try {
+                $staffId =
+                    allocateStaffAdminId(
+                        $pdo
+                    );
                 $insert = $pdo->prepare(
                     "INSERT INTO users (
                         user_name,
@@ -271,7 +258,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw $e;
             }
 
-            $success = 'Staff account created!';
+            $success =
+                'Staff account created successfully. Staff/Admin ID: ' .
+                $staffId;
         } elseif ($action === 'toggle') {
             $userId = normalizeStaffUserId(
                 $_POST['user_id'] ?? null

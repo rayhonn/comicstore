@@ -59,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         )
     ) {
         $error =
-            'Username or email must be between 1 and 100 characters.';
+            'Enter a valid 7-digit Staff/Admin ID or Super Admin account identifier.';
     } elseif (
         $error === '' &&
         (
@@ -76,15 +76,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare("
             SELECT *
             FROM users
-            WHERE (
-                user_name = ?
-                OR user_gmail = ?
-                OR user_staff_id = ?
+            WHERE user_is_active = 1
+            AND (
+                (
+                    user_staff_id = ?
+                    AND (
+                        user_role = 'staff'
+                        OR (
+                            user_role = 'admin'
+                            AND user_admin_level =
+                                'staff_admin'
+                        )
+                    )
+                )
+                OR (
+                    (
+                        user_name = ?
+                        OR user_gmail = ?
+                    )
+                    AND user_role = 'admin'
+                    AND user_admin_level =
+                        'senior_admin'
+                )
             )
-            AND user_is_active = 1
-            AND user_role IN ('admin', 'staff')
             LIMIT 1
         ");
+
         $stmt->execute([
             $identifier_value,
             $identifier_value,
@@ -208,10 +225,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     value="<?= htmlspecialchars($redirect_to, ENT_QUOTES, 'UTF-8') ?>"
                 >
                 <div>
-                    <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Username or Email</label>
-                    <input type="text" name="user_name" maxlength="100" required
-                           value="<?= htmlspecialchars($identifier_value, ENT_QUOTES, 'UTF-8') ?>"
-                           class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white" placeholder="Staff ID, username or email">
+                    <label
+                        class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide"
+                    >
+                        Staff / Admin ID
+                    </label>
+                    <input
+                        type="text"
+                        name="user_name"
+                        maxlength="100"
+                        required
+                        autocomplete="username"
+                        inputmode="numeric"
+                        value="<?= htmlspecialchars(
+                            $identifier_value,
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>"
+                        class="w-full px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-gray-50 focus:bg-white"
+                        placeholder="e.g. 2608001"
+                    >
+
+                    <p
+                        class="mt-1.5 text-[11px] leading-4 text-gray-400"
+                    >
+                        Staff and Admin accounts sign in using their
+                        7-digit ID. Super Admin may use username or email.
+                    </p>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Password</label>
