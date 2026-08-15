@@ -842,10 +842,6 @@ foreach ($products as $product) {
             }
         }
     </style>
-    <link
-        rel="stylesheet"
-        href="../assets/css/mobile_experience.css?v=1"
-    >
 
 </head>
 <body class="mobile-catalog-page min-h-screen bg-[#f5f0eb] text-gray-900 antialiased">
@@ -2620,11 +2616,6 @@ foreach ($products as $product) {
         });
         <?php endif; ?>
     </script>
-
-    <script
-        src="../assets/js/mobile_experience.js?v=1"
-        defer
-    ></script>
 
 </body>
 </html>

@@ -666,7 +666,7 @@ $genre_visuals = [
                 <button
                     id="menuBtn"
                     type="button"
-                    class="flex flex-col gap-1.5 p-1 focus:outline-none lg:hidden"
+                    class="relative z-[80] flex h-10 w-10 flex-col items-center justify-center gap-1.5 rounded-xl p-2 focus:outline-none focus:ring-2 focus:ring-red-100 lg:hidden"
                     aria-label="Open navigation menu"
                     aria-expanded="false"
                     aria-controls="mobileMenu"

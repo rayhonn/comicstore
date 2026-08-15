@@ -316,7 +316,7 @@ $nav_mobile_account_links = [
     }
 </style>
 
-<nav class="sticky top-0 z-50 bg-white shadow-sm">
+<nav class="sticky top-0 z-[70] bg-white shadow-sm">
     <div
         class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 sm:py-4"
     >
@@ -530,7 +530,7 @@ $nav_mobile_account_links = [
 
     <div
         id="navMobileMenu"
-        class="fixed right-0 top-0 z-[60] h-[100dvh] w-[min(88vw,380px)] translate-x-full overflow-y-auto bg-white shadow-2xl transition-transform duration-300 ease-out lg:hidden"
+        class="fixed right-0 top-0 z-[80] h-[100dvh] w-[min(88vw,380px)] translate-x-full overflow-y-auto bg-white shadow-2xl transition-transform duration-300 ease-out lg:hidden"
         aria-hidden="true"
     >
         <div
@@ -707,7 +707,7 @@ $nav_mobile_account_links = [
 
     <div
         id="navOverlay"
-        class="fixed inset-0 z-[55] hidden bg-black/40 backdrop-blur-[1px] lg:hidden"
+        class="fixed inset-0 z-[60] hidden bg-black/40 backdrop-blur-[1px] lg:hidden"
     ></div>
 </nav>
 

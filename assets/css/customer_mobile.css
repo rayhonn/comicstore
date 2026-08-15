@@ -1025,6 +1025,79 @@
     }
 }
 
+@media (max-width: 430px) {
+    body[data-customer-page="home"]
+        .catalog-filter-form {
+        grid-template-columns:
+            1fr !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-filter-form
+        > label:first-child {
+        grid-column: auto;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-filter-form
+        input,
+    body[data-customer-page="home"]
+        .catalog-filter-form
+        select,
+    body[data-customer-page="home"]
+        .catalog-filter-form
+        button {
+        width: 100%;
+    }
+
+    body[data-customer-page="home"]
+        #catalogProductGrid {
+        grid-template-columns:
+            1fr !important;
+        gap: 1rem !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-product-card {
+        max-width: 100%;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-cover-stage {
+        aspect-ratio:
+            4 /
+            5;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-card-body {
+        min-height: auto !important;
+        padding: 1rem !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-card-body
+        > a {
+        min-height: auto !important;
+        font-size: 0.9rem !important;
+        line-height: 1.3rem !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-card-body
+        > p.truncate {
+        display: block;
+        font-size: 0.75rem !important;
+    }
+
+    body[data-customer-page="home"]
+        .catalog-card-actions
+        > a {
+        height: 44px !important;
+        font-size: 0.75rem !important;
+    }
+}
+
 @media (max-width: 359px) {
     body[data-customer-page="checkout"]
         #speedSection
@@ -1048,28 +1121,5 @@
         > .flex-1
         > .grid.grid-cols-2 {
         grid-template-columns: 1fr !important;
-    }
-
-    body[data-customer-page="home"]
-        .catalog-filter-form {
-        grid-template-columns:
-            1fr !important;
-    }
-
-    body[data-customer-page="home"]
-        .catalog-filter-form
-        > label:first-child {
-        grid-column: auto;
-    }
-
-    body[data-customer-page="home"]
-        #catalogProductGrid {
-        grid-template-columns:
-            1fr !important;
-    }
-
-    body[data-customer-page="home"]
-        .catalog-card-body {
-        min-height: auto !important;
     }
 }
