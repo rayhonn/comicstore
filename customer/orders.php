@@ -303,6 +303,29 @@ $pay_again_error_message =
 
             <div class="flex-1 min-w-0">
 
+                <div
+                    class="customer-orders-heading mb-5"
+                >
+                    <p
+                        class="text-[11px] font-black uppercase tracking-[0.18em] text-red-600"
+                    >
+                        Order Centre
+                    </p>
+
+                    <h1
+                        class="mt-1 text-2xl font-black tracking-tight text-gray-900"
+                    >
+                        My Orders
+                    </h1>
+
+                    <p
+                        class="mt-1 max-w-2xl text-sm leading-6 text-gray-400"
+                    >
+                        Review payment status, delivery progress,
+                        invoices, returns and cancellation options.
+                    </p>
+                </div>
+
                 <?php if (isset($_GET['success'])): ?>
                     <div class="bg-green-50 border border-green-200 text-green-600 text-sm px-4 py-3 rounded-xl mb-5">
                         Order placed successfully!
@@ -508,14 +531,22 @@ $pay_again_error_message =
                     <?php endforeach; ?>
                 </div>
 
-                <!-- Filter Dropdown - Mobile -->
-                <div class="lg:hidden mb-6">
-                    <select onchange="window.location.href='orders.php?filter='+this.value"
-                            class="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm font-medium text-gray-700 focus:outline-none focus:border-red-500 shadow-sm">
+                <!-- Filter Pills - Mobile -->
+                <div
+                    class="order-filter-strip -mx-1 mb-5 overflow-x-auto px-1 pb-1 lg:hidden"
+                >
+                    <div class="flex w-max gap-2">
                         <?php foreach ($filters as $key => $label): ?>
-                            <option value="<?= $key ?>" <?= $filter === $key ? 'selected' : '' ?>><?= $label ?></option>
+                            <a
+                                href="orders.php?filter=<?= $key ?>"
+                                class="inline-flex min-h-[40px] items-center justify-center whitespace-nowrap rounded-xl px-4 text-xs font-bold transition-colors <?= $filter === $key
+                                    ? 'bg-red-600 text-white shadow-sm'
+                                    : 'border border-gray-200 bg-white text-gray-500' ?>"
+                            >
+                                <?= $label ?>
+                            </a>
                         <?php endforeach; ?>
-                    </select>
+                    </div>
                 </div>
 
                 <?php if (count($orders) === 0): ?>
@@ -537,11 +568,12 @@ $pay_again_error_message =
                 <?php else: ?>
                     <div class="space-y-4">
                         <?php foreach ($orders as $order): ?>
-                        <div class="bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow duration-200">
-
+                        <div
+                            class="order-card bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow duration-200"
+                        >
                             <!-- Order Header -->
-                            <div class="px-6 py-4 border-b border-gray-50 flex justify-between items-center flex-wrap gap-3">
-                                <div class="flex items-center gap-4">
+                            <div class="order-card-header px-6 py-4 border-b border-gray-50 flex justify-between items-center flex-wrap gap-3">
+                                <div class="order-status-group flex items-center gap-4">
                                     <div>
                                         <p class="font-bold text-gray-800 text-sm">Order #<?= str_pad($order['order_id'], 4, '0', STR_PAD_LEFT) ?></p>
                                         <p class="text-xs text-gray-400"><?= date('d M Y, h:i A', strtotime($order['order_created_at'])) ?></p>
@@ -636,7 +668,7 @@ $pay_again_error_message =
                                         <?php endif; ?>
                                     <?php endif; ?>
                                 </div>
-                                <p class="font-bold text-red-600">
+                                <p class="order-card-total font-bold text-red-600">
                                     RM
                                     <?= moneyFormatSen(
                                         moneyDecimalToSen(
@@ -663,9 +695,9 @@ $pay_again_error_message =
                             $stmt2->execute([$order['order_id']]);
                             $items = $stmt2->fetchAll(PDO::FETCH_ASSOC);
                             ?>
-                            <div class="px-6 py-4">
+                            <div class="order-items px-6 py-4">
                                 <?php foreach ($items as $item): ?>
-                                <div class="flex items-center gap-4 py-3 border-b border-gray-50 last:border-0">
+                                <div class="order-item-row flex items-center gap-4 py-3 border-b border-gray-50 last:border-0">
                                     <?php if ($item['product_cover_image']): ?>
                                         <img src="../assets/images/<?= htmlspecialchars($item['product_cover_image']) ?>"
                                              class="w-12 h-16 object-cover rounded-lg flex-shrink-0">
@@ -686,7 +718,7 @@ $pay_again_error_message =
                                             ) ?>
                                         </p>
                                     </div>
-                                    <div class="flex-shrink-0">
+                                    <div class="order-item-action flex-shrink-0">
                                         <?php if (
                                             $item['order_item_type'] === 'ebook' &&
                                             $order['order_payment_status'] === 'confirmed'
@@ -777,7 +809,7 @@ $pay_again_error_message =
                             <?php endif; ?>
                             
                             <!-- Invoice + Actions Footer -->
-                            <div class="px-6 py-3 border-t border-gray-50 flex items-center justify-between">
+                            <div class="order-card-footer px-6 py-3 border-t border-gray-50 flex items-center justify-between">
                                 <div class="flex items-center gap-4">
                                     <a href="invoice.php?order_id=<?= $order['order_id'] ?>"
                                         class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-red-600 transition-colors font-medium">
@@ -798,7 +830,7 @@ $pay_again_error_message =
 
                             <!-- Mini Timeline + Tracking -->
                             <?php if ($order['order_has_physical'] && $order['order_payment_status'] === 'confirmed'): ?>
-                            <div class="px-6 py-4 bg-gray-50 border-t border-gray-100">
+                            <div class="order-timeline-panel px-6 py-4 bg-gray-50 border-t border-gray-100">
 
                                 <?php if ($order['address_recipient_name']): ?>
                                 <p class="text-xs text-gray-500 mb-4">
@@ -818,7 +850,10 @@ $pay_again_error_message =
                                     $progress = $done_count > 1 ? (($done_count - 1) / (count($mini_steps) - 1)) * 100 : 0;
                                 ?>
                                 <!-- Horizontal Timeline -->
-                                <div class="relative flex items-start justify-between mb-4">
+                                <div class="order-timeline-scroll mb-4 overflow-x-auto pb-1">
+                                    <div
+                                        class="order-mini-timeline relative flex min-w-[430px] items-start justify-between"
+                                    >
                                     <!-- Background line -->
                                     <div class="absolute top-4 left-4 right-4 h-0.5 bg-gray-200 z-0"></div>
                                     <!-- Progress line -->
@@ -833,6 +868,7 @@ $pay_again_error_message =
                                         <p class="text-xs mt-1 font-semibold <?= $step['done'] ? 'text-gray-700' : 'text-gray-300' ?> text-center leading-tight"><?= $step['label'] ?></p>
                                     </div>
                                     <?php endforeach; ?>
+                                    </div>
                                 </div>
                                 <?php endif; ?>
 
@@ -845,7 +881,7 @@ $pay_again_error_message =
                                     $courier_key = $order['order_courier'] ?? null;
                                     $courier_name = $courier_names[$courier_key] ?? 'Courier';
                                 ?>
-                                <div class="flex items-center gap-3 bg-white rounded-xl p-3 border border-gray-100">
+                                <div class="order-tracking-card flex items-center gap-3 bg-white rounded-xl p-3 border border-gray-100">
                                     <span class="text-lg">🚚</span>
                                     <div class="flex-1 min-w-0">
                                         <p class="text-xs text-gray-400"><?= $courier_name ?></p>

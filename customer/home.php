@@ -966,7 +966,7 @@ foreach ($products as $product) {
                 >
                     <form
                         method="GET"
-                        class="grid gap-3 lg:grid-cols-[minmax(260px,1.45fr)_repeat(3,minmax(150px,0.75fr))_auto]"
+                        class="catalog-filter-form grid gap-3 lg:grid-cols-[minmax(260px,1.45fr)_repeat(3,minmax(150px,0.75fr))_auto]"
                     >
                         <label class="relative block">
                             <span class="sr-only">Search catalog</span>
@@ -1145,7 +1145,7 @@ foreach ($products as $product) {
                 </div>
 
                 <div
-                    class="mb-6 mt-10 flex flex-col justify-between gap-3 sm:flex-row sm:items-end"
+                    class="catalog-results-heading mb-6 mt-10 flex flex-col justify-between gap-3 sm:flex-row sm:items-end"
                 >
                     <div>
                         <p
@@ -1424,7 +1424,7 @@ foreach ($products as $product) {
                                     </div>
 
                                     <div
-                                        class="mt-auto grid grid-cols-[1fr_auto] gap-2 pt-5"
+                                        class="catalog-card-actions mt-auto grid grid-cols-[1fr_auto] gap-2 pt-5"
                                     >
                                         <a
                                             href="product_detail.php?id=<?= $detailId ?>"
@@ -1442,7 +1442,7 @@ foreach ($products as $product) {
                                                 JSON_HEX_APOS |
                                                 JSON_HEX_QUOT
                                             ) ?>)'
-                                            class="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-sm text-gray-500 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+                                            class="catalog-quick-view flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-sm text-gray-500 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600"
                                             aria-label="Quick view"
                                             title="Quick view"
                                         >
