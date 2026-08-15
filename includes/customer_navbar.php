@@ -280,7 +280,7 @@ $nav_mobile_account_links = [
 <style>
     @import url("<?= htmlspecialchars(
         app_path(
-            'assets/css/customer_mobile.css?v=2'
+            'assets/css/customer_mobile.css?v=3'
         ),
         ENT_QUOTES,
         'UTF-8'

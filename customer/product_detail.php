@@ -290,6 +290,14 @@ if ($ebook_status === 'owned') {
         .star-btn { transition: transform 0.1s ease; cursor: pointer; }
         .star-btn:hover { transform: scale(1.2); }
 
+        .product-wishlist-label {
+            display: none;
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
         .product-wishlist-button {
             display: flex;
             width: 52px;
@@ -600,7 +608,13 @@ if ($ebook_status === 'owned') {
                     <?php endif; ?>
 
                     <!-- Actions -->
-                    <div class="product-actions-row flex gap-3 flex-wrap">
+                    <div
+                        class="product-actions-row flex gap-3 flex-wrap"
+                        data-purchase-layout="<?= $product['product_type'] === 'physical' &&
+                            (int) $product['physical_stock_quantity'] > 0
+                                ? 'physical'
+                                : 'default' ?>"
+                    >
                         <?php if (
                             $product['product_type'] === 'ebook' &&
                             $owns_ebook
@@ -632,7 +646,11 @@ if ($ebook_status === 'owned') {
                                 Out of Stock
                             </button>
                         <?php else: ?>
-                            <form method="POST" action="cart_action.php" class="flex gap-3 flex-1">
+                            <form
+                                method="POST"
+                                action="cart_action.php"
+                                class="product-cart-form flex gap-3 flex-1"
+                            >
                                 <?php csrf_field(); ?>
                                 <input type="hidden" name="action" value="add">
                                 <input type="hidden" name="product_id" value="<?= (int) $id ?>">
@@ -673,8 +691,26 @@ if ($ebook_status === 'owned') {
                                 <?php else: ?>
                                     <input type="hidden" name="quantity" value="1">
                                 <?php endif; ?>
-                                <button type="submit" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl transition-colors">
-                                    🛒 Add to Cart
+                                <button
+                                    type="submit"
+                                    class="product-add-cart-button flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl transition-colors"
+                                >
+                                    <svg
+                                        class="h-5 w-5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
+                                        ></path>
+                                    </svg>
+
+                                    <span>Add to Cart</span>
                                 </button>
                             </form>
                         <?php endif; ?>
@@ -733,11 +769,11 @@ if ($ebook_status === 'owned') {
 
                                 <span
                                     id="productWishlistLabel"
-                                    class="sr-only"
+                                    class="product-wishlist-label"
                                 >
                                     <?= $in_wishlist
-                                        ? 'Remove from wishlist'
-                                        : 'Add to wishlist' ?>
+                                        ? 'Saved'
+                                        : 'Wishlist' ?>
                                 </span>
                             </button>
                         </form>
@@ -1009,7 +1045,10 @@ if ($ebook_status === 'owned') {
                 wishlistButton.setAttribute('aria-pressed', isActive ? 'true' : 'false');
                 wishlistButton.setAttribute('aria-label', isActive ? 'Remove from wishlist' : 'Add to wishlist');
                 wishlistIcon.textContent = isActive ? '♥' : '♡';
-                wishlistLabel.textContent = isActive ? 'Remove from wishlist' : 'Add to wishlist';
+                wishlistLabel.textContent =
+                    isActive
+                        ? 'Saved'
+                        : 'Wishlist';
                 wishlistButton.classList.add('is-success');
                 window.setTimeout(() => wishlistButton.classList.remove('is-success'), 350);
                 showWishlistToast(data.message);
