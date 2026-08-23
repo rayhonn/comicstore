@@ -158,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $pdo,
                         $customer_id,
                         'Bank Withdrawal Approved',
-                        "Your bank withdrawal request $request_number for RM $amount has been approved. Bank processing may take up to 14 business days. Your official approval PDF is now available in My Wallet.",
+                        "Your bank withdrawal request $request_number for RM $amount has been approved by MangaVault and submitted to your destination bank for verification. Processing may take up to 14 business days. Your approval PDF is available in My Wallet.",
                         'system'
                     );
                 } elseif ($action === 'reject') {
@@ -577,6 +577,11 @@ $result_id = filter_input(
                             'wallet_withdrawal_amount'
                         ]
                     );
+                    $bank_status = (string) (
+                        $request[
+                            'wallet_withdrawal_bank_status'
+                        ] ?? 'not_submitted'
+                    );
                     $processing_deadline =
                         walletWithdrawalBusinessDayDeadlineLabel(
                             (string) (
@@ -588,6 +593,13 @@ $result_id = filter_input(
                     ?>
                     <section
                         class="bg-white rounded-2xl shadow-sm overflow-hidden"
+                        <?= $status === 'approved' &&
+                            $bank_status === 'pending'
+                                ? 'data-bank-poll-id="' .
+                                    (int) $request[
+                                        'wallet_withdrawal_id'
+                                    ] . '"'
+                                : '' ?>
                     >
                         <div
                             class="px-6 py-5 border-b border-gray-100 flex items-start justify-between gap-4 flex-wrap"
@@ -616,14 +628,13 @@ $result_id = filter_input(
                                 </div>
                                 <p class="text-xs text-gray-400 mt-1">
                                     Requested <?= htmlspecialchars(
-                                        date(
+                                        walletWithdrawalMalaysiaDateTime(
+                                            (string) $request[
+                                                'wallet_withdrawal_created_at'
+                                            ],
                                             'd M Y, h:i A',
-                                            strtotime(
-                                                (string) $request[
-                                                    'wallet_withdrawal_created_at'
-                                                ]
-                                            )
-                                        ),
+                                            'Not available'
+                                        ) . ' MYT',
                                         ENT_QUOTES,
                                         'UTF-8'
                                     ) ?>
@@ -719,6 +730,18 @@ $result_id = filter_input(
                                     <?php endif; ?>
 
                                     <?php if (
+                                        $bank_status === 'approved'
+                                    ): ?>
+                                        <a
+                                            href="wallet_withdrawal_bank_confirmation.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>&amp;download=1"
+                                            class="inline-flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
+                                        >
+                                            <span aria-hidden="true">✅</span>
+                                            Download Bank Approval Proof
+                                        </a>
+                                    <?php endif; ?>
+
+                                    <?php if (
                                         in_array(
                                             $status,
                                             [
@@ -802,13 +825,12 @@ $result_id = filter_input(
                                                 >
                                                     <?= htmlspecialchars(
                                                         $status === 'completed'
-                                                            ? date(
+                                                            ? walletWithdrawalMalaysiaDateTime(
+                                                                (string) $request[
+                                                                    'wallet_withdrawal_completed_at'
+                                                                ],
                                                                 'd M Y',
-                                                                strtotime(
-                                                                    (string) $request[
-                                                                        'wallet_withdrawal_completed_at'
-                                                                    ]
-                                                                )
+                                                                'Not available'
                                                             )
                                                             : (
                                                                 $processing_deadline !== ''
@@ -963,6 +985,144 @@ $result_id = filter_input(
                                     </div>
 
                                 <?php elseif ($status === 'approved'): ?>
+                                    <?php if ($bank_status === 'pending'): ?>
+                                        <div
+                                            class="rounded-xl border border-amber-200 bg-amber-50 p-5"
+                                        >
+                                            <div class="flex items-start gap-3">
+                                                <span
+                                                    class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100 text-xl"
+                                                    aria-hidden="true"
+                                                >
+                                                    🏦
+                                                </span>
+                                                <div>
+                                                    <p
+                                                        class="text-sm font-black text-amber-900"
+                                                    >
+                                                        Waiting for Bank Verification
+                                                    </p>
+                                                    <p
+                                                        class="mt-1 text-xs leading-relaxed text-amber-700"
+                                                    >
+                                                        <?= htmlspecialchars(
+                                                            (string) $request[
+                                                                'wallet_withdrawal_bank_name'
+                                                            ],
+                                                            ENT_QUOTES,
+                                                            'UTF-8'
+                                                        ) ?> must independently approve this request before the transfer form is unlocked.
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div
+                                                class="mt-4 rounded-xl border border-amber-200 bg-white/80 p-3 text-xs text-amber-800"
+                                            >
+                                                <p>
+                                                    <strong>Gateway submission:</strong>
+                                                    <span class="font-mono">
+                                                        <?= htmlspecialchars(
+                                                            (string) (
+                                                                $request[
+                                                                    'wallet_withdrawal_bank_submission_id'
+                                                                ] ?? 'Pending assignment'
+                                                            ),
+                                                            ENT_QUOTES,
+                                                            'UTF-8'
+                                                        ) ?>
+                                                    </span>
+                                                </p>
+                                                <p class="mt-1">
+                                                    <strong>Submitted:</strong>
+                                                    <?= htmlspecialchars(
+                                                        walletWithdrawalMalaysiaDateTime(
+                                                            (string) (
+                                                                $request[
+                                                                    'wallet_withdrawal_bank_submitted_at'
+                                                                ] ?? ''
+                                                            ),
+                                                            'd M Y, h:i A',
+                                                            'Not available'
+                                                        ) . ' MYT',
+                                                        ENT_QUOTES,
+                                                        'UTF-8'
+                                                    ) ?>
+                                                </p>
+                                            </div>
+
+                                            <p
+                                                class="mt-3 text-[11px] font-semibold text-amber-700"
+                                            >
+                                                This card checks automatically for a bank decision.
+                                            </p>
+                                        </div>
+
+                                    <?php elseif (
+                                        $bank_status === 'rejected'
+                                    ): ?>
+                                        <div
+                                            class="rounded-xl border border-red-200 bg-red-50 p-5"
+                                        >
+                                            <p
+                                                class="text-sm font-black text-red-800"
+                                            >
+                                                Bank Verification Rejected
+                                            </p>
+                                            <p
+                                                class="mt-1 text-xs leading-relaxed text-red-700"
+                                            >
+                                                The transfer form remains locked. Review the bank decision and use the failure action below to release the customer's reserved funds.
+                                            </p>
+                                            <p class="mt-3 text-xs text-red-700">
+                                                <strong>Decision reference:</strong>
+                                                <?= htmlspecialchars(
+                                                    (string) (
+                                                        $request[
+                                                            'wallet_withdrawal_bank_decision_reference'
+                                                        ] ?? 'Not available'
+                                                    ),
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+                                            <p class="mt-1 text-xs text-red-700">
+                                                <strong>Decision time:</strong>
+                                                <?= htmlspecialchars(
+                                                    walletWithdrawalMalaysiaDateTime(
+                                                        (string) (
+                                                            $request[
+                                                                'wallet_withdrawal_bank_decided_at'
+                                                            ] ?? ''
+                                                        ),
+                                                        'd M Y, h:i A',
+                                                        'Not available'
+                                                    ) . ' MYT',
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+                                            <?php if (!empty(
+                                                $request[
+                                                    'wallet_withdrawal_bank_decision_note'
+                                                ]
+                                            )): ?>
+                                                <p class="mt-2 text-xs text-red-700">
+                                                    <strong>Bank note:</strong>
+                                                    <?= htmlspecialchars(
+                                                        (string) $request[
+                                                            'wallet_withdrawal_bank_decision_note'
+                                                        ],
+                                                        ENT_QUOTES,
+                                                        'UTF-8'
+                                                    ) ?>
+                                                </p>
+                                            <?php endif; ?>
+                                        </div>
+
+                                    <?php elseif (
+                                        $bank_status === 'approved'
+                                    ): ?>
                                     <div
                                         class="bg-blue-50 border border-blue-100 rounded-xl p-4"
                                     >
@@ -979,12 +1139,28 @@ $result_id = filter_input(
                                             <p
                                                 class="text-xs font-bold text-blue-900"
                                             >
-                                                Official approval PDF is ready
+                                                Bank verification approved
                                             </p>
                                             <p
                                                 class="mt-1 text-[11px] leading-relaxed text-blue-600"
                                             >
-                                                The customer can already download the approval advice. After completion, the same endpoint automatically becomes the final transfer confirmation.
+                                                Bank reference <?= htmlspecialchars(
+                                                    (string) $request[
+                                                        'wallet_withdrawal_bank_decision_reference'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?> · <?= htmlspecialchars(
+                                                    walletWithdrawalMalaysiaDateTime(
+                                                        (string) $request[
+                                                            'wallet_withdrawal_bank_decided_at'
+                                                        ],
+                                                        'd M Y, h:i A',
+                                                        'Not available'
+                                                    ) . ' MYT',
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>. The Admin can now manually record the completed transfer.
                                             </p>
                                         </div>
 
@@ -1056,6 +1232,23 @@ $result_id = filter_input(
                                             </button>
                                         </form>
                                     </div>
+
+                                    <?php else: ?>
+                                        <div
+                                            class="rounded-xl border border-gray-200 bg-gray-50 p-5"
+                                        >
+                                            <p
+                                                class="text-sm font-black text-gray-700"
+                                            >
+                                                Bank Submission Required
+                                            </p>
+                                            <p
+                                                class="mt-1 text-xs leading-relaxed text-gray-500"
+                                            >
+                                                Run the bank gateway database migration to prepare this legacy approved request.
+                                            </p>
+                                        </div>
+                                    <?php endif; ?>
 
                                     <div
                                         class="bg-orange-50 border border-orange-100 rounded-xl p-4 mt-4"
@@ -1406,6 +1599,59 @@ $result_id = filter_input(
                 }
             }
         );
+
+        async function pollBankVerificationCards() {
+            const cards = document.querySelectorAll(
+                '[data-bank-poll-id]'
+            );
+
+            await Promise.all(
+                Array.from(cards).map(async (card) => {
+                    const withdrawalId =
+                        card.dataset.bankPollId;
+
+                    try {
+                        const response = await fetch(
+                            'wallet_withdrawal_bank_status.php?' +
+                                new URLSearchParams({
+                                    id: withdrawalId,
+                                }),
+                            {
+                                credentials: 'same-origin',
+                                cache: 'no-store',
+                                headers: {
+                                    Accept: 'application/json',
+                                },
+                            }
+                        );
+
+                        if (!response.ok) {
+                            return;
+                        }
+
+                        const result = await response.json();
+
+                        if (
+                            result.ok &&
+                            result.bank_status !== 'pending'
+                        ) {
+                            window.location.reload();
+                        }
+                    } catch (error) {
+                        // A temporary polling failure must not interrupt Admin work.
+                    }
+                })
+            );
+        }
+
+        if (
+            document.querySelector('[data-bank-poll-id]')
+        ) {
+            window.setInterval(
+                pollBankVerificationCards,
+                10000
+            );
+        }
     </script>
 
 </body>

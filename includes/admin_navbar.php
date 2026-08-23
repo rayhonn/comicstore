@@ -112,6 +112,8 @@ $wallet_withdrawal_pages = [
     'wallet_withdrawal_bank.php',
     'wallet_withdrawal_evidence.php',
     'wallet_withdrawal_receipt.php',
+    'wallet_withdrawal_bank_confirmation.php',
+    'wallet_withdrawal_bank_status.php',
 ];
 
 $review_pages = [

@@ -13,6 +13,9 @@ $loginDestination = match ($role) {
     'supplier' =>
         app_path('supplier/login.php?logged_out=1'),
 
+    'bank' =>
+        app_path('bank/login.php?logged_out=1'),
+
     default =>
         app_path('login.php?logged_out=1'),
 };
@@ -27,6 +30,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
         'supplier' =>
             app_path('supplier/dashboard.php'),
+
+        'bank' =>
+            app_path('bank/dashboard.php'),
 
         'customer' =>
             app_path('index.php'),

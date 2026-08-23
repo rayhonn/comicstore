@@ -28,6 +28,45 @@ function walletWithdrawalSupportedBanks(): array
     ];
 }
 
+function walletWithdrawalMalaysiaDateTimeObject(
+    string $storedUtc
+): ?DateTimeImmutable {
+    $storedUtc = trim($storedUtc);
+
+    if ($storedUtc === '') {
+        return null;
+    }
+
+    try {
+        $utcDate = new DateTimeImmutable(
+            $storedUtc,
+            new DateTimeZone('UTC')
+        );
+
+        return $utcDate->setTimezone(
+            new DateTimeZone(
+                'Asia/Kuala_Lumpur'
+            )
+        );
+    } catch (Throwable) {
+        return null;
+    }
+}
+
+function walletWithdrawalMalaysiaDateTime(
+    string $storedUtc,
+    string $format = 'd M Y, h:i A',
+    string $fallback = 'Not available'
+): string {
+    $date = walletWithdrawalMalaysiaDateTimeObject(
+        $storedUtc
+    );
+
+    return $date instanceof DateTimeImmutable
+        ? $date->format($format)
+        : $fallback;
+}
+
 function walletWithdrawalBusinessDayDeadline(
     string $approvedAt,
     int $businessDays = 14
@@ -42,14 +81,12 @@ function walletWithdrawalBusinessDayDeadline(
         return null;
     }
 
-    try {
-        $deadline = new DateTimeImmutable(
-            $approvedAt,
-            new DateTimeZone(
-                'Asia/Kuala_Lumpur'
-            )
+    $deadline =
+        walletWithdrawalMalaysiaDateTimeObject(
+            $approvedAt
         );
-    } catch (Throwable) {
+
+    if (!$deadline instanceof DateTimeImmutable) {
         return null;
     }
 
@@ -729,6 +766,11 @@ function getWalletWithdrawalSummary(
             wallet_withdrawal_amount,
             wallet_withdrawal_status,
             wallet_withdrawal_reviewed_at,
+            wallet_withdrawal_bank_status,
+            wallet_withdrawal_bank_submitted_at,
+            wallet_withdrawal_bank_decided_at,
+            wallet_withdrawal_bank_decision_reference,
+            wallet_withdrawal_completed_at,
             wallet_withdrawal_created_at
         FROM wallet_withdrawal_requests
         WHERE wallet_withdrawal_user_id = ?
@@ -773,6 +815,11 @@ function getCustomerWalletWithdrawals(
             wallet_withdrawal_admin_note,
             wallet_withdrawal_reviewed_at,
             wallet_withdrawal_reviewed_by,
+            wallet_withdrawal_bank_status,
+            wallet_withdrawal_bank_submitted_at,
+            wallet_withdrawal_bank_decided_at,
+            wallet_withdrawal_bank_decision_reference,
+            wallet_withdrawal_bank_decision_note,
             wallet_withdrawal_failed_at,
             wallet_withdrawal_failure_reason,
             wallet_withdrawal_completed_at,
@@ -913,10 +960,12 @@ function createWalletWithdrawalRequest(
                 wallet_withdrawal_account_number_encrypted,
                 wallet_withdrawal_account_number_last4,
                 wallet_withdrawal_account_fingerprint,
-                wallet_withdrawal_customer_reauthenticated_at
+                wallet_withdrawal_customer_reauthenticated_at,
+                wallet_withdrawal_created_at
             )
             VALUES (
-                ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, NOW()
+                ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?,
+                UTC_TIMESTAMP(), UTC_TIMESTAMP()
             )
         ");
         $insert->execute([
@@ -1177,6 +1226,9 @@ function approveWalletWithdrawalRequest(
         $adminNote,
         false
     );
+    $bankSubmissionId = bin2hex(
+        random_bytes(16)
+    );
 
     try {
         $pdo->beginTransaction();
@@ -1226,8 +1278,16 @@ function approveWalletWithdrawalRequest(
             UPDATE wallet_withdrawal_requests
             SET wallet_withdrawal_status = 'approved',
                 wallet_withdrawal_reviewed_by = ?,
-                wallet_withdrawal_reviewed_at = NOW(),
-                wallet_withdrawal_admin_note = ?
+                wallet_withdrawal_reviewed_at = UTC_TIMESTAMP(),
+                wallet_withdrawal_admin_note = ?,
+                wallet_withdrawal_bank_status = 'pending',
+                wallet_withdrawal_bank_submission_id = ?,
+                wallet_withdrawal_bank_submitted_at = UTC_TIMESTAMP(),
+                wallet_withdrawal_bank_decision_reference = NULL,
+                wallet_withdrawal_bank_decided_by = NULL,
+                wallet_withdrawal_bank_decided_at = NULL,
+                wallet_withdrawal_bank_decision_note = NULL,
+                wallet_withdrawal_bank_verification_hash = NULL
             WHERE wallet_withdrawal_id = ?
             AND wallet_withdrawal_status = 'pending'
         ");
@@ -1236,6 +1296,7 @@ function approveWalletWithdrawalRequest(
             $adminNote !== ''
                 ? $adminNote
                 : null,
+            $bankSubmissionId,
             $withdrawalId,
         ]);
 
@@ -1250,13 +1311,19 @@ function approveWalletWithdrawalRequest(
             $adminId,
             'approve_wallet_withdrawal',
             $withdrawalId,
-            'Approved bank withdrawal request. Funds remain reserved pending bank transfer completion.'
+            'Approved withdrawal and submitted it to the destination-bank verification queue. Funds remain reserved pending bank approval and transfer completion.'
         );
 
         $pdo->commit();
 
         $request['wallet_withdrawal_status'] =
             'approved';
+        $request[
+            'wallet_withdrawal_bank_status'
+        ] = 'pending';
+        $request[
+            'wallet_withdrawal_bank_submission_id'
+        ] = $bankSubmissionId;
 
         return $request;
     } catch (Throwable $e) {
@@ -1374,7 +1441,7 @@ function rejectWalletWithdrawalRequest(
             UPDATE wallet_withdrawal_requests
             SET wallet_withdrawal_status = 'rejected',
                 wallet_withdrawal_reviewed_by = ?,
-                wallet_withdrawal_reviewed_at = NOW(),
+                wallet_withdrawal_reviewed_at = UTC_TIMESTAMP(),
                 wallet_withdrawal_admin_note = ?,
                 wallet_withdrawal_release_tx_id = ?
             WHERE wallet_withdrawal_id = ?
@@ -1586,7 +1653,7 @@ function failApprovedWalletWithdrawalRequest(
                         'failed',
                     wallet_withdrawal_failed_by = ?,
                     wallet_withdrawal_failed_at =
-                        NOW(),
+                        UTC_TIMESTAMP(),
                     wallet_withdrawal_failure_reason = ?,
                     wallet_withdrawal_release_tx_id = ?
                 WHERE
@@ -2061,6 +2128,26 @@ function completeWalletWithdrawalRequest(
         }
 
         if (
+            ($request[
+                'wallet_withdrawal_bank_status'
+            ] ?? '') !== 'approved' ||
+            empty(
+                $request[
+                    'wallet_withdrawal_bank_decision_reference'
+                ]
+            ) ||
+            empty(
+                $request[
+                    'wallet_withdrawal_bank_verification_hash'
+                ]
+            )
+        ) {
+            throw new WalletWithdrawalException(
+                'The destination bank must approve and verify this withdrawal before the transfer can be completed.'
+            );
+        }
+
+        if (
             !empty(
                 $request[
                     'wallet_withdrawal_debit_tx_id'
@@ -2194,11 +2281,12 @@ function completeWalletWithdrawalRequest(
                 wallet_withdrawal_receipt_size = ?,
                 wallet_withdrawal_receipt_sha256 = ?,
                 wallet_withdrawal_receipt_uploaded_by = ?,
-                wallet_withdrawal_receipt_uploaded_at = NOW(),
+                wallet_withdrawal_receipt_uploaded_at = UTC_TIMESTAMP(),
                 wallet_withdrawal_debit_tx_id = ?,
-                wallet_withdrawal_completed_at = NOW()
+                wallet_withdrawal_completed_at = UTC_TIMESTAMP()
             WHERE wallet_withdrawal_id = ?
             AND wallet_withdrawal_status = 'approved'
+            AND wallet_withdrawal_bank_status = 'approved'
             AND wallet_withdrawal_debit_tx_id IS NULL
             AND wallet_withdrawal_receipt_file IS NULL
         ");

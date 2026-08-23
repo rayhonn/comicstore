@@ -235,6 +235,8 @@ function safe_redirect_target(string $target, string $default): string
         'admin/wallet_withdrawal_bank.php',
         'admin/wallet_withdrawal_evidence.php',
         'admin/wallet_withdrawal_receipt.php',
+        'admin/wallet_withdrawal_bank_confirmation.php',
+        'admin/wallet_withdrawal_bank_status.php',
         'admin/goods_received.php',
         'admin/delivery_receipt.php',
 
@@ -243,6 +245,11 @@ function safe_redirect_target(string $target, string $default): string
 
         'supplier/index.php',
         'supplier/dashboard.php',
+
+        'bank/index.php',
+        'bank/login.php',
+        'bank/dashboard.php',
+        'bank/confirmation.php',
     ];
 
     if (!in_array($path, $allowedPaths, true)) {
@@ -323,6 +330,9 @@ function safe_redirect_target(string $target, string $default): string
                 'admin/wallet_withdrawal_bank.php',
                 'admin/wallet_withdrawal_evidence.php',
                 'admin/wallet_withdrawal_receipt.php',
+                'admin/wallet_withdrawal_bank_confirmation.php',
+                'admin/wallet_withdrawal_bank_status.php',
+                'bank/confirmation.php',
             ],
             true
         )
@@ -368,6 +378,8 @@ function safe_redirect_target(string $target, string $default): string
                 [
                     'customer/wallet_withdrawal_receipt.php',
                     'admin/wallet_withdrawal_receipt.php',
+                    'admin/wallet_withdrawal_bank_confirmation.php',
+                    'bank/confirmation.php',
                 ],
                 true
             ) &&
@@ -626,6 +638,10 @@ function regenerate_session(): void
         $_SESSION['user_first_name'],
         $_SESSION['supplier_id'],
         $_SESSION['supplier_name'],
+        $_SESSION['bank_operator_id'],
+        $_SESSION['bank_operator_code'],
+        $_SESSION['bank_operator_name'],
+        $_SESSION['bank_operator_bank_name'],
         $_SESSION['admin_level'],
         $_SESSION['role'],
         $_SESSION['auth_last_activity_at'],

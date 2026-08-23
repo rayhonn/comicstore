@@ -306,10 +306,88 @@ $type_labels = [
                             $active_status = (string) $active_withdrawal[
                                 'wallet_withdrawal_status'
                             ];
-                            $active_step =
-                                $active_status === 'approved'
-                                    ? 3
-                                    : 1;
+                            $active_bank_status = (string) (
+                                $active_withdrawal[
+                                    'wallet_withdrawal_bank_status'
+                                ] ?? 'not_submitted'
+                            );
+                            $active_step = 2;
+
+                            if ($active_status === 'approved') {
+                                $active_step =
+                                    $active_bank_status === 'approved'
+                                        ? 4
+                                        : 3;
+                            }
+
+                            $active_timeline = [
+                                1 => [
+                                    'Request Submitted',
+                                    walletWithdrawalMalaysiaDateTime(
+                                        (string) $active_withdrawal[
+                                            'wallet_withdrawal_created_at'
+                                        ],
+                                        'd M Y, h:i A',
+                                        'Received securely'
+                                    ) . ' MYT',
+                                ],
+                                2 => [
+                                    'Admin Review',
+                                    !empty(
+                                        $active_withdrawal[
+                                            'wallet_withdrawal_reviewed_at'
+                                        ]
+                                    )
+                                        ? walletWithdrawalMalaysiaDateTime(
+                                            (string) $active_withdrawal[
+                                                'wallet_withdrawal_reviewed_at'
+                                            ],
+                                            'd M Y, h:i A',
+                                            'Pending'
+                                        ) . ' MYT'
+                                        : 'Pending review',
+                                ],
+                                3 => [
+                                    'Bank Verification',
+                                    !empty(
+                                        $active_withdrawal[
+                                            'wallet_withdrawal_bank_decided_at'
+                                        ]
+                                    )
+                                        ? walletWithdrawalMalaysiaDateTime(
+                                            (string) $active_withdrawal[
+                                                'wallet_withdrawal_bank_decided_at'
+                                            ],
+                                            'd M Y, h:i A',
+                                            'Pending'
+                                        ) . ' MYT'
+                                        : (
+                                            $active_status === 'approved'
+                                                ? 'Awaiting bank decision'
+                                                : 'Starts after Admin approval'
+                                        ),
+                                ],
+                                4 => [
+                                    'Transfer Completion',
+                                    !empty(
+                                        $active_withdrawal[
+                                            'wallet_withdrawal_completed_at'
+                                        ]
+                                    )
+                                        ? walletWithdrawalMalaysiaDateTime(
+                                            (string) $active_withdrawal[
+                                                'wallet_withdrawal_completed_at'
+                                            ],
+                                            'd M Y, h:i A',
+                                            'Pending'
+                                        ) . ' MYT'
+                                        : (
+                                            $active_bank_status === 'approved'
+                                                ? 'Bank verified · Admin transfer pending'
+                                                : 'Pending bank approval'
+                                        ),
+                                ],
+                            ];
                             $active_deadline =
                                 walletWithdrawalBusinessDayDeadlineLabel(
                                     (string) (
@@ -344,7 +422,15 @@ $type_labels = [
                                                 class="rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white"
                                             >
                                                 <?= $active_status === 'approved'
-                                                    ? 'Bank Processing'
+                                                    ? (
+                                                        $active_bank_status === 'approved'
+                                                            ? 'Bank Verified'
+                                                            : (
+                                                                $active_bank_status === 'rejected'
+                                                                    ? 'Bank Review Issue'
+                                                                    : 'Bank Verification'
+                                                            )
+                                                    )
                                                     : 'Pending Review' ?>
                                             </span>
                                         </div>
@@ -367,19 +453,24 @@ $type_labels = [
                                 </div>
 
                                 <div class="px-5 py-5">
+                                    <?php if (
+                                        $active_bank_status === 'rejected'
+                                    ): ?>
+                                        <div
+                                            class="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs leading-relaxed text-red-700"
+                                        >
+                                            <strong>Bank verification was not approved.</strong>
+                                            MangaVault Admin is reviewing the bank response. Your reserved amount remains protected until the request is closed and the funds are released.
+                                        </div>
+                                    <?php endif; ?>
+
                                     <div
                                         class="grid grid-cols-2 gap-4 md:grid-cols-4"
                                     >
-                                        <?php foreach ([
-                                            1 => ['Request Submitted', 'Received securely'],
-                                            2 => ['Admin Review', $active_status === 'approved'
-                                                ? 'Approved'
-                                                : 'In review'],
-                                            3 => ['Bank Processing', $active_status === 'approved'
-                                                ? 'In progress'
-                                                : 'Starts after approval'],
-                                            4 => ['Completed', 'Funds sent'],
-                                        ] as $step => $step_copy): ?>
+                                        <?php foreach (
+                                            $active_timeline
+                                            as $step => $step_copy
+                                        ): ?>
                                             <div class="relative">
                                                 <div
                                                     class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-black <?= $step <= $active_step
@@ -546,6 +637,11 @@ $type_labels = [
                                 $withdrawal_status = (string) $withdrawal[
                                     'wallet_withdrawal_status'
                                 ];
+                                $withdrawal_bank_status = (string) (
+                                    $withdrawal[
+                                        'wallet_withdrawal_bank_status'
+                                    ] ?? 'not_submitted'
+                                );
                                 $withdrawal_status_classes = [
                                     'pending' =>
                                         'bg-yellow-100 text-yellow-700',
@@ -566,6 +662,20 @@ $type_labels = [
                                             ] ?? ''
                                         )
                                     );
+                                $history_timeline = [
+                                    'Requested' => $withdrawal[
+                                        'wallet_withdrawal_created_at'
+                                    ] ?? '',
+                                    'Admin Review' => $withdrawal[
+                                        'wallet_withdrawal_reviewed_at'
+                                    ] ?? '',
+                                    'Bank Decision' => $withdrawal[
+                                        'wallet_withdrawal_bank_decided_at'
+                                    ] ?? '',
+                                    'Completed' => $withdrawal[
+                                        'wallet_withdrawal_completed_at'
+                                    ] ?? '',
+                                ];
                                 ?>
                                 <div
                                     class="px-6 py-4 flex items-start justify-between gap-5 flex-wrap"
@@ -609,18 +719,88 @@ $type_labels = [
 
                                         <p class="text-xs text-gray-400 mt-1">
                                             Requested <?= htmlspecialchars(
-                                                date(
+                                                walletWithdrawalMalaysiaDateTime(
+                                                    (string) $withdrawal[
+                                                        'wallet_withdrawal_created_at'
+                                                    ],
                                                     'd M Y, h:i A',
-                                                    strtotime(
-                                                        (string) $withdrawal[
-                                                            'wallet_withdrawal_created_at'
-                                                        ]
-                                                    )
-                                                ),
+                                                    'Not available'
+                                                ) . ' MYT',
                                                 ENT_QUOTES,
                                                 'UTF-8'
                                             ) ?>
                                         </p>
+
+                                        <div
+                                            class="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4"
+                                        >
+                                            <?php foreach (
+                                                $history_timeline
+                                                as $timeline_label =>
+                                                    $timeline_value
+                                            ): ?>
+                                                <div
+                                                    class="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-2"
+                                                >
+                                                    <p
+                                                        class="text-[9px] font-black uppercase tracking-wide text-gray-400"
+                                                    >
+                                                        <?= htmlspecialchars(
+                                                            $timeline_label,
+                                                            ENT_QUOTES,
+                                                            'UTF-8'
+                                                        ) ?>
+                                                    </p>
+                                                    <p
+                                                        class="mt-1 text-[10px] font-semibold text-gray-600"
+                                                    >
+                                                        <?= $timeline_value !== ''
+                                                            ? htmlspecialchars(
+                                                                walletWithdrawalMalaysiaDateTime(
+                                                                    (string) $timeline_value,
+                                                                    'd M Y, h:i A',
+                                                                    'Not available'
+                                                                ) . ' MYT',
+                                                                ENT_QUOTES,
+                                                                'UTF-8'
+                                                            )
+                                                            : 'Pending' ?>
+                                                    </p>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+
+                                        <?php if (
+                                            $withdrawal_bank_status ===
+                                                'approved'
+                                        ): ?>
+                                            <p
+                                                class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2.5 py-1.5 text-[11px] font-semibold text-green-700"
+                                            >
+                                                ✅ Bank verified <?= htmlspecialchars(
+                                                    walletWithdrawalMalaysiaDateTime(
+                                                        (string) (
+                                                            $withdrawal[
+                                                                'wallet_withdrawal_bank_decided_at'
+                                                            ] ?? ''
+                                                        ),
+                                                        'd M Y, h:i A',
+                                                        'Not available'
+                                                    ) . ' MYT',
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+                                        <?php elseif (
+                                            $withdrawal_bank_status ===
+                                                'rejected'
+                                        ): ?>
+                                            <p
+                                                class="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-semibold text-red-700"
+                                            >
+                                                Bank verification rejected. MangaVault Admin is reviewing the bank decision.
+                                            </p>
+                                        <?php endif; ?>
 
                                         <?php if (!empty(
                                             $withdrawal[

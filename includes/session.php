@@ -47,12 +47,29 @@ function app_normalize_session_identity(): void
 {
     $role = (string) ($_SESSION['role'] ?? '');
 
+    if ($role === 'bank') {
+        unset(
+            $_SESSION['user_id'],
+            $_SESSION['user_name'],
+            $_SESSION['user_first_name'],
+            $_SESSION['supplier_id'],
+            $_SESSION['supplier_name'],
+            $_SESSION['admin_level']
+        );
+
+        return;
+    }
+
     if ($role === 'supplier') {
         unset(
             $_SESSION['user_id'],
             $_SESSION['user_name'],
             $_SESSION['user_first_name'],
-            $_SESSION['admin_level']
+            $_SESSION['admin_level'],
+            $_SESSION['bank_operator_id'],
+            $_SESSION['bank_operator_code'],
+            $_SESSION['bank_operator_name'],
+            $_SESSION['bank_operator_bank_name']
         );
 
         return;
@@ -71,7 +88,11 @@ function app_normalize_session_identity(): void
     ) {
         unset(
             $_SESSION['supplier_id'],
-            $_SESSION['supplier_name']
+            $_SESSION['supplier_name'],
+            $_SESSION['bank_operator_id'],
+            $_SESSION['bank_operator_code'],
+            $_SESSION['bank_operator_name'],
+            $_SESSION['bank_operator_bank_name']
         );
 
         if ($role !== 'admin') {
@@ -87,6 +108,10 @@ function app_normalize_session_identity(): void
         $_SESSION['user_first_name'],
         $_SESSION['supplier_id'],
         $_SESSION['supplier_name'],
+        $_SESSION['bank_operator_id'],
+        $_SESSION['bank_operator_code'],
+        $_SESSION['bank_operator_name'],
+        $_SESSION['bank_operator_bank_name'],
         $_SESSION['admin_level'],
         $_SESSION['role']
     );
@@ -101,6 +126,13 @@ function app_session_is_authenticated(): bool
 
     if ($role === 'supplier') {
         return !empty($_SESSION['supplier_id']);
+    }
+
+    if ($role === 'bank') {
+        return (
+            !empty($_SESSION['bank_operator_id']) &&
+            !empty($_SESSION['bank_operator_code'])
+        );
     }
 
     return (
@@ -127,6 +159,14 @@ function app_session_account_id(): int
     ) {
         return (int) (
             $_SESSION['supplier_id'] ?? 0
+        );
+    }
+
+    if (
+        ($_SESSION['role'] ?? '') === 'bank'
+    ) {
+        return (int) (
+            $_SESSION['bank_operator_id'] ?? 0
         );
     }
 

@@ -100,20 +100,15 @@ function walletWithdrawalDocumentDate(
         return $fallback;
     }
 
-    try {
-        $date = new DateTimeImmutable(
-            $value,
-            new DateTimeZone(
-                'Asia/Kuala_Lumpur'
-            )
-        );
-    } catch (Throwable) {
-        return $fallback;
-    }
+    $formatted = walletWithdrawalMalaysiaDateTime(
+        $value,
+        'd M Y, h:i A',
+        $fallback
+    );
 
-    return $date->format(
-        'd M Y, h:i A'
-    ) . ' MYT';
+    return $formatted === $fallback
+        ? $fallback
+        : $formatted . ' MYT';
 }
 
 function walletWithdrawalDocumentName(
@@ -133,26 +128,20 @@ function walletWithdrawalDocumentNumber(
     $withdrawalId = (int) (
         $record['wallet_withdrawal_id'] ?? 0
     );
-    try {
-        $createdAt = new DateTimeImmutable(
-            (string) (
-                $record[
-                    'wallet_withdrawal_created_at'
-                ] ?? 'now'
-            ),
-            new DateTimeZone(
-                'Asia/Kuala_Lumpur'
-            )
-        );
-    } catch (Throwable) {
-        $createdAt = new DateTimeImmutable(
+    $datePart = walletWithdrawalMalaysiaDateTime(
+        (string) (
+            $record[
+                'wallet_withdrawal_created_at'
+            ] ?? ''
+        ),
+        'Ymd',
+        (new DateTimeImmutable(
             'now',
             new DateTimeZone(
                 'Asia/Kuala_Lumpur'
             )
-        );
-    }
-    $datePart = $createdAt->format('Ymd');
+        ))->format('Ymd')
+    );
     $suffix = (
         ($record['wallet_withdrawal_status'] ?? '') ===
             'completed'
@@ -180,12 +169,21 @@ function buildWalletWithdrawalDocumentHtml(
         $record['wallet_withdrawal_status'] ?? ''
     );
     $isCompleted = $status === 'completed';
+    $bankVerified = (
+        $record[
+            'wallet_withdrawal_bank_status'
+        ] ?? ''
+    ) === 'approved';
     $documentTitle = $isCompleted
         ? 'Bank Transfer Confirmation'
         : 'Withdrawal Approval Advice';
     $statusLabel = $isCompleted
         ? 'COMPLETED'
-        : 'APPROVED — AWAITING BANK TRANSFER';
+        : (
+            $bankVerified
+                ? 'BANK VERIFIED — AWAITING TRANSFER'
+                : 'ADMIN APPROVED — AWAITING BANK VERIFICATION'
+        );
     $documentNumber =
         walletWithdrawalDocumentNumber($record);
     $customerName =
@@ -253,8 +251,45 @@ function buildWalletWithdrawalDocumentHtml(
 
     $transferRows = '';
 
+    if ($bankVerified) {
+        $transferRows .= '
+            <tr>
+                <td class="label">Bank verification</td>
+                <td class="value">Approved by ' .
+                    walletWithdrawalDocumentEscape(
+                        $record[
+                            'wallet_withdrawal_bank_name'
+                        ] ?? ''
+                    ) .
+                    '</td>
+            </tr>
+            <tr>
+                <td class="label">Bank authorization reference</td>
+                <td class="value mono">' .
+                    walletWithdrawalDocumentEscape(
+                        $record[
+                            'wallet_withdrawal_bank_decision_reference'
+                        ] ?? ''
+                    ) .
+                    '</td>
+            </tr>
+            <tr>
+                <td class="label">Bank verified at</td>
+                <td class="value">' .
+                    walletWithdrawalDocumentEscape(
+                        walletWithdrawalDocumentDate(
+                            $record[
+                                'wallet_withdrawal_bank_decided_at'
+                            ] ?? ''
+                        )
+                    ) .
+                    '</td>
+            </tr>
+        ';
+    }
+
     if ($isCompleted) {
-        $transferRows = '
+        $transferRows .= '
             <tr>
                 <td class="label">Bank transfer reference</td>
                 <td class="value mono">' .
@@ -285,7 +320,11 @@ function buildWalletWithdrawalDocumentHtml(
         : 'Important processing notice';
     $noticeText = $isCompleted
         ? 'This document confirms that MangaVault recorded the bank transfer as completed. It should be retained together with the customer bank statement and the original bank transfer evidence.'
-        : 'This document confirms administrative approval only. It is not proof that the receiving bank has credited the funds. Processing may take up to 14 business days after approval.';
+        : (
+            $bankVerified
+                ? 'The simulated destination-bank layer approved the transfer instruction. This is not proof that funds have been sent or credited. MangaVault Admin must still perform and record the external transfer.'
+                : 'This document confirms MangaVault administrative approval only. The destination bank has not yet verified the transfer instruction. Processing may take up to 14 business days after approval.'
+        );
 
     return '<!DOCTYPE html>
 <html lang="en">
