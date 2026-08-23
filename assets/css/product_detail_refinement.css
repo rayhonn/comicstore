@@ -245,3 +245,145 @@
     padding-right: 0 !important;
     padding-left: 0 !important;
 }
+
+/*
+ * Product purchase actions.
+ * Keeps the existing cart and wishlist behaviour while improving
+ * spacing, alignment, hierarchy and responsive presentation.
+ */
+.product-actions-row {
+    align-items: center;
+    gap: 12px !important;
+}
+
+.product-actions-row[data-purchase-layout="physical"]
+.product-cart-form {
+    flex: 0 1 620px !important;
+    width: 100%;
+    max-width: 620px;
+    min-width: 0;
+    align-items: stretch;
+    gap: 12px !important;
+}
+
+.product-actions-row[data-purchase-layout="default"]
+.product-cart-form {
+    flex: 0 1 460px !important;
+    width: 100%;
+    max-width: 460px;
+    min-width: 0;
+}
+
+.product-add-cart-button {
+    display: inline-flex !important;
+    min-width: 0;
+    height: 52px;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border: 0;
+    border-radius: 12px !important;
+    background: #dc2626 !important;
+    padding: 0 28px !important;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 800 !important;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    box-shadow:
+        0 8px 20px rgba(220, 38, 38, 0.18);
+    cursor: pointer;
+    transition:
+        background-color 0.2s ease,
+        box-shadow 0.2s ease,
+        transform 0.2s ease;
+}
+
+.product-add-cart-button:hover {
+    background: #b91c1c !important;
+    box-shadow:
+        0 12px 26px rgba(185, 28, 28, 0.24);
+    transform: translateY(-1px);
+}
+
+.product-add-cart-button:active {
+    box-shadow:
+        0 5px 14px rgba(185, 28, 28, 0.18);
+    transform: translateY(0);
+}
+
+.product-add-cart-button:focus-visible {
+    outline: 3px solid rgba(248, 113, 113, 0.3);
+    outline-offset: 3px;
+}
+
+.product-add-cart-button svg {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+}
+
+#productWishlistForm {
+    flex: 0 0 auto;
+}
+
+.product-wishlist-button {
+    width: 52px;
+    height: 52px;
+    border: 1px solid #dfe3ea;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow:
+        0 4px 12px rgba(15, 23, 42, 0.05);
+}
+
+.product-wishlist-button:hover {
+    border-color: #fca5a5;
+    background: #fff7f7;
+    color: #dc2626;
+    box-shadow:
+        0 8px 18px rgba(15, 23, 42, 0.08);
+    transform: translateY(-1px);
+}
+
+.product-wishlist-button.is-active {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+/*
+ * Mobile layout:
+ * purchase controls remain easy to tap without squeezing the
+ * Add to Cart label.
+ */
+@media (max-width: 640px) {
+    .product-actions-row {
+        align-items: stretch;
+    }
+
+    .product-actions-row[data-purchase-layout="physical"]
+    .product-cart-form,
+    .product-actions-row[data-purchase-layout="default"]
+    .product-cart-form {
+        flex: 1 1 100% !important;
+        max-width: none;
+    }
+
+    .product-add-cart-button {
+        padding: 0 18px !important;
+    }
+
+    #productWishlistForm {
+        flex: 1 1 100%;
+    }
+
+    .product-wishlist-button {
+        width: 100%;
+        gap: 8px;
+    }
+
+    .product-wishlist-label {
+        display: inline;
+    }
+}
