@@ -14,6 +14,37 @@ if (
 $error = '';
 $identifier_value = '';
 
+$support_email =
+    defined('MAIL_USERNAME') &&
+    filter_var(
+        MAIL_USERNAME,
+        FILTER_VALIDATE_EMAIL
+    ) !== false
+        ? (string) MAIL_USERNAME
+        : '';
+
+$support_mailto =
+    $support_email !== ''
+        ? 'mailto:' .
+            $support_email .
+            '?' .
+            http_build_query(
+                [
+                    'subject' =>
+                        'MangaVault Customer Login Assistance',
+
+                    'body' =>
+                        "Hello MangaVault Admin,\n\n" .
+                        "I need assistance with my customer account.\n\n" .
+                        "Username or email: \n" .
+                        "Issue description: ",
+                ],
+                '',
+                '&',
+                PHP_QUERY_RFC3986
+            )
+        : '';
+
 $account_status =
     $_GET['account'] ?? null;
 
@@ -1001,6 +1032,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Create your account
                         </a>
                     </p>
+
+                    <?php if (
+                        $support_email !== ''
+                    ): ?>
+                    <div
+                        class="mt-4 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-center"
+                    >
+                        <p
+                            class="text-xs font-semibold text-blue-800"
+                        >
+                            Unable to access your account?
+                        </p>
+
+                        <a
+                            href="<?= htmlspecialchars(
+                                $support_mailto,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>"
+                            class="mini-link mt-1 inline-flex items-center justify-center gap-1 text-sm"
+                        >
+                            ✉ Contact Admin
+                        </a>
+
+                        <p
+                            class="mt-1 break-all text-xs text-blue-600"
+                        >
+                            <?= htmlspecialchars(
+                                $support_email,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>
+                        </p>
+                    </div>
+                    <?php endif; ?>                    
                 </div>
 
                 <aside

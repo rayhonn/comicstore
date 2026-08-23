@@ -260,20 +260,18 @@ function findAvailableVoucher(
     int $user_id
 ): ?array {
     $voucher = $pdo->prepare("
-        SELECT v.*
+        SELECT
+            v.*,
+            uv.uv_id AS user_voucher_id,
+            uv.uv_expires_at
         FROM vouchers v
-        INNER JOIN user_vouchers uv
+        LEFT JOIN user_vouchers uv
             ON uv.uv_voucher_id =
                 v.voucher_id
+            AND uv.uv_user_id = ?
         WHERE v.voucher_code = ?
-        AND uv.uv_user_id = ?
-        AND uv.uv_is_used = 0
-        AND uv.uv_status = 'available'
-        AND (
-            uv.uv_expires_at IS NULL
-            OR uv.uv_expires_at >= NOW()
-        )
         AND v.voucher_is_active = 1
+        AND v.voucher_is_birthday_template = 0
         AND (
             v.voucher_usage_limit IS NULL
             OR v.voucher_used_count <
@@ -287,6 +285,28 @@ function findAvailableVoucher(
             v.voucher_end_date IS NULL
             OR v.voucher_end_date >= NOW()
         )
+        AND (
+            (
+                v.voucher_is_points_redeem = 0
+                AND v.voucher_is_system_generated = 0
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM user_vouchers uv_any
+                    WHERE uv_any.uv_voucher_id =
+                        v.voucher_id
+                )
+            )
+            OR
+            (
+                uv.uv_id IS NOT NULL
+                AND uv.uv_is_used = 0
+                AND uv.uv_status = 'available'
+                AND (
+                    uv.uv_expires_at IS NULL
+                    OR uv.uv_expires_at >= NOW()
+                )
+            )
+        )
         AND NOT EXISTS (
             SELECT 1
             FROM voucher_usage vu
@@ -298,13 +318,14 @@ function findAvailableVoucher(
     ");
 
     $voucher->execute([
-        $voucher_code,
         $user_id,
+        $voucher_code,
         $user_id,
     ]);
 
-    $result =
-        $voucher->fetch(PDO::FETCH_ASSOC);
+    $result = $voucher->fetch(
+        PDO::FETCH_ASSOC
+    );
 
     return $result ?: null;
 }
@@ -1570,27 +1591,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <!-- Voucher Dropdown -->
                         <?php
                         $avail_vouchers = $pdo->prepare("
-                            SELECT v.*, uv.uv_expires_at FROM vouchers v
-                            JOIN user_vouchers uv ON v.voucher_id = uv.uv_voucher_id
-                            WHERE uv.uv_user_id = ?
-                            AND uv.uv_is_used = 0
-                            AND (uv.uv_status IS NULL OR uv.uv_status = 'available')
-                            AND v.voucher_is_active = 1
+                            SELECT
+                                v.*,
+                                uv.uv_expires_at
+                            FROM vouchers v
+                            LEFT JOIN user_vouchers uv
+                                ON uv.uv_voucher_id =
+                                    v.voucher_id
+                                AND uv.uv_user_id = ?
+                            WHERE v.voucher_is_active = 1
+                            AND v.voucher_is_birthday_template = 0
                             AND (
                                 v.voucher_usage_limit IS NULL
                                 OR v.voucher_used_count <
                                     v.voucher_usage_limit
                             )
-                            AND (v.voucher_end_date IS NULL OR v.voucher_end_date >= NOW())
-                            AND (uv.uv_expires_at IS NULL OR uv.uv_expires_at >= NOW())
-                            AND NOT EXISTS (
-                                SELECT 1 FROM voucher_usage vu 
-                                WHERE vu.usage_voucher_id = v.voucher_id AND vu.usage_user_id = ?
+                            AND (
+                                v.voucher_start_date IS NULL
+                                OR v.voucher_start_date <= NOW()
                             )
-                            ORDER BY v.voucher_min_order ASC
+                            AND (
+                                v.voucher_end_date IS NULL
+                                OR v.voucher_end_date >= NOW()
+                            )
+                            AND (
+                                (
+                                    v.voucher_is_points_redeem = 0
+                                    AND v.voucher_is_system_generated = 0
+                                    AND NOT EXISTS (
+                                        SELECT 1
+                                        FROM user_vouchers uv_any
+                                        WHERE uv_any.uv_voucher_id =
+                                            v.voucher_id
+                                    )
+                                )
+                                OR
+                                (
+                                    uv.uv_id IS NOT NULL
+                                    AND uv.uv_is_used = 0
+                                    AND uv.uv_status = 'available'
+                                    AND (
+                                        uv.uv_expires_at IS NULL
+                                        OR uv.uv_expires_at >= NOW()
+                                    )
+                                )
+                            )
+                            AND NOT EXISTS (
+                                SELECT 1
+                                FROM voucher_usage vu
+                                WHERE vu.usage_voucher_id =
+                                    v.voucher_id
+                                AND vu.usage_user_id = ?
+                            )
+                            ORDER BY
+                                v.voucher_min_order ASC,
+                                v.voucher_code ASC
                         ");
-                        $avail_vouchers->execute([$user_id, $user_id]);
-                        $avail_vouchers = $avail_vouchers->fetchAll(PDO::FETCH_ASSOC);
+
+                        $avail_vouchers->execute([
+                            $user_id,
+                            $user_id,
+                        ]);
+
+                        $avail_vouchers =
+                            $avail_vouchers->fetchAll(
+                                PDO::FETCH_ASSOC
+                            );
                         ?>
 
                         <div class="border-t border-gray-100 pt-3">

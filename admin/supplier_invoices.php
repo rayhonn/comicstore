@@ -1096,11 +1096,82 @@ foreach ($available_credits as $c) {
                             </span>
                         </td>
                         <td class="px-3 py-4 text-center align-middle">
-                            <?php if ($inv['invoice_status'] === 'unpaid'): ?>
-                            <div class="flex flex-col items-center gap-2">
-                                <?php if (!$inv['invoice_credit_note_id'] && !empty($credits_by_supplier[$inv['invoice_supplier_id']])): ?>
-                                    <?php foreach ($credits_by_supplier[$inv['invoice_supplier_id']] as $credit): ?>
-                                    <form method="POST" class="w-full">
+                            <?php
+                            $eligible_credits = [];
+
+                            if (
+                                !$inv[
+                                    'invoice_credit_note_id'
+                                ] &&
+                                !empty(
+                                    $credits_by_supplier[
+                                        $inv[
+                                            'invoice_supplier_id'
+                                        ]
+                                    ]
+                                )
+                            ) {
+                                foreach (
+                                    $credits_by_supplier[
+                                        $inv[
+                                            'invoice_supplier_id'
+                                        ]
+                                    ] as $credit
+                                ) {
+                                    $credit_amount_sen =
+                                        moneyDecimalToSen(
+                                            (string) $credit[
+                                                'return_credit_note_amount'
+                                            ]
+                                        );
+
+                                    if (
+                                        $credit_amount_sen > 0 &&
+                                        $credit_amount_sen <=
+                                            $invoice_amount_sen &&
+                                        $invoice_amount_sen -
+                                            $credit_amount_sen ===
+                                            $po_total_sen
+                                    ) {
+                                        $eligible_credits[] = [
+                                            'credit' =>
+                                                $credit,
+                                            'amount_sen' =>
+                                                $credit_amount_sen,
+                                        ];
+                                    }
+                                }
+                            }
+
+                            $matched_payment_label =
+                                $invoice_credit_sen > 0
+                                    ? 'Pay Correct Amount'
+                                    : 'Pay Invoice Total';
+                            ?>
+
+                            <?php if (
+                                $inv['invoice_status'] ===
+                                'unpaid'
+                            ): ?>
+                            <div
+                                class="flex flex-col items-center gap-2"
+                            >
+                                <?php foreach (
+                                    $eligible_credits as
+                                    $credit_option
+                                ): ?>
+                                    <?php
+                                    $credit =
+                                        $credit_option[
+                                            'credit'
+                                        ];
+                                    ?>
+
+                                    <form
+                                        method="POST"
+                                        class="w-full"
+                                        onsubmit="return confirm('Apply this credit note and change the payable amount to RM <?= moneyFormatSen($po_total_sen) ?>?')"
+                                    >
                                         <?php csrf_field(); ?>
 
                                         <input
@@ -1120,27 +1191,60 @@ foreach ($available_credits as $c) {
                                             name="return_id"
                                             value="<?= (int) $credit['return_id'] ?>"
                                         >
-                                        <button type="submit" class="w-full bg-yellow-50 hover:bg-yellow-100 text-yellow-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors whitespace-normal leading-tight">
-                                            💳 Apply Credit<br><?= htmlspecialchars($credit['return_credit_note_number']) ?> (RM
-                                            <?= moneyFormatSen(
-                                                moneyDecimalToSen(
+
+                                        <button
+                                            type="submit"
+                                            class="w-full rounded-lg bg-yellow-50 px-3 py-2 text-center text-xs font-semibold leading-tight text-yellow-700 transition-colors hover:bg-yellow-100"
+                                        >
+                                            <span>
+                                                Apply Credit Note
+                                            </span>
+
+                                            <br>
+
+                                            <span class="font-mono">
+                                                <?= htmlspecialchars(
                                                     (string) $credit[
-                                                        'return_credit_note_amount'
-                                                    ]
-                                                )
-                                            ) ?>)
+                                                        'return_credit_note_number'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </span>
+
+                                            <br>
+
+                                            <span>
+                                                Pay Correct Amount:
+                                                RM
+                                                <?= moneyFormatSen(
+                                                    $po_total_sen
+                                                ) ?>
+                                            </span>
                                         </button>
                                     </form>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
-                                <?php if ($inv['invoice_is_mismatch']): ?>
-                                    <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
+                                <?php endforeach; ?>
+
+                                <?php if (
+                                    $inv[
+                                        'invoice_is_mismatch'
+                                    ]
+                                ): ?>
+                                    <?php if (
+                                        (
+                                            $_SESSION[
+                                                'admin_level'
+                                            ] ?? ''
+                                        ) === 'senior_admin'
+                                    ): ?>
                                     <button
                                         type="button"
                                         onclick='openOverrideModal(
                                             <?= (int) $inv['invoice_id'] ?>,
                                             <?= json_encode(
-                                                $inv['invoice_number'],
+                                                $inv[
+                                                    'invoice_number'
+                                                ],
                                                 JSON_HEX_TAG |
                                                 JSON_HEX_AMP |
                                                 JSON_HEX_APOS |
@@ -1149,19 +1253,43 @@ foreach ($available_credits as $c) {
                                             <?= $invoice_amount_sen ?>,
                                             <?= $po_total_sen ?>
                                         )'
-                                            class="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center">
-                                        ✓ Mark as Paid
+                                        class="w-full rounded-lg bg-orange-50 px-3 py-2 text-center text-xs font-semibold leading-tight text-orange-700 transition-colors hover:bg-orange-100"
+                                    >
+                                        <span>
+                                            Pay Invoice Total
+                                        </span>
+
+                                        <br>
+
+                                        <span>
+                                            RM
+                                            <?= moneyFormatSen(
+                                                $invoice_amount_sen
+                                            ) ?>
+                                            — Override
+                                        </span>
                                     </button>
                                     <?php else: ?>
-                                    <span class="bg-gray-100 text-gray-400 text-xs font-semibold px-3 py-1.5 rounded-lg w-full text-center inline-block" title="Only senior admin can approve mismatched payments">
-                                        🔒 Needs Approval
+                                    <span
+                                        class="inline-block w-full rounded-lg bg-gray-100 px-3 py-2 text-center text-xs font-semibold leading-tight text-gray-400"
+                                        title="Only senior admin can approve mismatched payments"
+                                    >
+                                        🔒 Invoice Total:
+                                        RM
+                                        <?= moneyFormatSen(
+                                            $invoice_amount_sen
+                                        ) ?>
+
+                                        <br>
+
+                                        Requires Senior Approval
                                     </span>
                                     <?php endif; ?>
                                 <?php else: ?>
                                 <form
                                     method="POST"
                                     class="w-full"
-                                    onsubmit="return confirm('Mark this invoice as paid?')"
+                                    onsubmit="return confirm('Confirm payment of RM <?= moneyFormatSen($invoice_net_sen) ?>?')"
                                 >
                                     <?php csrf_field(); ?>
 
@@ -1179,37 +1307,58 @@ foreach ($available_credits as $c) {
 
                                     <button
                                         type="submit"
-                                        class="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center"
+                                        class="w-full rounded-lg bg-green-50 px-3 py-2 text-center text-xs font-semibold leading-tight text-green-700 transition-colors hover:bg-green-100"
                                     >
-                                        ✓ Mark as Paid
+                                        <span>
+                                            ✓
+                                            <?= $matched_payment_label ?>
+                                        </span>
+
+                                        <br>
+
+                                        <span>
+                                            RM
+                                            <?= moneyFormatSen(
+                                                $invoice_net_sen
+                                            ) ?>
+                                        </span>
                                     </button>
                                 </form>
                                 <?php endif; ?>
+
                                 <button
                                     type="button"
                                     onclick='openRejectModal(
                                         <?= (int) $inv['invoice_id'] ?>,
                                         <?= json_encode(
-                                            $inv['invoice_number'],
+                                            $inv[
+                                                'invoice_number'
+                                            ],
                                             JSON_HEX_TAG |
                                             JSON_HEX_AMP |
                                             JSON_HEX_APOS |
                                             JSON_HEX_QUOT
                                         ) ?>
                                     )'
-                                        class="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors w-full text-center">
+                                    class="w-full rounded-lg bg-red-50 px-3 py-1.5 text-center text-xs font-semibold text-red-600 transition-colors hover:bg-red-100"
+                                >
                                     ✕ Reject
                                 </button>
                             </div>
-                            <?php elseif ($inv['invoice_status'] === 'paid'): ?>
+                            <?php elseif (
+                                $inv['invoice_status'] ===
+                                'paid'
+                            ): ?>
                             <a
-                                href="?download_receipt=<?= $inv['invoice_id'] ?>"
-                                class="inline-flex items-center justify-center gap-1 text-xs text-blue-600 hover:underline font-semibold whitespace-nowrap"
+                                href="?download_receipt=<?= (int) $inv['invoice_id'] ?>"
+                                class="inline-flex items-center justify-center gap-1 whitespace-nowrap text-xs font-semibold text-blue-600 hover:underline"
                             >
                                 📄 Download Receipt
                             </a>
                             <?php else: ?>
-                            <span class="text-xs text-gray-400">Rejected — Closed</span>
+                            <span class="text-xs text-gray-400">
+                                Rejected — Closed
+                            </span>
                             <?php endif; ?>
                         </td>
                     </tr>

@@ -1098,33 +1098,280 @@ function createPaymentDraft(
             $voucherId = null;
         }
 
-        if ($voucherId !== null) {
-            $reserveVoucher = $pdo->prepare("
-                UPDATE user_vouchers
-                SET uv_status = 'pending',
-                    uv_pending_at = NOW()
-                WHERE uv_voucher_id = ?
-                AND uv_user_id = ?
-                AND uv_is_used = 0
-                AND uv_status = 'available'
-                AND (
-                    uv_expires_at IS NULL
-                    OR uv_expires_at >= NOW()
+        $voucherCode = strtoupper(
+            trim(
+                (string) (
+                    $draft[
+                        'voucher_code'
+                    ] ?? ''
                 )
+            )
+        );
+
+        if ($voucherId === null) {
+            if (
+                $voucherCode !== '' ||
+                $discountAmountSen !== 0
+            ) {
+                throw new PaymentDraftException(
+                    'The checkout voucher details are invalid.'
+                );
+            }
+        } else {
+            if ($voucherCode === '') {
+                throw new PaymentDraftException(
+                    'The checkout voucher code is invalid.'
+                );
+            }
+
+            $voucherStatement = $pdo->prepare("
+                SELECT
+                    v.voucher_id,
+                    v.voucher_type,
+                    v.voucher_value,
+                    v.voucher_min_order,
+                    v.voucher_max_discount,
+                    v.voucher_is_points_redeem,
+                    v.voucher_is_system_generated,
+                    v.voucher_is_birthday_template,
+                    EXISTS (
+                        SELECT 1
+                        FROM user_vouchers uv_any
+                        WHERE uv_any.uv_voucher_id =
+                            v.voucher_id
+                    ) AS voucher_has_assignments,
+                    uv.uv_id,
+                    uv.uv_is_used,
+                    uv.uv_status,
+                    uv.uv_expires_at
+                FROM vouchers v
+                LEFT JOIN user_vouchers uv
+                    ON uv.uv_voucher_id =
+                        v.voucher_id
+                    AND uv.uv_user_id = ?
+                WHERE v.voucher_id = ?
+                AND v.voucher_code = ?
+                AND v.voucher_is_active = 1
+                AND v.voucher_is_birthday_template = 0
+                AND (
+                    v.voucher_usage_limit IS NULL
+                    OR v.voucher_used_count <
+                        v.voucher_usage_limit
+                )
+                AND (
+                    v.voucher_start_date IS NULL
+                    OR v.voucher_start_date <= NOW()
+                )
+                AND (
+                    v.voucher_end_date IS NULL
+                    OR v.voucher_end_date >= NOW()
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM voucher_usage vu
+                    WHERE vu.usage_voucher_id =
+                        v.voucher_id
+                    AND vu.usage_user_id = ?
+                )
+                LIMIT 1
+                FOR UPDATE
             ");
 
-            $reserveVoucher->execute([
+            $voucherStatement->execute([
+                $userId,
                 $voucherId,
+                $voucherCode,
                 $userId,
             ]);
 
-            if (
-                $reserveVoucher->rowCount()
-                !== 1
-            ) {
+            $voucher = $voucherStatement->fetch(
+                PDO::FETCH_ASSOC
+            );
+
+            if (!$voucher) {
                 throw new PaymentDraftException(
                     'The selected voucher is no longer available.'
                 );
+            }
+
+            $isPublicVoucher =
+                (int) $voucher[
+                    'voucher_is_points_redeem'
+                ] === 0 &&
+                (int) $voucher[
+                    'voucher_is_system_generated'
+                ] === 0 &&
+                (int) $voucher[
+                    'voucher_is_birthday_template'
+                ] === 0 &&
+                (int) $voucher[
+                    'voucher_has_assignments'
+                ] === 0;
+
+            $userVoucherExpiresAt = trim(
+                (string) (
+                    $voucher[
+                        'uv_expires_at'
+                    ] ?? ''
+                )
+            );
+
+            $userVoucherExpiryTimestamp =
+                $userVoucherExpiresAt === ''
+                    ? null
+                    : strtotime(
+                        $userVoucherExpiresAt
+                    );
+
+            $hasAvailableUserVoucher =
+                $voucher['uv_id'] !== null &&
+                (int) $voucher[
+                    'uv_is_used'
+                ] === 0 &&
+                $voucher['uv_status'] ===
+                    'available' &&
+                (
+                    $userVoucherExpiresAt === '' ||
+                    (
+                        $userVoucherExpiryTimestamp !==
+                            false &&
+                        $userVoucherExpiryTimestamp >=
+                            time()
+                    )
+                );
+
+            if (
+                !$isPublicVoucher &&
+                !$hasAvailableUserVoucher
+            ) {
+                throw new PaymentDraftException(
+                    'This voucher is not assigned to your account.'
+                );
+            }
+
+            try {
+                $minimumOrderSen =
+                    moneyDecimalToSen(
+                        (string) $voucher[
+                            'voucher_min_order'
+                        ]
+                    );
+
+                if (
+                    $itemSubtotalSen <
+                    $minimumOrderSen
+                ) {
+                    throw new PaymentDraftException(
+                        'The order no longer meets the voucher minimum amount.'
+                    );
+                }
+
+                if (
+                    $voucher['voucher_type'] ===
+                    'percentage'
+                ) {
+                    $expectedDiscountSen =
+                        moneyPercentageDiscountSen(
+                            $itemSubtotalSen,
+                            (string) $voucher[
+                                'voucher_value'
+                            ]
+                        );
+
+                    $maximumDiscountRaw =
+                        $voucher[
+                            'voucher_max_discount'
+                        ] ?? null;
+
+                    if (
+                        $maximumDiscountRaw !== null &&
+                        trim(
+                            (string) $maximumDiscountRaw
+                        ) !== ''
+                    ) {
+                        $maximumDiscountSen =
+                            moneyDecimalToSen(
+                                (string)
+                                    $maximumDiscountRaw
+                            );
+
+                        if (
+                            $maximumDiscountSen > 0
+                        ) {
+                            $expectedDiscountSen = min(
+                                $expectedDiscountSen,
+                                $maximumDiscountSen
+                            );
+                        }
+                    }
+                } elseif (
+                    $voucher['voucher_type'] ===
+                    'fixed'
+                ) {
+                    $expectedDiscountSen =
+                        moneyDecimalToSen(
+                            (string) $voucher[
+                                'voucher_value'
+                            ]
+                        );
+                } else {
+                    throw new PaymentDraftException(
+                        'The selected voucher type is invalid.'
+                    );
+                }
+
+                $expectedDiscountSen = min(
+                    $expectedDiscountSen,
+                    $itemSubtotalSen
+                );
+            } catch (MoneyValueException $e) {
+                throw new PaymentDraftException(
+                    'The selected voucher contains an invalid amount.',
+                    0,
+                    $e
+                );
+            }
+
+            if (
+                $expectedDiscountSen !==
+                $discountAmountSen
+            ) {
+                throw new PaymentDraftException(
+                    'The voucher discount has changed. Please apply the voucher again.'
+                );
+            }
+
+            if (!$isPublicVoucher) {
+                $reserveVoucher =
+                    $pdo->prepare("
+                        UPDATE user_vouchers
+                        SET uv_status = 'pending',
+                            uv_pending_at = NOW()
+                        WHERE uv_id = ?
+                        AND uv_voucher_id = ?
+                        AND uv_user_id = ?
+                        AND uv_is_used = 0
+                        AND uv_status = 'available'
+                        AND (
+                            uv_expires_at IS NULL
+                            OR uv_expires_at >= NOW()
+                        )
+                    ");
+
+                $reserveVoucher->execute([
+                    (int) $voucher['uv_id'],
+                    $voucherId,
+                    $userId,
+                ]);
+
+                if (
+                    $reserveVoucher->rowCount()
+                    !== 1
+                ) {
+                    throw new PaymentDraftException(
+                        'The selected voucher is no longer available.'
+                    );
+                }
             }
         }
 

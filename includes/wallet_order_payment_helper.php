@@ -635,29 +635,56 @@ function finalizeWalletPaymentDraft(
                 );
             }
 
-            $userVoucherUpdate = $pdo->prepare("
-                UPDATE user_vouchers
-                SET uv_is_used = 1,
-                    uv_status = 'used',
-                    uv_pending_at = NULL,
-                    uv_used_at = NOW()
-                WHERE uv_voucher_id = ?
-                AND uv_user_id = ?
-                AND uv_is_used = 0
-                AND uv_status IN (
-                    'available',
-                    'pending'
-                )
-            ");
-            $userVoucherUpdate->execute([
+            $userVoucherStatement =
+                $pdo->prepare("
+                    SELECT uv_id
+                    FROM user_vouchers
+                    WHERE uv_voucher_id = ?
+                    AND uv_user_id = ?
+                    LIMIT 1
+                    FOR UPDATE
+                ");
+
+            $userVoucherStatement->execute([
                 $voucherId,
                 $userId,
             ]);
 
-            if ($userVoucherUpdate->rowCount() !== 1) {
-                throw new WalletOrderPaymentException(
-                    'Customer voucher state could not be finalized.'
-                );
+            $userVoucherId =
+                $userVoucherStatement->fetchColumn();
+
+            if ($userVoucherId !== false) {
+                $userVoucherUpdate =
+                    $pdo->prepare("
+                        UPDATE user_vouchers
+                        SET uv_is_used = 1,
+                            uv_status = 'used',
+                            uv_pending_at = NULL,
+                            uv_used_at = NOW()
+                        WHERE uv_id = ?
+                        AND uv_voucher_id = ?
+                        AND uv_user_id = ?
+                        AND uv_is_used = 0
+                        AND uv_status IN (
+                            'available',
+                            'pending'
+                        )
+                    ");
+
+                $userVoucherUpdate->execute([
+                    (int) $userVoucherId,
+                    $voucherId,
+                    $userId,
+                ]);
+
+                if (
+                    $userVoucherUpdate->rowCount()
+                    !== 1
+                ) {
+                    throw new WalletOrderPaymentException(
+                        'Customer voucher state could not be finalized.'
+                    );
+                }
             }
         }
 
