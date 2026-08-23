@@ -8,17 +8,99 @@ require_once __DIR__ . '/../includes/csrf.php';
 
 $user_id = current_user_id();
 
+$success = (string) (
+    $_SESSION['voucher_success'] ??
+    ''
+);
+
+$info = (string) (
+    $_SESSION['voucher_info'] ??
+    ''
+);
+
+$error = (string) (
+    $_SESSION['voucher_error'] ??
+    ''
+);
+
+unset(
+    $_SESSION['voucher_success'],
+    $_SESSION['voucher_info'],
+    $_SESSION['voucher_error']
+);
+
+function redirect_customer_voucher_page(
+    string $message,
+    string $message_type,
+    string $tab
+): void {
+    $allowed_message_types = [
+        'success',
+        'info',
+        'error',
+    ];
+
+    if (
+        !in_array(
+            $message_type,
+            $allowed_message_types,
+            true
+        )
+    ) {
+        $message_type = 'error';
+    }
+
+    $allowed_tabs = [
+        'promotions',
+        'points',
+        'myvouchers',
+    ];
+
+    if (
+        !in_array(
+            $tab,
+            $allowed_tabs,
+            true
+        )
+    ) {
+        $tab = 'promotions';
+    }
+
+    $_SESSION[
+        'voucher_' . $message_type
+    ] = $message;
+
+    header(
+        'Location: vouchers.php?tab=' .
+        rawurlencode($tab)
+    );
+
+    exit;
+}
 
 // Get user points
-$user = $pdo->prepare("SELECT user_points, user_first_name FROM users WHERE user_id = ?");
-$user->execute([$user_id]);
-$user = $user->fetch(PDO::FETCH_ASSOC);
-$user_points = $user['user_points'] ?? 0;
+$user = $pdo->prepare("
+    SELECT
+        user_points,
+        user_first_name
+    FROM users
+    WHERE user_id = ?
+");
 
-$success = '';
-$error = '';
+$user->execute([
+    $user_id,
+]);
 
-// Handle redeem points voucher
+$user = $user->fetch(
+    PDO::FETCH_ASSOC
+);
+
+$user_points = (int) (
+    $user['user_points'] ??
+    0
+);
+
+// Handle points voucher redemption
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['redeem_voucher'])
@@ -36,192 +118,227 @@ if (
     );
 
     if ($voucher_id === false) {
-        $error = 'Invalid voucher.';
-    } else {
-        try {
-            $pdo->beginTransaction();
+        redirect_customer_voucher_page(
+            'Invalid voucher.',
+            'error',
+            'points'
+        );
+    }
 
-            $voucher_stmt = $pdo->prepare("
-                SELECT
-                    voucher_id,
-                    voucher_code,
-                    voucher_points_required
-                FROM vouchers
-                WHERE voucher_id = ?
-                AND voucher_is_active = 1
-                AND voucher_is_points_redeem = 1
-                AND (
-                    voucher_start_date IS NULL
-                    OR voucher_start_date <= NOW()
-                )
-                AND (
-                    voucher_end_date IS NULL
-                    OR voucher_end_date >= NOW()
-                )
-                AND (
-                    voucher_usage_limit IS NULL
-                    OR voucher_used_count <
-                        voucher_usage_limit
-                )
-                LIMIT 1
-                FOR UPDATE
-            ");
+    try {
+        $pdo->beginTransaction();
 
-            $voucher_stmt->execute([$voucher_id]);
-            $voucher = $voucher_stmt->fetch(PDO::FETCH_ASSOC);
+        $voucher_stmt = $pdo->prepare("
+            SELECT
+                voucher_id,
+                voucher_code,
+                voucher_points_required
+            FROM vouchers
+            WHERE voucher_id = ?
+            AND voucher_is_active = 1
+            AND voucher_is_points_redeem = 1
+            AND (
+                voucher_start_date IS NULL
+                OR voucher_start_date <= NOW()
+            )
+            AND (
+                voucher_end_date IS NULL
+                OR voucher_end_date >= NOW()
+            )
+            AND (
+                voucher_usage_limit IS NULL
+                OR voucher_used_count <
+                    voucher_usage_limit
+            )
+            LIMIT 1
+            FOR UPDATE
+        ");
 
-            if (!$voucher) {
-                throw new RuntimeException(
-                    'Voucher not found or no longer available.'
-                );
-            }
+        $voucher_stmt->execute([
+            $voucher_id,
+        ]);
 
-            $points_required = max(
-                0,
-                (int) $voucher['voucher_points_required']
+        $voucher = $voucher_stmt->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$voucher) {
+            throw new RuntimeException(
+                'Voucher not found or no longer available.'
             );
-
-            if ($points_required <= 0) {
-                throw new RuntimeException(
-                    'This voucher cannot be redeemed with points.'
-                );
-            }
-
-            $user_lock = $pdo->prepare("
-                SELECT user_points
-                FROM users
-                WHERE user_id = ?
-                FOR UPDATE
-            ");
-
-            $user_lock->execute([$user_id]);
-
-            $locked_user =
-                $user_lock->fetch(PDO::FETCH_ASSOC);
-
-            if (!$locked_user) {
-                throw new RuntimeException(
-                    'User account not found.'
-                );
-            }
-
-            $claimed_stmt = $pdo->prepare("
-                SELECT uv_id
-                FROM user_vouchers
-                WHERE uv_user_id = ?
-                AND uv_voucher_id = ?
-                LIMIT 1
-                FOR UPDATE
-            ");
-
-            $claimed_stmt->execute([
-                $user_id,
-                $voucher_id,
-            ]);
-
-            if ($claimed_stmt->fetchColumn()) {
-                throw new RuntimeException(
-                    'You have already claimed this voucher.'
-                );
-            }
-
-            $deduct_points = $pdo->prepare("
-                UPDATE users
-                SET user_points =
-                    user_points - ?
-                WHERE user_id = ?
-                AND user_points >= ?
-            ");
-
-            $deduct_points->execute([
-                $points_required,
-                $user_id,
-                $points_required,
-            ]);
-
-            if ($deduct_points->rowCount() !== 1) {
-                throw new RuntimeException(
-                    'Insufficient points.'
-                );
-            }
-
-            $add_voucher = $pdo->prepare("
-                INSERT INTO user_vouchers (
-                    uv_user_id,
-                    uv_voucher_id
-                )
-                VALUES (?, ?)
-            ");
-
-            $add_voucher->execute([
-                $user_id,
-                $voucher_id,
-            ]);
-
-            $log_points = $pdo->prepare("
-                INSERT INTO points_log (
-                    log_user_id,
-                    log_points,
-                    log_type,
-                    log_description
-                )
-                VALUES (?, ?, 'redeem', ?)
-            ");
-
-            $log_points->execute([
-                $user_id,
-                -$points_required,
-                'Redeemed voucher: ' .
-                    $voucher['voucher_code'],
-            ]);
-
-            $pdo->commit();
-
-            $user_points =
-                (int) $locked_user['user_points'] -
-                $points_required;
-
-            $success =
-                'Voucher ' .
-                $voucher['voucher_code'] .
-                ' claimed! Use it at checkout.';
-        } catch (PDOException $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-
-            app_error_log(
-                'Points voucher redemption database error for user ' .
-                $user_id .
-                ': ' .
-                $e->getMessage()
-            );
-
-            $error =
-                'Unable to redeem the voucher. Please try again.';
-        } catch (RuntimeException $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-
-            $error = $e->getMessage();
-        } catch (Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-
-            app_error_log(
-                'Points voucher redemption failed for user ' .
-                $user_id .
-                ': ' .
-                $e->getMessage()
-            );
-
-            $error =
-                'Unable to redeem the voucher. Please try again.';
         }
+
+        $points_required = max(
+            0,
+            (int) $voucher[
+                'voucher_points_required'
+            ]
+        );
+
+        if ($points_required <= 0) {
+            throw new RuntimeException(
+                'This voucher cannot be redeemed with points.'
+            );
+        }
+
+        $user_lock = $pdo->prepare("
+            SELECT user_points
+            FROM users
+            WHERE user_id = ?
+            FOR UPDATE
+        ");
+
+        $user_lock->execute([
+            $user_id,
+        ]);
+
+        $locked_user = $user_lock->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+        if (!$locked_user) {
+            throw new RuntimeException(
+                'User account not found.'
+            );
+        }
+
+        $claimed_stmt = $pdo->prepare("
+            SELECT uv_id
+            FROM user_vouchers
+            WHERE uv_user_id = ?
+            AND uv_voucher_id = ?
+            LIMIT 1
+            FOR UPDATE
+        ");
+
+        $claimed_stmt->execute([
+            $user_id,
+            $voucher_id,
+        ]);
+
+        if ($claimed_stmt->fetchColumn()) {
+            $pdo->rollBack();
+
+            redirect_customer_voucher_page(
+                'This voucher is already in My Vouchers. No points were deducted.',
+                'info',
+                'myvouchers'
+            );
+        }
+
+        $deduct_points = $pdo->prepare("
+            UPDATE users
+            SET user_points =
+                user_points - ?
+            WHERE user_id = ?
+            AND user_points >= ?
+        ");
+
+        $deduct_points->execute([
+            $points_required,
+            $user_id,
+            $points_required,
+        ]);
+
+        if (
+            $deduct_points->rowCount() !== 1
+        ) {
+            throw new RuntimeException(
+                'Insufficient points.'
+            );
+        }
+
+        $add_voucher = $pdo->prepare("
+            INSERT INTO user_vouchers (
+                uv_user_id,
+                uv_voucher_id
+            )
+            VALUES (?, ?)
+        ");
+
+        $add_voucher->execute([
+            $user_id,
+            $voucher_id,
+        ]);
+
+        $log_points = $pdo->prepare("
+            INSERT INTO points_log (
+                log_user_id,
+                log_points,
+                log_type,
+                log_description
+            )
+            VALUES (
+                ?,
+                ?,
+                'redeem',
+                ?
+            )
+        ");
+
+        $log_points->execute([
+            $user_id,
+            -$points_required,
+            'Redeemed voucher: ' .
+                $voucher['voucher_code'],
+        ]);
+
+        $pdo->commit();
+
+        redirect_customer_voucher_page(
+            'Voucher ' .
+                $voucher['voucher_code'] .
+                ' was redeemed successfully and added to My Vouchers.',
+            'success',
+            'myvouchers'
+        );
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        app_error_log(
+            'Points voucher redemption database error for user ' .
+            $user_id .
+            ': ' .
+            $e->getMessage()
+        );
+
+        redirect_customer_voucher_page(
+            'Unable to redeem the voucher. Please try again.',
+            'error',
+            'points'
+        );
+    } catch (RuntimeException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        redirect_customer_voucher_page(
+            $e->getMessage(),
+            'error',
+            'points'
+        );
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        app_error_log(
+            'Points voucher redemption failed for user ' .
+            $user_id .
+            ': ' .
+            $e->getMessage()
+        );
+
+        redirect_customer_voucher_page(
+            'Unable to redeem the voucher. Please try again.',
+            'error',
+            'points'
+        );
     }
 }
+
 
 
 // Get available points vouchers
@@ -394,10 +511,42 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
             <div class="flex-1 min-w-0 space-y-6">
 
                 <?php if ($success): ?>
-                <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl">✅ <?= htmlspecialchars($success) ?></div>
+                <div
+                    class="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
+                >
+                    ✅
+                    <?= htmlspecialchars(
+                        $success,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </div>
                 <?php endif; ?>
+
+                <?php if ($info): ?>
+                <div
+                    class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700"
+                >
+                    ℹ️
+                    <?= htmlspecialchars(
+                        $info,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </div>
+                <?php endif; ?>
+
                 <?php if ($error): ?>
-                <div class="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl">❌ <?= htmlspecialchars($error) ?></div>
+                <div
+                    class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"
+                >
+                    ❌
+                    <?= htmlspecialchars(
+                        $error,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+                </div>
                 <?php endif; ?>
 
                 <!-- Points Card -->
@@ -520,7 +669,7 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                             </p>
 
                             <p class="text-xs text-red-600">
-                                These promotional vouchers were added by MangaVault Admin and can be used directly at checkout.
+                                Add products to your cart, select them, and then choose one of these vouchers on the Checkout page.
                             </p>
                         </div>
                     </div>
@@ -719,7 +868,7 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                                         ></div>
 
                                         <div
-                                            class="flex w-44 flex-col items-center justify-center gap-3 p-4"
+                                            class="flex w-52 flex-col items-center justify-center gap-3 p-4"
                                         >
                                             <p
                                                 class="text-xs font-semibold uppercase tracking-wide text-gray-400"
@@ -739,11 +888,17 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                                                 ) ?>
                                             </p>
 
+                                            <p
+                                                class="text-center text-xs leading-5 text-gray-400"
+                                            >
+                                                Add items to your cart, select them, and choose this code at checkout.
+                                            </p>
+
                                             <a
                                                 href="cart.php"
                                                 class="rounded-xl bg-red-600 px-4 py-2 text-center text-xs font-semibold text-white transition-colors hover:bg-red-700"
                                             >
-                                                Use at Checkout →
+                                                Go to Cart →
                                             </a>
                                         </div>
                                     </div>
@@ -820,7 +975,18 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                                         <?php if ($already_claimed): ?>
                                         <span class="bg-green-100 text-green-700 text-xs font-semibold px-3 py-1.5 rounded-xl">Claimed ✓</span>
                                         <?php elseif ($can_redeem): ?>
-                                        <form method="POST">
+                                        <form
+                                            method="POST"
+                                            data-voucher-code="<?= htmlspecialchars(
+                                                (string)$v['voucher_code'],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>"
+                                            data-points-required="<?= (int)$v[
+                                                'voucher_points_required'
+                                            ] ?>"
+                                            onsubmit="return confirmVoucherRedemption(this);"
+                                        >
                                             <?php csrf_field(); ?>
 
                                             <input
@@ -828,10 +994,19 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                                                 name="redeem_voucher"
                                                 value="1"
                                             >
-                                            <input type="hidden" name="redeem_voucher" value="1">
-                                            <input type="hidden" name="voucher_id" value="<?= $v['voucher_id'] ?>">
-                                            <button type="submit"
-                                                    class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors">
+
+                                            <input
+                                                type="hidden"
+                                                name="voucher_id"
+                                                value="<?= (int)$v[
+                                                    'voucher_id'
+                                                ] ?>"
+                                            >
+
+                                            <button
+                                                type="submit"
+                                                class="rounded-xl bg-yellow-500 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-yellow-600 disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
                                                 Redeem ⭐
                                             </button>
                                         </form>
@@ -913,8 +1088,11 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                                             <?= htmlspecialchars($v['voucher_code']) ?>
                                         </p>
                                         <?php if (!$is_used && !$is_expired && !$is_pending): ?>
-                                        <a href="checkout.php" class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors">
-                                            Use Now →
+                                        <a
+                                            href="cart.php"
+                                            class="rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-red-700"
+                                        >
+                                            Go to Cart →
                                         </a>
                                         <?php elseif ($is_pending): ?>
                                         <span class="text-xs text-yellow-600 font-semibold text-center">⏳ In Use</span>
@@ -933,34 +1111,146 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
     </div>
 
     <script>
-    function switchTab(tab) {
-        [
-            'promotions',
-            'points',
-            'myvouchers'
-        ].forEach(t => {
-            document.getElementById('tab-' + t).className = 'px-5 py-2 rounded-xl text-sm font-semibold transition-colors ' +
-                (t === tab ? 'bg-red-600 text-white' : 'text-gray-500 hover:text-red-600');
-            document.getElementById('content-' + t).classList.toggle('hidden', t !== tab);
-        });
-    }
+        function switchTab(tab) {
+            [
+                'promotions',
+                'points',
+                'myvouchers'
+            ].forEach((tabName) => {
+                const tabButton = document.getElementById(
+                    'tab-' + tabName
+                );
 
-    function togglePointsHistory() {
-        const short = document.getElementById('pointsHistoryShort');
-        const full = document.getElementById('pointsHistoryFull');
-        const btn = document.getElementById('pointsToggleBtn');
-        const isExpanded = !full.classList.contains('hidden');
-        if (isExpanded) {
-            full.classList.add('hidden');
-            short.classList.remove('hidden');
-            btn.textContent = 'View All ↓';
-        } else {
-            full.classList.remove('hidden');
-            short.classList.add('hidden');
-            btn.textContent = 'Show Less ↑';
+                const tabContent = document.getElementById(
+                    'content-' + tabName
+                );
+
+                tabButton.className =
+                    'px-5 py-2 rounded-xl text-sm font-semibold transition-colors ' +
+                    (
+                        tabName === tab
+                            ? 'bg-red-600 text-white'
+                            : 'text-gray-500 hover:text-red-600'
+                    );
+
+                tabContent.classList.toggle(
+                    'hidden',
+                    tabName !== tab
+                );
+            });
         }
-    }
-    </script>
 
+        const requestedVoucherTab =
+            new URLSearchParams(
+                window.location.search
+            ).get('tab');
+
+        if (
+            [
+                'promotions',
+                'points',
+                'myvouchers'
+            ].includes(requestedVoucherTab)
+        ) {
+            switchTab(requestedVoucherTab);
+        }
+
+        function confirmVoucherRedemption(form) {
+            if (
+                form.dataset.submitting ===
+                'true'
+            ) {
+                return false;
+            }
+
+            const voucherCode =
+                form.dataset.voucherCode ||
+                'Points Voucher';
+
+            const pointsRequired = Number(
+                form.dataset.pointsRequired ||
+                0
+            );
+
+            const confirmed = window.confirm(
+                'Confirm voucher redemption?\n\n' +
+                'Voucher: ' +
+                voucherCode +
+                '\n' +
+                'Points to deduct: ' +
+                pointsRequired.toLocaleString(
+                    'en-MY'
+                ) +
+                '\n\n' +
+                'Your points will be deducted immediately. ' +
+                'This action cannot be undone.'
+            );
+
+            if (!confirmed) {
+                return false;
+            }
+
+            form.dataset.submitting = 'true';
+
+            const submitButton =
+                form.querySelector(
+                    'button[type="submit"]'
+                );
+
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent =
+                    'Redeeming...';
+            }
+
+            return true;
+        }
+
+        function togglePointsHistory() {
+            const shortHistory =
+                document.getElementById(
+                    'pointsHistoryShort'
+                );
+
+            const fullHistory =
+                document.getElementById(
+                    'pointsHistoryFull'
+                );
+
+            const toggleButton =
+                document.getElementById(
+                    'pointsToggleBtn'
+                );
+
+            const isExpanded =
+                !fullHistory.classList.contains(
+                    'hidden'
+                );
+
+            if (isExpanded) {
+                fullHistory.classList.add(
+                    'hidden'
+                );
+
+                shortHistory.classList.remove(
+                    'hidden'
+                );
+
+                toggleButton.textContent =
+                    'View All ↓';
+            } else {
+                fullHistory.classList.remove(
+                    'hidden'
+                );
+
+                shortHistory.classList.add(
+                    'hidden'
+                );
+
+                toggleButton.textContent =
+                    'Show Less ↑';
+            }
+        }
+    </script>
 </body>
 </html>
