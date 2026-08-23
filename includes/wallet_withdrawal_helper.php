@@ -28,6 +28,59 @@ function walletWithdrawalSupportedBanks(): array
     ];
 }
 
+function walletWithdrawalBusinessDayDeadline(
+    string $approvedAt,
+    int $businessDays = 14
+): ?DateTimeImmutable {
+    $approvedAt = trim($approvedAt);
+
+    if (
+        $approvedAt === '' ||
+        $businessDays < 1 ||
+        $businessDays > 60
+    ) {
+        return null;
+    }
+
+    try {
+        $deadline = new DateTimeImmutable(
+            $approvedAt,
+            new DateTimeZone(
+                'Asia/Kuala_Lumpur'
+            )
+        );
+    } catch (Throwable) {
+        return null;
+    }
+
+    $remaining = $businessDays;
+
+    while ($remaining > 0) {
+        $deadline = $deadline->modify('+1 day');
+        $weekday = (int) $deadline->format('N');
+
+        if ($weekday <= 5) {
+            $remaining--;
+        }
+    }
+
+    return $deadline;
+}
+
+function walletWithdrawalBusinessDayDeadlineLabel(
+    string $approvedAt,
+    int $businessDays = 14
+): string {
+    $deadline = walletWithdrawalBusinessDayDeadline(
+        $approvedAt,
+        $businessDays
+    );
+
+    return $deadline instanceof DateTimeImmutable
+        ? $deadline->format('d M Y')
+        : '';
+}
+
 function normalizeWalletWithdrawalBankCode(
     mixed $value
 ): array {
@@ -675,6 +728,7 @@ function getWalletWithdrawalSummary(
             wallet_withdrawal_id,
             wallet_withdrawal_amount,
             wallet_withdrawal_status,
+            wallet_withdrawal_reviewed_at,
             wallet_withdrawal_created_at
         FROM wallet_withdrawal_requests
         WHERE wallet_withdrawal_user_id = ?
@@ -718,10 +772,12 @@ function getCustomerWalletWithdrawals(
             wallet_withdrawal_transfer_reference,
             wallet_withdrawal_admin_note,
             wallet_withdrawal_reviewed_at,
+            wallet_withdrawal_reviewed_by,
             wallet_withdrawal_failed_at,
             wallet_withdrawal_failure_reason,
             wallet_withdrawal_completed_at,
             wallet_withdrawal_receipt_file,
+            wallet_withdrawal_receipt_uploaded_by,
             wallet_withdrawal_created_at
         FROM wallet_withdrawal_requests
         WHERE wallet_withdrawal_user_id = ?

@@ -158,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $pdo,
                         $customer_id,
                         'Bank Withdrawal Approved',
-                        "Your bank withdrawal request $request_number for RM $amount has been approved. The funds remain reserved while the bank transfer is being processed.",
+                        "Your bank withdrawal request $request_number for RM $amount has been approved. Bank processing may take up to 14 business days. Your official approval PDF is now available in My Wallet.",
                         'system'
                     );
                 } elseif ($action === 'reject') {
@@ -202,7 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $request_result[
                                 'wallet_withdrawal_transfer_reference'
                             ] .
-                            '. The transfer receipt is available in My Wallet.',
+                            '. Your official transfer confirmation PDF is available in My Wallet.',
                         'system'
                     );
                 }
@@ -380,7 +380,7 @@ $result_id = filter_input(
                     </span>
                 </div>
                 <p class="text-sm text-gray-400 mt-2 max-w-3xl">
-                    Review refund-to-bank requests. Approval keeps funds reserved; completion requires an external transfer reference, current admin password, and integrity-checked transfer receipt.
+                    Review refund-to-bank requests. Approval automatically makes an official approval PDF available and starts the 14-business-day processing window. Completion still requires bank evidence for the internal audit trail.
                 </p>
             </div>
         </div>
@@ -468,7 +468,9 @@ $result_id = filter_input(
             <?php foreach ($summary as $key => $card): ?>
                 <a
                     href="?status=<?= urlencode($key) ?>"
-                    class="<?= $card[1] ?> border rounded-2xl p-4"
+                    class="<?= $card[1] ?> border rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-md <?= $status_filter === $key
+                        ? 'ring-2 ring-offset-2 ring-gray-300 shadow-sm'
+                        : '' ?>"
                 >
                     <p
                         class="text-xs font-semibold uppercase tracking-wide opacity-70"
@@ -487,47 +489,50 @@ $result_id = filter_input(
         </div>
 
         <div
-            class="bg-white rounded-2xl shadow-sm p-4 mb-6"
+            class="bg-white rounded-2xl shadow-sm p-3 mb-6 overflow-x-auto"
         >
-            <form
-                method="GET"
-                class="flex items-center gap-3 flex-wrap"
+            <div
+                class="flex items-center gap-2 min-w-max"
+                aria-label="Withdrawal status filter"
             >
-                <label class="text-sm font-semibold text-gray-600">
-                    View
-                </label>
-                <select
-                    name="status"
-                    onchange="this.form.submit()"
-                    class="px-4 py-2 border border-gray-200 rounded-xl text-sm"
+                <span
+                    class="px-3 text-xs font-black uppercase tracking-[0.16em] text-gray-400"
                 >
-                    <?php foreach ([
-                        'pending' => 'Pending Review',
-                        'approved' => 'Approved / Awaiting Transfer',
-                        'rejected' => 'Rejected',
-                        'failed' => 'Transfer Failed',
-                        'completed' => 'Completed',
-                        'all' => 'All Requests',
-                    ] as $value => $label): ?>
-                        <option
-                            value="<?= htmlspecialchars(
-                                $value,
-                                ENT_QUOTES,
-                                'UTF-8'
-                            ) ?>"
-                            <?= $status_filter === $value
-                                ? 'selected'
-                                : '' ?>
+                    Queue
+                </span>
+
+                <?php foreach ([
+                    'all' => ['All Requests', array_sum($counts)],
+                    'pending' => ['Pending', $counts['pending']],
+                    'approved' => ['Approved', $counts['approved']],
+                    'rejected' => ['Rejected', $counts['rejected']],
+                    'failed' => ['Failed', $counts['failed']],
+                    'completed' => ['Completed', $counts['completed']],
+                ] as $value => $filter): ?>
+                    <a
+                        href="?status=<?= urlencode($value) ?>"
+                        class="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors <?= $status_filter === $value
+                            ? 'bg-[#17243d] text-white shadow-sm'
+                            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800' ?>"
+                        aria-current="<?= $status_filter === $value
+                            ? 'page'
+                            : 'false' ?>"
+                    >
+                        <?= htmlspecialchars(
+                            $filter[0],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                        <span
+                            class="rounded-full px-2 py-0.5 text-[10px] <?= $status_filter === $value
+                                ? 'bg-white/15 text-white'
+                                : 'bg-gray-100 text-gray-500' ?>"
                         >
-                            <?= htmlspecialchars(
-                                $label,
-                                ENT_QUOTES,
-                                'UTF-8'
-                            ) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </form>
+                            <?= (int) $filter[1] ?>
+                        </span>
+                    </a>
+                <?php endforeach; ?>
+            </div>
         </div>
 
         <?php if ($requests === []): ?>
@@ -572,6 +577,14 @@ $result_id = filter_input(
                             'wallet_withdrawal_amount'
                         ]
                     );
+                    $processing_deadline =
+                        walletWithdrawalBusinessDayDeadlineLabel(
+                            (string) (
+                                $request[
+                                    'wallet_withdrawal_reviewed_at'
+                                ] ?? ''
+                            )
+                        );
                     ?>
                     <section
                         class="bg-white rounded-2xl shadow-sm overflow-hidden"
@@ -706,6 +719,27 @@ $result_id = filter_input(
                                     <?php endif; ?>
 
                                     <?php if (
+                                        in_array(
+                                            $status,
+                                            [
+                                                'approved',
+                                                'completed',
+                                            ],
+                                            true
+                                        )
+                                    ): ?>
+                                        <a
+                                            href="wallet_withdrawal_receipt.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>&amp;download=1"
+                                            class="inline-flex items-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold px-4 py-2 rounded-xl text-sm"
+                                        >
+                                            <span aria-hidden="true">📄</span>
+                                            <?= $status === 'completed'
+                                                ? 'Download Transfer Confirmation'
+                                                : 'Download Approval PDF' ?>
+                                        </a>
+                                    <?php endif; ?>
+
+                                    <?php if (
                                         $status === 'completed' &&
                                         !empty(
                                             $request[
@@ -714,15 +748,81 @@ $result_id = filter_input(
                                         )
                                     ): ?>
                                         <a
-                                            href="wallet_withdrawal_receipt.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>"
+                                            href="wallet_withdrawal_evidence.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>"
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             class="inline-flex items-center bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 font-semibold px-4 py-2 rounded-xl text-sm"
                                         >
-                                            View Transfer Receipt
+                                            View Bank Evidence
                                         </a>
                                     <?php endif; ?>
                                 </div>
+
+                                <?php if (
+                                    in_array(
+                                        $status,
+                                        [
+                                            'approved',
+                                            'completed',
+                                        ],
+                                        true
+                                    )
+                                ): ?>
+                                    <div
+                                        class="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 p-4"
+                                    >
+                                        <div
+                                            class="flex items-start justify-between gap-4 flex-wrap"
+                                        >
+                                            <div>
+                                                <p
+                                                    class="text-sm font-black text-blue-900"
+                                                >
+                                                    14-business-day service window
+                                                </p>
+                                                <p
+                                                    class="mt-1 text-xs leading-relaxed text-blue-700"
+                                                >
+                                                    Starts after approval. Weekends are excluded; bank and public-holiday schedules may affect the exact arrival date.
+                                                </p>
+                                            </div>
+
+                                            <div
+                                                class="rounded-xl bg-white px-4 py-3 text-right shadow-sm ring-1 ring-blue-100"
+                                            >
+                                                <p
+                                                    class="text-[10px] font-black uppercase tracking-wider text-blue-400"
+                                                >
+                                                    <?= $status === 'completed'
+                                                        ? 'Completed'
+                                                        : 'Estimated by' ?>
+                                                </p>
+                                                <p
+                                                    class="mt-1 text-sm font-black text-blue-900"
+                                                >
+                                                    <?= htmlspecialchars(
+                                                        $status === 'completed'
+                                                            ? date(
+                                                                'd M Y',
+                                                                strtotime(
+                                                                    (string) $request[
+                                                                        'wallet_withdrawal_completed_at'
+                                                                    ]
+                                                                )
+                                                            )
+                                                            : (
+                                                                $processing_deadline !== ''
+                                                                    ? $processing_deadline
+                                                                    : 'Calculating'
+                                                            ),
+                                                        ENT_QUOTES,
+                                                        'UTF-8'
+                                                    ) ?>
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
 
                                 <?php if (!empty(
                                     $request[
@@ -783,7 +883,11 @@ $result_id = filter_input(
                                         <form
                                             method="POST"
                                             class="mt-4 space-y-3"
-                                            onsubmit="return confirm('Approve this bank withdrawal request? Funds will remain reserved until transfer completion.')"
+                                            data-confirm-title="Approve Withdrawal"
+                                            data-confirm-message="Approve this request and make the official approval PDF available to the customer? Funds remain reserved until transfer completion."
+                                            data-confirm-button="Approve Request"
+                                            data-confirm-tone="green"
+                                            onsubmit="return openWithdrawalActionModal(event, this)"
                                         >
                                             <?php csrf_field(); ?>
                                             <input
@@ -824,7 +928,11 @@ $result_id = filter_input(
                                         <form
                                             method="POST"
                                             class="mt-4 space-y-3"
-                                            onsubmit="return confirm('Reject this bank withdrawal request and release the reserved funds?')"
+                                            data-confirm-title="Reject Withdrawal"
+                                            data-confirm-message="Reject this request and release the reserved funds back to the customer wallet?"
+                                            data-confirm-button="Reject & Release"
+                                            data-confirm-tone="red"
+                                            onsubmit="return openWithdrawalActionModal(event, this)"
                                         >
                                             <?php csrf_field(); ?>
                                             <input
@@ -865,11 +973,30 @@ $result_id = filter_input(
                                             Perform the transfer through the bank first. Then enter the bank reference and upload the transfer receipt. Completion permanently debits the reserved wallet amount.
                                         </p>
 
+                                        <div
+                                            class="mt-3 rounded-xl border border-blue-200 bg-white/75 p-3"
+                                        >
+                                            <p
+                                                class="text-xs font-bold text-blue-900"
+                                            >
+                                                Official approval PDF is ready
+                                            </p>
+                                            <p
+                                                class="mt-1 text-[11px] leading-relaxed text-blue-600"
+                                            >
+                                                The customer can already download the approval advice. After completion, the same endpoint automatically becomes the final transfer confirmation.
+                                            </p>
+                                        </div>
+
                                         <form
                                             method="POST"
                                             enctype="multipart/form-data"
                                             class="mt-4 space-y-3"
-                                            onsubmit="return confirm('Confirm that the external bank transfer has been completed and debit the reserved wallet funds?')"
+                                            data-confirm-title="Complete Bank Transfer"
+                                            data-confirm-message="Confirm the external transfer is completed, permanently debit the reserved wallet amount, and create the final transfer confirmation PDF?"
+                                            data-confirm-button="Complete Transfer"
+                                            data-confirm-tone="blue"
+                                            onsubmit="return openWithdrawalActionModal(event, this)"
                                         >
                                             <?php csrf_field(); ?>
                                             <input
@@ -951,7 +1078,11 @@ $result_id = filter_input(
                                         <form
                                             method="POST"
                                             class="mt-4 space-y-3"
-                                            onsubmit="return confirm('Mark this bank transfer as failed and release the reserved funds back to the customer wallet?')"
+                                            data-confirm-title="Mark Transfer Failed"
+                                            data-confirm-message="Confirm the bank transfer was not completed and release the reserved funds back to the customer wallet?"
+                                            data-confirm-button="Mark Failed & Release"
+                                            data-confirm-tone="orange"
+                                            onsubmit="return openWithdrawalActionModal(event, this)"
                                         >
                                             <?php csrf_field(); ?>
 
@@ -1067,6 +1198,215 @@ $result_id = filter_input(
             </div>
         <?php endif; ?>
     </main>
+
+    <div
+        id="withdrawalActionModal"
+        class="hidden fixed inset-0 z-[120] items-center justify-center bg-slate-950/65 px-4 py-8 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="withdrawalActionTitle"
+    >
+        <div
+            class="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl"
+        >
+            <div
+                id="withdrawalActionHeader"
+                class="bg-[#17243d] px-6 py-5 text-white"
+            >
+                <div class="flex items-center gap-4">
+                    <div
+                        class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-white/15 text-2xl"
+                        aria-hidden="true"
+                    >
+                        🏦
+                    </div>
+                    <div>
+                        <p
+                            class="text-[10px] font-black uppercase tracking-[0.18em] text-white/55"
+                        >
+                            Admin confirmation
+                        </p>
+                        <h2
+                            id="withdrawalActionTitle"
+                            class="mt-1 text-xl font-black"
+                        >
+                            Confirm Action
+                        </h2>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-6">
+                <div
+                    class="rounded-2xl border border-gray-200 bg-gray-50 p-4"
+                >
+                    <div
+                        class="flex items-center justify-between gap-4 border-b border-gray-200 pb-3"
+                    >
+                        <span class="text-sm text-gray-500">
+                            Withdrawal
+                        </span>
+                        <strong
+                            id="withdrawalActionNumber"
+                            class="text-gray-900"
+                        >
+                            #0000
+                        </strong>
+                    </div>
+                    <div
+                        class="flex items-center justify-between gap-4 pt-3"
+                    >
+                        <span class="text-sm text-gray-500">
+                            Amount
+                        </span>
+                        <strong
+                            id="withdrawalActionAmount"
+                            class="text-lg text-red-600"
+                        >
+                            RM 0.00
+                        </strong>
+                    </div>
+                </div>
+
+                <p
+                    id="withdrawalActionMessage"
+                    class="mt-5 text-sm leading-6 text-gray-600"
+                ></p>
+
+                <div class="mt-6 grid grid-cols-2 gap-3">
+                    <button
+                        type="button"
+                        onclick="closeWithdrawalActionModal()"
+                        class="rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 transition-colors hover:bg-gray-50"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        id="withdrawalActionConfirm"
+                        onclick="confirmWithdrawalAction()"
+                        class="rounded-xl bg-[#17243d] px-4 py-3 text-sm font-bold text-white transition-opacity hover:opacity-90"
+                    >
+                        Confirm
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let pendingWithdrawalActionForm = null;
+
+        function openWithdrawalActionModal(
+            event,
+            form
+        ) {
+            event.preventDefault();
+
+            pendingWithdrawalActionForm = form;
+
+            const modal = document.getElementById(
+                'withdrawalActionModal'
+            );
+            const withdrawalInput =
+                form.querySelector(
+                    '[name="withdrawal_id"]'
+                );
+            const section = form.closest('section');
+            const amountElement = section
+                ? section.querySelector(
+                    '.text-2xl.font-black.text-red-600'
+                )
+                : null;
+
+            document.getElementById(
+                'withdrawalActionTitle'
+            ).textContent =
+                form.dataset.confirmTitle ||
+                'Confirm Action';
+
+            document.getElementById(
+                'withdrawalActionMessage'
+            ).textContent =
+                form.dataset.confirmMessage ||
+                'Please confirm this withdrawal action.';
+
+            document.getElementById(
+                'withdrawalActionNumber'
+            ).textContent =
+                '#' + String(
+                    withdrawalInput
+                        ? withdrawalInput.value
+                        : '0'
+                ).padStart(4, '0');
+
+            document.getElementById(
+                'withdrawalActionAmount'
+            ).textContent = amountElement
+                ? amountElement.textContent.trim()
+                : 'Withdrawal amount';
+
+            document.getElementById(
+                'withdrawalActionConfirm'
+            ).textContent =
+                form.dataset.confirmButton ||
+                'Confirm';
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.body.classList.add(
+                'overflow-hidden'
+            );
+        }
+
+        function closeWithdrawalActionModal() {
+            const modal = document.getElementById(
+                'withdrawalActionModal'
+            );
+
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.body.classList.remove(
+                'overflow-hidden'
+            );
+            pendingWithdrawalActionForm = null;
+        }
+
+        function confirmWithdrawalAction() {
+            if (!pendingWithdrawalActionForm) {
+                return;
+            }
+
+            const form = pendingWithdrawalActionForm;
+            const button = document.getElementById(
+                'withdrawalActionConfirm'
+            );
+
+            button.disabled = true;
+            button.textContent = 'Processing...';
+            form.submit();
+        }
+
+        document.getElementById(
+            'withdrawalActionModal'
+        ).addEventListener(
+            'click',
+            function (event) {
+                if (event.target === this) {
+                    closeWithdrawalActionModal();
+                }
+            }
+        );
+
+        document.addEventListener(
+            'keydown',
+            function (event) {
+                if (event.key === 'Escape') {
+                    closeWithdrawalActionModal();
+                }
+            }
+        );
+    </script>
 
 </body>
 </html>

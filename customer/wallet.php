@@ -306,19 +306,30 @@ $type_labels = [
                             $active_status = (string) $active_withdrawal[
                                 'wallet_withdrawal_status'
                             ];
-                            $active_class =
+                            $active_step =
                                 $active_status === 'approved'
-                                    ? 'bg-blue-50 border-blue-200 text-blue-700'
-                                    : 'bg-yellow-50 border-yellow-200 text-yellow-700';
+                                    ? 3
+                                    : 1;
+                            $active_deadline =
+                                walletWithdrawalBusinessDayDeadlineLabel(
+                                    (string) (
+                                        $active_withdrawal[
+                                            'wallet_withdrawal_reviewed_at'
+                                        ] ?? ''
+                                    )
+                                );
                             ?>
                             <div
-                                class="<?= $active_class ?> border rounded-xl p-4"
+                                class="overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-indigo-50"
                             >
                                 <div
-                                    class="flex items-center justify-between gap-4 flex-wrap"
+                                    class="flex items-start justify-between gap-5 border-b border-blue-100 px-5 py-4 flex-wrap"
                                 >
                                     <div>
-                                        <p class="font-bold">
+                                        <div
+                                            class="flex items-center gap-2 flex-wrap"
+                                        >
+                                            <p class="font-black text-blue-900">
                                             Active Request #<?= str_pad(
                                                 (string) $active_withdrawal[
                                                     'wallet_withdrawal_id'
@@ -327,16 +338,24 @@ $type_labels = [
                                                 '0',
                                                 STR_PAD_LEFT
                                             ) ?>
-                                        </p>
-                                        <p class="text-xs mt-1">
-                                            Status: <?= htmlspecialchars(
-                                                ucfirst($active_status),
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?> · The requested amount remains reserved until completion, rejection, or a failed transfer.
+                                            </p>
+
+                                            <span
+                                                class="rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white"
+                                            >
+                                                <?= $active_status === 'approved'
+                                                    ? 'Bank Processing'
+                                                    : 'Pending Review' ?>
+                                            </span>
+                                        </div>
+                                        <p
+                                            class="mt-1.5 max-w-2xl text-xs leading-relaxed text-blue-700"
+                                        >
+                                            The requested amount remains reserved and protected until completion, rejection, or a failed transfer.
                                         </p>
                                     </div>
-                                    <p class="font-black">
+
+                                    <p class="text-xl font-black text-blue-700">
                                         RM <?= moneyFormatSen(
                                             moneyDecimalToSen(
                                                 (string) $active_withdrawal[
@@ -345,6 +364,108 @@ $type_labels = [
                                             )
                                         ) ?>
                                     </p>
+                                </div>
+
+                                <div class="px-5 py-5">
+                                    <div
+                                        class="grid grid-cols-2 gap-4 md:grid-cols-4"
+                                    >
+                                        <?php foreach ([
+                                            1 => ['Request Submitted', 'Received securely'],
+                                            2 => ['Admin Review', $active_status === 'approved'
+                                                ? 'Approved'
+                                                : 'In review'],
+                                            3 => ['Bank Processing', $active_status === 'approved'
+                                                ? 'In progress'
+                                                : 'Starts after approval'],
+                                            4 => ['Completed', 'Funds sent'],
+                                        ] as $step => $step_copy): ?>
+                                            <div class="relative">
+                                                <div
+                                                    class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-black <?= $step <= $active_step
+                                                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                                                        : 'bg-gray-100 text-gray-400' ?>"
+                                                >
+                                                    <?= $step < $active_step
+                                                        ? '✓'
+                                                        : $step ?>
+                                                </div>
+                                                <p
+                                                    class="mt-2 text-xs font-black <?= $step <= $active_step
+                                                        ? 'text-blue-900'
+                                                        : 'text-gray-400' ?>"
+                                                >
+                                                    <?= htmlspecialchars(
+                                                        $step_copy[0],
+                                                        ENT_QUOTES,
+                                                        'UTF-8'
+                                                    ) ?>
+                                                </p>
+                                                <p
+                                                    class="mt-0.5 text-[10px] <?= $step <= $active_step
+                                                        ? 'text-blue-600'
+                                                        : 'text-gray-400' ?>"
+                                                >
+                                                    <?= htmlspecialchars(
+                                                        $step_copy[1],
+                                                        ENT_QUOTES,
+                                                        'UTF-8'
+                                                    ) ?>
+                                                </p>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+
+                                    <div
+                                        class="mt-5 flex items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex-wrap"
+                                    >
+                                        <div>
+                                            <p
+                                                class="text-xs font-black text-amber-800"
+                                            >
+                                                Processing may take up to 14 business days
+                                            </p>
+                                            <p
+                                                class="mt-1 text-[11px] leading-relaxed text-amber-700"
+                                            >
+                                                The service window begins after approval. Weekends are excluded; bank and public-holiday schedules may affect the exact arrival date.
+                                            </p>
+                                        </div>
+
+                                        <?php if (
+                                            $active_status === 'approved'
+                                        ): ?>
+                                            <div
+                                                class="flex items-center gap-3 flex-wrap"
+                                            >
+                                                <div class="text-right">
+                                                    <p
+                                                        class="text-[10px] font-black uppercase tracking-wider text-amber-500"
+                                                    >
+                                                        Estimated by
+                                                    </p>
+                                                    <p
+                                                        class="text-sm font-black text-amber-900"
+                                                    >
+                                                        <?= htmlspecialchars(
+                                                            $active_deadline !== ''
+                                                                ? $active_deadline
+                                                                : 'Calculating',
+                                                            ENT_QUOTES,
+                                                            'UTF-8'
+                                                        ) ?>
+                                                    </p>
+                                                </div>
+
+                                                <a
+                                                    href="wallet_withdrawal_receipt.php?id=<?= (int) $active_withdrawal['wallet_withdrawal_id'] ?>&amp;download=1"
+                                                    class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-blue-700"
+                                                >
+                                                    📄 Download Approval PDF
+                                                </a>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
                                 </div>
                             </div>
                         <?php elseif ($withdrawable_refund_sen >= 100): ?>
@@ -437,6 +558,14 @@ $type_labels = [
                                     'completed' =>
                                         'bg-green-100 text-green-700',
                                 ];
+                                $withdrawal_deadline =
+                                    walletWithdrawalBusinessDayDeadlineLabel(
+                                        (string) (
+                                            $withdrawal[
+                                                'wallet_withdrawal_reviewed_at'
+                                            ] ?? ''
+                                        )
+                                    );
                                 ?>
                                 <div
                                     class="px-6 py-4 flex items-start justify-between gap-5 flex-wrap"
@@ -550,6 +679,21 @@ $type_labels = [
                                                 </span>
                                             </p>
                                         <?php endif; ?>
+
+                                        <?php if (
+                                            $withdrawal_status === 'approved' &&
+                                            $withdrawal_deadline !== ''
+                                        ): ?>
+                                            <p
+                                                class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700"
+                                            >
+                                                ⏱ Estimated processing by <?= htmlspecialchars(
+                                                    $withdrawal_deadline,
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+                                        <?php endif; ?>
                                     </div>
 
                                     <div class="text-right">
@@ -563,21 +707,23 @@ $type_labels = [
                                             ) ?>
                                         </p>
 
-                                        <?php if (
-                                            $withdrawal_status === 'completed' &&
-                                            !empty(
-                                                $withdrawal[
-                                                    'wallet_withdrawal_receipt_file'
-                                                ]
-                                            )
-                                        ): ?>
+                                        <?php if (in_array(
+                                            $withdrawal_status,
+                                            [
+                                                'approved',
+                                                'completed',
+                                            ],
+                                            true
+                                        )): ?>
                                             <a
-                                                href="wallet_withdrawal_receipt.php?id=<?= (int) $withdrawal['wallet_withdrawal_id'] ?>"
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                class="inline-block mt-2 text-xs font-semibold text-green-700 hover:underline"
+                                                href="wallet_withdrawal_receipt.php?id=<?= (int) $withdrawal['wallet_withdrawal_id'] ?>&amp;download=1"
+                                                class="mt-2 inline-flex items-center gap-1.5 rounded-lg border <?= $withdrawal_status === 'completed'
+                                                    ? 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'
+                                                    : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' ?> px-3 py-2 text-xs font-bold transition-colors"
                                             >
-                                                View Transfer Receipt
+                                                📄 <?= $withdrawal_status === 'completed'
+                                                    ? 'Transfer Confirmation PDF'
+                                                    : 'Approval Advice PDF' ?>
                                             </a>
                                         <?php endif; ?>
                                     </div>

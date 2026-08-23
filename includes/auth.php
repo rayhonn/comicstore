@@ -233,6 +233,7 @@ function safe_redirect_target(string $target, string $default): string
         'admin/identity_verification_requests.php',
         'admin/wallet_withdrawals.php',
         'admin/wallet_withdrawal_bank.php',
+        'admin/wallet_withdrawal_evidence.php',
         'admin/wallet_withdrawal_receipt.php',
         'admin/goods_received.php',
         'admin/delivery_receipt.php',
@@ -320,6 +321,7 @@ function safe_redirect_target(string $target, string $default): string
             [
                 'customer/wallet_withdrawal_receipt.php',
                 'admin/wallet_withdrawal_bank.php',
+                'admin/wallet_withdrawal_evidence.php',
                 'admin/wallet_withdrawal_receipt.php',
             ],
             true
@@ -356,9 +358,25 @@ function safe_redirect_target(string $target, string $default): string
             return $default;
         }
 
-        return app_path($path) .
+        $validatedTarget = app_path($path) .
             '?id=' .
             (int) $withdrawalId;
+
+        if (
+            in_array(
+                $path,
+                [
+                    'customer/wallet_withdrawal_receipt.php',
+                    'admin/wallet_withdrawal_receipt.php',
+                ],
+                true
+            ) &&
+            ($queryParameters['download'] ?? '') === '1'
+        ) {
+            $validatedTarget .= '&download=1';
+        }
+
+        return $validatedTarget;
     }
 
     if (

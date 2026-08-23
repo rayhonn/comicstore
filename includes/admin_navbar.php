@@ -110,6 +110,7 @@ $return_pages = [
 $wallet_withdrawal_pages = [
     'wallet_withdrawals.php',
     'wallet_withdrawal_bank.php',
+    'wallet_withdrawal_evidence.php',
     'wallet_withdrawal_receipt.php',
 ];
 

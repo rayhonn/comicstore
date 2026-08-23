@@ -196,6 +196,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 <?php endif; ?>
 
+                <div
+                    class="mb-6 overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50"
+                >
+                    <div
+                        class="flex items-start gap-4 px-5 py-4"
+                    >
+                        <div
+                            class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-xl text-white shadow-sm"
+                            aria-hidden="true"
+                        >
+                            ⏱
+                        </div>
+                        <div>
+                            <p
+                                class="text-sm font-black text-blue-900"
+                            >
+                                Allow up to 14 business days after approval
+                            </p>
+                            <p
+                                class="mt-1 text-xs leading-relaxed text-blue-700"
+                            >
+                                Your request is reviewed first. Once approved, MangaVault begins the bank transfer process and automatically provides an official approval PDF. Weekends are excluded; bank and public-holiday schedules may affect the exact arrival date.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div
+                        class="grid grid-cols-2 border-t border-blue-100 bg-white/65 md:grid-cols-4"
+                    >
+                        <?php foreach ([
+                            ['1', 'Submit', 'Request received'],
+                            ['2', 'Review', 'Admin decision'],
+                            ['3', 'Process', 'Up to 14 business days'],
+                            ['4', 'Complete', 'Official PDF updated'],
+                        ] as $process_step): ?>
+                            <div
+                                class="border-blue-100 px-4 py-3 md:border-r last:border-r-0"
+                            >
+                                <p
+                                    class="text-[10px] font-black uppercase tracking-wider text-blue-400"
+                                >
+                                    Step <?= $process_step[0] ?>
+                                </p>
+                                <p
+                                    class="mt-1 text-xs font-black text-blue-900"
+                                >
+                                    <?= $process_step[1] ?>
+                                </p>
+                                <p
+                                    class="mt-0.5 text-[10px] text-blue-600"
+                                >
+                                    <?= $process_step[2] ?>
+                                </p>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
                 <?php if ($active_request): ?>
                     <div
                         class="bg-yellow-50 border border-yellow-200 rounded-xl p-5"
@@ -271,7 +329,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php endif; ?>
                     </div>
 
-                    <form method="POST" class="space-y-5">
+                    <form
+                        method="POST"
+                        class="space-y-5"
+                        id="customerWithdrawalForm"
+                        onsubmit="return openCustomerWithdrawalModal(event, this)"
+                    >
                         <?php csrf_field(); ?>
 
                         <div>
@@ -431,7 +494,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         <button
                             type="submit"
-                            onclick="return confirm('Submit this bank withdrawal request? Bank details cannot be edited after submission.')"
                             class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 rounded-xl text-sm transition-colors"
                         >
                             Submit Bank Withdrawal Request
@@ -441,6 +503,206 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </div>
     </div>
+
+    <div
+        id="customerWithdrawalModal"
+        class="hidden fixed inset-0 z-[120] items-center justify-center bg-slate-950/65 px-4 py-8 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="customerWithdrawalModalTitle"
+    >
+        <div
+            class="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl"
+        >
+            <div
+                class="bg-gradient-to-r from-[#17243d] to-[#293957] px-6 py-5 text-white"
+            >
+                <div class="flex items-center gap-4">
+                    <div
+                        class="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 text-2xl"
+                        aria-hidden="true"
+                    >
+                        🏦
+                    </div>
+                    <div>
+                        <p
+                            class="text-[10px] font-black uppercase tracking-[0.18em] text-white/55"
+                        >
+                            Final review
+                        </p>
+                        <h2
+                            id="customerWithdrawalModalTitle"
+                            class="mt-1 text-xl font-black"
+                        >
+                            Confirm Bank Withdrawal
+                        </h2>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-6">
+                <div
+                    class="rounded-2xl border border-gray-200 bg-gray-50 p-4"
+                >
+                    <div
+                        class="flex items-center justify-between gap-4 border-b border-gray-200 pb-3"
+                    >
+                        <span class="text-sm text-gray-500">
+                            Amount
+                        </span>
+                        <strong
+                            id="customerWithdrawalModalAmount"
+                            class="text-lg text-red-600"
+                        >
+                            RM 0.00
+                        </strong>
+                    </div>
+                    <div
+                        class="flex items-center justify-between gap-4 pt-3"
+                    >
+                        <span class="text-sm text-gray-500">
+                            Destination bank
+                        </span>
+                        <strong
+                            id="customerWithdrawalModalBank"
+                            class="text-right text-gray-900"
+                        >
+                            Selected bank
+                        </strong>
+                    </div>
+                </div>
+
+                <div
+                    class="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4"
+                >
+                    <p class="text-sm font-black text-amber-800">
+                        Please verify before submitting
+                    </p>
+                    <p
+                        class="mt-1 text-xs leading-relaxed text-amber-700"
+                    >
+                        Bank details cannot be edited after submission. The amount is reserved immediately. After approval, processing may take up to 14 business days.
+                    </p>
+                </div>
+
+                <div class="mt-6 grid grid-cols-2 gap-3">
+                    <button
+                        type="button"
+                        onclick="closeCustomerWithdrawalModal()"
+                        class="rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 transition-colors hover:bg-gray-50"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        id="customerWithdrawalModalConfirm"
+                        onclick="confirmCustomerWithdrawal()"
+                        class="rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-red-700"
+                    >
+                        Confirm Request
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let pendingCustomerWithdrawalForm = null;
+
+        function openCustomerWithdrawalModal(
+            event,
+            form
+        ) {
+            event.preventDefault();
+            pendingCustomerWithdrawalForm = form;
+
+            const amount = form.querySelector(
+                '[name="amount"]'
+            );
+            const bank = form.querySelector(
+                '[name="bank_code"]'
+            );
+            const selectedBank = bank &&
+                bank.selectedIndex >= 0
+                    ? bank.options[
+                        bank.selectedIndex
+                    ].text.trim()
+                    : 'Selected bank';
+
+            document.getElementById(
+                'customerWithdrawalModalAmount'
+            ).textContent =
+                'RM ' + (
+                    amount && amount.value
+                        ? amount.value
+                        : '0.00'
+                );
+
+            document.getElementById(
+                'customerWithdrawalModalBank'
+            ).textContent = selectedBank;
+
+            const modal = document.getElementById(
+                'customerWithdrawalModal'
+            );
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.body.classList.add(
+                'overflow-hidden'
+            );
+
+            return false;
+        }
+
+        function closeCustomerWithdrawalModal() {
+            const modal = document.getElementById(
+                'customerWithdrawalModal'
+            );
+
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.body.classList.remove(
+                'overflow-hidden'
+            );
+            pendingCustomerWithdrawalForm = null;
+        }
+
+        function confirmCustomerWithdrawal() {
+            if (!pendingCustomerWithdrawalForm) {
+                return;
+            }
+
+            const form = pendingCustomerWithdrawalForm;
+            const button = document.getElementById(
+                'customerWithdrawalModalConfirm'
+            );
+
+            button.disabled = true;
+            button.textContent = 'Submitting...';
+            form.submit();
+        }
+
+        document.getElementById(
+            'customerWithdrawalModal'
+        ).addEventListener(
+            'click',
+            function (event) {
+                if (event.target === this) {
+                    closeCustomerWithdrawalModal();
+                }
+            }
+        );
+
+        document.addEventListener(
+            'keydown',
+            function (event) {
+                if (event.key === 'Escape') {
+                    closeCustomerWithdrawalModal();
+                }
+            }
+        );
+    </script>
 
 </body>
 </html>
