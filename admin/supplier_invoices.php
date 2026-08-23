@@ -327,47 +327,55 @@ if (
     try {
         $pdo->beginTransaction();
 
-        $inv_stmt = $pdo->prepare(
-            "SELECT invoice_amount,
-                    invoice_supplier_id,
-                    invoice_credit_note_id
-             FROM supplier_invoices
-             WHERE invoice_id = ?
-             AND invoice_status = 'unpaid'
-             FOR UPDATE"
-        );
+        $inv_stmt = $pdo->prepare("
+            SELECT
+                si.invoice_amount,
+                si.invoice_supplier_id,
+                si.invoice_credit_note_id,
+                po.po_total_amount
+            FROM supplier_invoices si
+            JOIN purchase_orders po
+                ON po.po_id = si.invoice_po_id
+            WHERE si.invoice_id = ?
+            AND si.invoice_status = 'unpaid'
+            FOR UPDATE
+        ");
 
         $inv_stmt->execute([$invoice_id]);
-        $invoice = $inv_stmt->fetch(PDO::FETCH_ASSOC);
+        $invoice = $inv_stmt->fetch(
+            PDO::FETCH_ASSOC
+        );
 
         if (
             !$invoice ||
-            !empty($invoice['invoice_credit_note_id'])
+            !empty(
+                $invoice['invoice_credit_note_id']
+            )
         ) {
             throw new RuntimeException(
                 'Invoice not found, already processed, or already has a credit note.'
             );
         }
 
-        $credit_stmt = $pdo->prepare(
-            "SELECT
+        $credit_stmt = $pdo->prepare("
+            SELECT
                 sr.return_credit_note_number,
                 sr.return_credit_note_amount
-             FROM supplier_returns sr
-             JOIN purchase_orders po
-               ON po.po_id = sr.return_po_id
-             WHERE sr.return_id = ?
-             AND sr.return_status = 'resolved'
-             AND sr.return_resolution_type IN (
-                 'credit_note',
-                 'dispute_upheld'
-             )
-             AND sr.return_credit_note_number IS NOT NULL
-             AND sr.return_credit_note_amount > 0
-             AND sr.return_credit_note_used_invoice_id IS NULL
-             AND po.po_supplier_id = ?
-             FOR UPDATE"
-        );
+            FROM supplier_returns sr
+            JOIN purchase_orders po
+                ON po.po_id = sr.return_po_id
+            WHERE sr.return_id = ?
+            AND sr.return_status = 'resolved'
+            AND sr.return_resolution_type IN (
+                'credit_note',
+                'dispute_upheld'
+            )
+            AND sr.return_credit_note_number IS NOT NULL
+            AND sr.return_credit_note_amount > 0
+            AND sr.return_credit_note_used_invoice_id IS NULL
+            AND po.po_supplier_id = ?
+            FOR UPDATE
+        ");
 
         $credit_stmt->execute([
             $return_id,
@@ -398,6 +406,13 @@ if (
                 ]
             );
 
+        $po_total_sen =
+            moneyDecimalToSen(
+                (string) $invoice[
+                    'po_total_amount'
+                ]
+            );
+
         if (
             $credit_amount_sen < 1 ||
             $invoice_amount_sen < 1
@@ -416,31 +431,57 @@ if (
                 $credit_note[
                     'return_credit_note_number'
                 ] .
-                ' is RM ' .
-                moneyFormatSen(
-                    $credit_amount_sen
-                ) .
-                ' and cannot be partially applied to this RM ' .
-                moneyFormatSen(
-                    $invoice_amount_sen
-                ) .
-                ' invoice. Choose an invoice with an equal or higher amount.'
+                ' exceeds this invoice amount.'
             );
         }
 
-        $applied_sen = $credit_amount_sen;
+        if (
+            $invoice_amount_sen ===
+            $po_total_sen
+        ) {
+            throw new RuntimeException(
+                'This invoice already matches the correct PO payable amount of RM ' .
+                moneyFormatSen($po_total_sen) .
+                '. Pay the invoice total without applying a credit note.'
+            );
+        }
+
+        $correct_payable_sen =
+            $invoice_amount_sen -
+            $credit_amount_sen;
+
+        if (
+            $correct_payable_sen !==
+            $po_total_sen
+        ) {
+            throw new RuntimeException(
+                'After applying Credit Note ' .
+                $credit_note[
+                    'return_credit_note_number'
+                ] .
+                ', the payable amount would be RM ' .
+                moneyFormatSen(
+                    $correct_payable_sen
+                ) .
+                ', which does not match the correct PO payable amount of RM ' .
+                moneyFormatSen($po_total_sen) .
+                '.'
+            );
+        }
 
         $applied = moneySenToDecimal(
-            $applied_sen
+            $credit_amount_sen
         );
-        $invoice_update = $pdo->prepare(
-            "UPDATE supplier_invoices
-             SET invoice_credit_note_id = ?,
-                 invoice_credit_applied_amount = ?
-             WHERE invoice_id = ?
-             AND invoice_status = 'unpaid'
-             AND invoice_credit_note_id IS NULL"
-        );
+
+        $invoice_update = $pdo->prepare("
+            UPDATE supplier_invoices
+            SET invoice_credit_note_id = ?,
+                invoice_credit_applied_amount = ?,
+                invoice_is_mismatch = 0
+            WHERE invoice_id = ?
+            AND invoice_status = 'unpaid'
+            AND invoice_credit_note_id IS NULL
+        ");
 
         $invoice_update->execute([
             $return_id,
@@ -454,12 +495,12 @@ if (
             );
         }
 
-        $credit_update = $pdo->prepare(
-            "UPDATE supplier_returns
-             SET return_credit_note_used_invoice_id = ?
-             WHERE return_id = ?
-             AND return_credit_note_used_invoice_id IS NULL"
-        );
+        $credit_update = $pdo->prepare("
+            UPDATE supplier_returns
+            SET return_credit_note_used_invoice_id = ?
+            WHERE return_id = ?
+            AND return_credit_note_used_invoice_id IS NULL
+        ");
 
         $credit_update->execute([
             $invoice_id,
@@ -475,9 +516,11 @@ if (
         $pdo->commit();
 
         redirectInvoicePage(
-            'Credit note applied. RM ' .
-            moneyFormatSen($applied_sen) .
-            ' deducted from this invoice.'
+            'Credit note applied. Correct payable amount: RM ' .
+                moneyFormatSen(
+                    $correct_payable_sen
+                ) .
+                '.'
         );
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
