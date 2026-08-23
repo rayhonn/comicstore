@@ -977,8 +977,13 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                                         <?php elseif ($can_redeem): ?>
                                         <form
                                             method="POST"
-                                            data-voucher-code="<?= htmlspecialchars(
-                                                (string)$v['voucher_code'],
+                                            data-voucher-reward="<?= htmlspecialchars(
+                                                $v['voucher_type'] === 'percentage'
+                                                    ? (string)$v['voucher_value'] . '% OFF'
+                                                    : 'RM ' . number_format(
+                                                        (float)$v['voucher_value'],
+                                                        2
+                                                    ) . ' OFF',
                                                 ENT_QUOTES,
                                                 'UTF-8'
                                             ) ?>"
@@ -1154,12 +1159,12 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                         class="flex items-center justify-between gap-4 border-b border-gray-200 pb-3"
                     >
                         <span class="text-sm text-gray-500">
-                            Voucher Code
+                            Reward
                         </span>
 
                         <span
-                            id="voucherConfirmCode"
-                            class="rounded-lg border border-dashed border-red-300 bg-red-50 px-3 py-1 font-mono text-sm font-black text-red-700"
+                            id="voucherConfirmReward"
+                            class="text-right text-base font-black text-red-600"
                         >
                             -
                         </span>
@@ -1275,8 +1280,8 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
 
             pendingVoucherForm = form;
 
-            const voucherCode =
-                form.dataset.voucherCode ||
+            const voucherReward =
+                form.dataset.voucherReward ||
                 'Points Voucher';
 
             const pointsRequired = Number(
@@ -1285,8 +1290,8 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
             );
 
             document.getElementById(
-                'voucherConfirmCode'
-            ).textContent = voucherCode;
+                'voucherConfirmReward'
+            ).textContent = voucherReward;
 
             document.getElementById(
                 'voucherConfirmPoints'
