@@ -286,17 +286,17 @@ function buildBankConfirmationHtml(array $record): string
 <body>
     <div class="top">
         <div class="meta">
-            <div class="meta-title">Bank Verification Approval</div>
+            <div class="meta-title">Institution Decision Record</div>
             <div class="meta-number">Document ' .
                 bankConfirmationEscape($documentNumber) .
             '</div>
         </div>
-        <div class="brand">MangaVault Bank Gateway</div>
-        <div class="subtitle">Controlled Simulation Record</div>
+        <div class="brand">BankLink Settlement Services</div>
+        <div class="subtitle">Settlement Instruction Verification</div>
         <div class="clear"></div>
     </div>
 
-    <span class="approved">BANK VERIFICATION APPROVED</span>
+    <span class="approved">INSTITUTION INSTRUCTION ACCEPTED</span>
 
     <div class="amount">
         <div style="float:right;text-align:right;color:#0e7490;">
@@ -407,7 +407,10 @@ function buildBankConfirmationHtml(array $record): string
     </table>
 
     <div class="notice">
-        This document confirms that the simulated destination-bank verification layer accepted the transfer instruction. It does not confirm that funds have been transferred or credited. MangaVault Admin must still perform the bank transfer and upload the external receipt.
+        This record confirms that the destination institution workflow accepted
+        the transfer instruction. It does not confirm that funds have been
+        transferred or credited. Merchant operations must still perform the
+        transfer and attach the external bank receipt.
     </div>
 
     <table class="signoff">
@@ -453,7 +456,7 @@ function buildBankConfirmationHtml(array $record): string
     </table>
 
     <div class="footer">
-        MangaVault Bank Gateway Simulator · ' .
+        BankLink Settlement Services · Academic demo · ' .
         bankConfirmationEscape($documentNumber) .
         ' · Generated ' .
         bankConfirmationEscape(

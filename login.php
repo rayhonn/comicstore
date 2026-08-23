@@ -746,6 +746,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #7f1d1d;
         }
 
+        .partner-bank-entry {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: fit-content;
+            margin: 0.85rem auto 0;
+            border: 1px solid rgba(17, 24, 39, 0.09);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.58);
+            padding: 0.42rem 0.75rem;
+            color: #64748b;
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-decoration: none;
+            text-transform: uppercase;
+            transition:
+                border-color 0.2s ease,
+                color 0.2s ease,
+                transform 0.2s ease;
+        }
+
+        .partner-bank-entry:hover {
+            border-color: rgba(15, 76, 129, 0.25);
+            color: #0f4c81;
+            transform: translateY(-1px);
+        }
+
         @media (max-width: 900px) {
             .login-card {
                 grid-template-columns: 1fr;
@@ -1086,6 +1115,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Create your account
                         </a>
                     </p>
+
+                    <a
+                        href="bank/login.php"
+                        class="partner-bank-entry"
+                    >
+                        <span aria-hidden="true">▣</span>
+                        Authorized Partner Bank Access
+                        <span aria-hidden="true">→</span>
+                    </a>
 
                 </div>
 

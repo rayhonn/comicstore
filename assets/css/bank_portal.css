@@ -1,0 +1,949 @@
+:root {
+    --bank-navy: #071b33;
+    --bank-navy-soft: #0d2c4f;
+    --bank-blue: #0b63ce;
+    --bank-blue-dark: #084c9e;
+    --bank-cyan: #25b8d6;
+    --bank-ink: #122033;
+    --bank-muted: #66758a;
+    --bank-line: #d9e2ec;
+    --bank-surface: #ffffff;
+    --bank-canvas: #f3f6f9;
+    --bank-danger: #c52b38;
+    --bank-success: #14835d;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+.bank-login-page {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bank-canvas);
+    color: var(--bank-ink);
+    font-family:
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+}
+
+.bank-login-shell {
+    position: relative;
+    display: grid;
+    min-height: 100vh;
+    grid-template-rows: 72px 1fr;
+    overflow: hidden;
+}
+
+.bank-login-topbar {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bank-navy);
+    padding: 0 36px;
+    color: #ffffff;
+}
+
+.bank-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    color: inherit;
+    text-decoration: none;
+}
+
+.bank-brand-mark {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 11px;
+    background:
+        linear-gradient(
+            145deg,
+            rgba(37, 184, 214, 0.28),
+            rgba(11, 99, 206, 0.18)
+        );
+    color: #8eeaff;
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+}
+
+.bank-brand-name {
+    display: block;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+}
+
+.bank-brand-subtitle {
+    display: block;
+    margin-top: 2px;
+    color: #91a8c1;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.bank-topbar-status {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    color: #b7c7d8;
+    font-size: 11px;
+    font-weight: 650;
+}
+
+.bank-secure-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 7px;
+    border-radius: 999px;
+    background: #43d49f;
+    box-shadow: 0 0 0 4px rgba(67, 212, 159, 0.12);
+}
+
+.bank-login-main {
+    position: relative;
+    display: grid;
+    min-height: 0;
+    place-items: center;
+    padding: 28px 36px;
+    background:
+        linear-gradient(
+            90deg,
+            var(--bank-navy) 0%,
+            var(--bank-navy) 47%,
+            var(--bank-canvas) 47%,
+            var(--bank-canvas) 100%
+        );
+}
+
+.bank-login-main::before {
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(
+            rgba(255, 255, 255, 0.035) 1px,
+            transparent 1px
+        ),
+        linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0.035) 1px,
+            transparent 1px
+        );
+    background-size: 44px 44px;
+    content: "";
+    mask-image:
+        linear-gradient(
+            90deg,
+            #000 0%,
+            #000 47%,
+            transparent 64%
+        );
+    pointer-events: none;
+}
+
+.bank-login-card {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    width: min(1180px, 100%);
+    height: min(690px, calc(100vh - 128px));
+    min-height: 590px;
+    grid-template-columns: minmax(0, 1.04fr) minmax(390px, 0.96fr);
+    overflow: hidden;
+    border: 1px solid rgba(134, 158, 184, 0.24);
+    border-radius: 18px;
+    background: var(--bank-surface);
+    box-shadow: 0 26px 70px rgba(4, 21, 40, 0.2);
+}
+
+.bank-login-visual {
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(
+            circle at 78% 14%,
+            rgba(37, 184, 214, 0.22),
+            transparent 16rem
+        ),
+        linear-gradient(145deg, #0d3158, #071b33 68%);
+    padding: clamp(34px, 4vw, 58px);
+    color: #ffffff;
+}
+
+.bank-login-visual::after {
+    position: absolute;
+    right: -110px;
+    bottom: -160px;
+    width: 430px;
+    height: 430px;
+    border: 64px solid rgba(255, 255, 255, 0.035);
+    border-radius: 50%;
+    content: "";
+}
+
+.bank-network-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    border: 1px solid rgba(142, 234, 255, 0.22);
+    border-radius: 999px;
+    background: rgba(37, 184, 214, 0.08);
+    padding: 7px 11px;
+    color: #a7efff;
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.bank-login-title {
+    max-width: 560px;
+    margin: 28px 0 0;
+    font-size: clamp(32px, 3.6vw, 52px);
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 1.04;
+}
+
+.bank-login-description {
+    max-width: 520px;
+    margin: 18px 0 0;
+    color: #b9cada;
+    font-size: 14px;
+    line-height: 1.75;
+}
+
+.bank-operation-panel {
+    position: relative;
+    z-index: 2;
+    margin-top: 34px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    background: rgba(4, 21, 40, 0.4);
+    backdrop-filter: blur(10px);
+}
+
+.bank-operation-row {
+    display: grid;
+    grid-template-columns: 42px 1fr auto;
+    align-items: center;
+    gap: 14px;
+    padding: 15px 17px;
+}
+
+.bank-operation-row + .bank-operation-row {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bank-operation-icon {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #8eeaff;
+    font-size: 16px;
+}
+
+.bank-operation-title {
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.bank-operation-copy {
+    margin-top: 3px;
+    color: #8fa5ba;
+    font-size: 10px;
+}
+
+.bank-operation-state {
+    color: #58dbaa;
+    font-size: 9px;
+    font-weight: 850;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.bank-login-form-panel {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    padding: clamp(32px, 4vw, 54px);
+    background: #ffffff;
+}
+
+.bank-form-eyebrow {
+    color: var(--bank-blue);
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+}
+
+.bank-form-title {
+    margin: 8px 0 0;
+    color: var(--bank-ink);
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+}
+
+.bank-form-description {
+    margin: 7px 0 0;
+    color: var(--bank-muted);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.bank-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 16px;
+    border: 1px solid #efc6ca;
+    border-radius: 10px;
+    background: #fff5f6;
+    padding: 11px 13px;
+    color: #a61f2b;
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.bank-alert-success {
+    border-color: #bde4d5;
+    background: #f0fbf7;
+    color: #0e6a4b;
+}
+
+.bank-alert-warning {
+    border-color: #ecd9a6;
+    background: #fffbeb;
+    color: #8a6412;
+}
+
+.bank-login-form {
+    margin-top: 22px;
+}
+
+.bank-form-group + .bank-form-group {
+    margin-top: 16px;
+}
+
+.bank-form-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 7px;
+    color: #445267;
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.bank-required {
+    color: var(--bank-danger);
+}
+
+.bank-input-wrap {
+    position: relative;
+}
+
+.bank-input {
+    width: 100%;
+    height: 48px;
+    border: 1px solid var(--bank-line);
+    border-radius: 10px;
+    background: #fbfcfd;
+    padding: 0 14px;
+    color: var(--bank-ink);
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+    transition:
+        border-color 0.18s ease,
+        box-shadow 0.18s ease,
+        background 0.18s ease;
+}
+
+.bank-input:hover {
+    border-color: #b7c5d4;
+}
+
+.bank-input:focus {
+    border-color: var(--bank-blue);
+    background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(11, 99, 206, 0.1);
+}
+
+.bank-input.is-invalid,
+.bank-select-trigger.is-invalid {
+    border-color: var(--bank-danger);
+    background: #fffafb;
+}
+
+.bank-password-input {
+    padding-right: 50px;
+}
+
+.bank-password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 7px;
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    transform: translateY(-50%);
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #6b7b8e;
+    cursor: pointer;
+}
+
+.bank-password-toggle:hover {
+    background: #edf2f7;
+    color: var(--bank-ink);
+}
+
+.bank-field-error {
+    min-height: 15px;
+    margin: 5px 0 0;
+    color: var(--bank-danger);
+    font-size: 10px;
+}
+
+.bank-caps-warning {
+    display: none;
+    color: #9a6c12;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.bank-caps-warning.is-visible {
+    display: inline;
+}
+
+.bank-select {
+    position: relative;
+}
+
+.bank-select-trigger {
+    display: flex;
+    width: 100%;
+    height: 50px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--bank-line);
+    border-radius: 10px;
+    background: #fbfcfd;
+    padding: 0 13px;
+    color: var(--bank-ink);
+    cursor: pointer;
+    outline: none;
+    transition:
+        border-color 0.18s ease,
+        box-shadow 0.18s ease,
+        background 0.18s ease;
+}
+
+.bank-select-trigger:hover,
+.bank-select-trigger[aria-expanded="true"] {
+    border-color: var(--bank-blue);
+    background: #ffffff;
+}
+
+.bank-select-trigger:focus-visible {
+    box-shadow: 0 0 0 3px rgba(11, 99, 206, 0.1);
+}
+
+.bank-select-value {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 11px;
+    text-align: left;
+}
+
+.bank-select-logo,
+.bank-option-logo {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 8px;
+    background: #eaf2fb;
+    color: #155eaa;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+}
+
+.bank-select-name {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bank-select-placeholder {
+    color: #8795a7;
+    font-weight: 550;
+}
+
+.bank-select-chevron {
+    flex: 0 0 auto;
+    transition: transform 0.18s ease;
+}
+
+.bank-select-trigger[aria-expanded="true"] .bank-select-chevron {
+    transform: rotate(180deg);
+}
+
+.bank-select-menu {
+    position: absolute;
+    z-index: 60;
+    top: calc(100% + 7px);
+    right: 0;
+    left: 0;
+    overflow: hidden;
+    border: 1px solid #cbd7e3;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 18px 46px rgba(12, 36, 62, 0.2);
+}
+
+.bank-select-menu[hidden] {
+    display: none;
+}
+
+.bank-select-search-wrap {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    border-bottom: 1px solid #e5ebf1;
+    background: #ffffff;
+    padding: 10px;
+}
+
+.bank-select-search {
+    width: 100%;
+    height: 38px;
+    border: 1px solid #d6e0e9;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 0 11px;
+    color: var(--bank-ink);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+}
+
+.bank-select-search:focus {
+    border-color: var(--bank-blue);
+    background: #ffffff;
+}
+
+.bank-select-options {
+    max-height: 238px;
+    overflow-y: auto;
+    padding: 6px;
+    scrollbar-color: #b8c5d2 transparent;
+    scrollbar-width: thin;
+}
+
+.bank-option {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 11px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    padding: 8px 9px;
+    color: var(--bank-ink);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+}
+
+.bank-option:hover,
+.bank-option.is-active {
+    background: #edf5ff;
+}
+
+.bank-option[aria-selected="true"] {
+    background: #e4f0ff;
+    color: #084c9e;
+}
+
+.bank-option-copy {
+    min-width: 0;
+    flex: 1;
+}
+
+.bank-option-name {
+    display: block;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bank-option-code {
+    display: block;
+    margin-top: 2px;
+    color: #8a98a9;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.bank-select-empty {
+    padding: 18px;
+    color: #7b8999;
+    font-size: 11px;
+    text-align: center;
+}
+
+.bank-login-button {
+    display: flex;
+    width: 100%;
+    height: 49px;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    margin-top: 19px;
+    border: 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--bank-blue), #084f9f);
+    color: #ffffff;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    box-shadow: 0 12px 24px rgba(11, 99, 206, 0.2);
+    transition:
+        transform 0.18s ease,
+        box-shadow 0.18s ease,
+        opacity 0.18s ease;
+}
+
+.bank-login-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 15px 28px rgba(11, 99, 206, 0.26);
+}
+
+.bank-login-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
+}
+
+.bank-form-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 16px;
+    color: #7d8b9d;
+    font-size: 9px;
+    line-height: 1.5;
+}
+
+.bank-form-footer strong {
+    color: #4d5d70;
+}
+
+.bank-demo-badge {
+    position: fixed;
+    z-index: 140;
+    right: 12px;
+    bottom: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid rgba(105, 122, 143, 0.28);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.88);
+    padding: 5px 9px;
+    color: #657489;
+    font-size: 8px;
+    font-weight: 850;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    box-shadow: 0 5px 18px rgba(12, 36, 62, 0.12);
+    backdrop-filter: blur(8px);
+}
+
+.bank-demo-badge::before {
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: #d59622;
+    content: "";
+}
+
+.bank-portal-body {
+    background:
+        linear-gradient(180deg, #edf2f7 0, #f7f9fb 280px);
+    color: var(--bank-ink);
+    font-family:
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+}
+
+.bank-portal-body main {
+    position: relative;
+}
+
+.bank-portal-body main::before {
+    position: absolute;
+    z-index: -1;
+    top: 0;
+    right: 32px;
+    left: 32px;
+    height: 150px;
+    border-radius: 0 0 34px 34px;
+    background:
+        linear-gradient(
+            130deg,
+            rgba(11, 99, 206, 0.08),
+            rgba(37, 184, 214, 0.03)
+        );
+    content: "";
+}
+
+.bank-nav {
+    position: sticky;
+    z-index: 40;
+    top: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(7, 27, 51, 0.97);
+    color: #ffffff;
+    box-shadow: 0 6px 22px rgba(7, 27, 51, 0.18);
+    backdrop-filter: blur(14px);
+}
+
+.bank-nav-inner {
+    display: flex;
+    max-width: 1280px;
+    height: 72px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 22px;
+    margin: 0 auto;
+    padding: 0 28px;
+}
+
+.bank-nav-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.bank-nav-session {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border-right: 1px solid rgba(255, 255, 255, 0.12);
+    padding-right: 14px;
+    color: #a9bdd1;
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.bank-nav-identity {
+    text-align: right;
+}
+
+.bank-nav-bank {
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.bank-nav-operator {
+    margin-top: 2px;
+    color: #8fa7be;
+    font-size: 10px;
+}
+
+.bank-nav-logout {
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 9px 13px;
+    color: #d9e5f0;
+    cursor: pointer;
+    font: inherit;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.bank-nav-logout:hover {
+    background: rgba(255, 255, 255, 0.11);
+    color: #ffffff;
+}
+
+@media (min-width: 901px) {
+    .bank-login-page {
+        height: 100vh;
+        overflow: hidden;
+    }
+}
+
+@media (max-height: 790px) and (min-width: 901px) {
+    .bank-login-shell {
+        grid-template-rows: 62px 1fr;
+    }
+
+    .bank-login-topbar {
+        padding: 0 26px;
+    }
+
+    .bank-login-main {
+        padding: 18px 30px;
+    }
+
+    .bank-login-card {
+        height: calc(100vh - 98px);
+        min-height: 0;
+    }
+
+    .bank-login-visual,
+    .bank-login-form-panel {
+        padding: 30px 38px;
+    }
+
+    .bank-login-title {
+        margin-top: 20px;
+        font-size: 38px;
+    }
+
+    .bank-operation-panel {
+        margin-top: 24px;
+    }
+
+    .bank-operation-row {
+        padding: 11px 14px;
+    }
+
+    .bank-form-group + .bank-form-group {
+        margin-top: 11px;
+    }
+
+    .bank-login-form {
+        margin-top: 15px;
+    }
+
+    .bank-login-button {
+        margin-top: 13px;
+    }
+}
+
+@media (max-width: 900px) {
+    .bank-login-shell {
+        overflow: visible;
+    }
+
+    .bank-login-topbar {
+        padding: 0 18px;
+    }
+
+    .bank-topbar-status {
+        display: none;
+    }
+
+    .bank-login-main {
+        display: block;
+        padding: 20px 14px 34px;
+        background: var(--bank-canvas);
+    }
+
+    .bank-login-main::before {
+        display: none;
+    }
+
+    .bank-login-card {
+        height: auto;
+        min-height: 0;
+        grid-template-columns: 1fr;
+    }
+
+    .bank-login-visual {
+        display: none;
+    }
+
+    .bank-login-form-panel {
+        padding: 28px 22px;
+    }
+}
+
+@media (max-width: 640px) {
+    .bank-brand-subtitle {
+        display: none;
+    }
+
+    .bank-form-footer {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 7px;
+    }
+
+    .bank-nav-inner {
+        height: 64px;
+        padding: 0 14px;
+    }
+
+    .bank-nav-session,
+    .bank-nav-identity {
+        display: none;
+    }
+
+    .bank-brand-name {
+        font-size: 13px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
+}

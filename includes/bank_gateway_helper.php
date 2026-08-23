@@ -434,6 +434,88 @@ function insertBankGatewayAuditLog(
     ]);
 }
 
+function revealBankGatewayAccountDetails(
+    PDO $pdo,
+    int $withdrawalId,
+    int $operatorId,
+    string $bankCode,
+    mixed $currentPassword
+): array {
+    $operator = verifyBankGatewayOperatorPassword(
+        $pdo,
+        $operatorId,
+        $currentPassword
+    );
+
+    if (!hash_equals(
+        (string) $operator['bank_gateway_operator_bank_code'],
+        $bankCode
+    )) {
+        throw new BankGatewayException(
+            'This operator is not authorized for the selected institution.'
+        );
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $request = loadBankGatewayWithdrawal(
+            $pdo,
+            $withdrawalId,
+            $bankCode,
+            true
+        );
+
+        if (!in_array(
+            (string) $request['wallet_withdrawal_status'],
+            [
+                'approved',
+                'completed',
+            ],
+            true
+        )) {
+            throw new BankGatewayException(
+                'This transfer instruction is no longer available for review.'
+            );
+        }
+
+        $accountNumber = decryptWalletWithdrawalAccountNumber(
+            (string) $request[
+                'wallet_withdrawal_account_number_encrypted'
+            ]
+        );
+
+        insertBankGatewayAuditLog(
+            $pdo,
+            $operatorId,
+            $withdrawalId,
+            'reveal_account_details',
+            'Re-authorized access to protected destination account details.'
+        );
+
+        $pdo->commit();
+
+        return [
+            'account_number' => $accountNumber,
+            'account_holder' => (string) $request[
+                'wallet_withdrawal_account_holder'
+            ],
+            'bank_name' => (string) $request[
+                'wallet_withdrawal_bank_name'
+            ],
+            'last4' => (string) $request[
+                'wallet_withdrawal_account_number_last4'
+            ],
+        ];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        throw $e;
+    }
+}
+
 function decideBankGatewayWithdrawal(
     PDO $pdo,
     int $withdrawalId,

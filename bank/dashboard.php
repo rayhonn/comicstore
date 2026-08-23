@@ -197,10 +197,18 @@ $result_id = filter_input(
         $bank_name,
         ENT_QUOTES,
         'UTF-8'
-    ) ?> Verification Queue</title>
+    ) ?> Transfer Instruction Review</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link
+        rel="stylesheet"
+        href="<?= htmlspecialchars(
+            app_path('assets/css/bank_portal.css'),
+            ENT_QUOTES,
+            'UTF-8'
+        ) ?>"
+    >
 </head>
-<body class="min-h-screen bg-[#eef2f7] text-slate-800">
+<body class="bank-portal-body min-h-screen">
 
     <?php require '../includes/bank_navbar.php'; ?>
 
@@ -211,7 +219,7 @@ $result_id = filter_input(
             <div>
                 <div class="flex items-center gap-3 flex-wrap">
                     <h1 class="text-2xl font-black text-slate-900">
-                        Withdrawal Verification Queue
+                        Transfer Instruction Review
                     </h1>
                     <span
                         class="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-cyan-700"
@@ -226,7 +234,9 @@ $result_id = filter_input(
                 <p
                     class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-500"
                 >
-                    Verify the destination account and authorization request. A bank approval permits MangaVault administration to perform the external transfer; it does not itself move funds.
+                    Review merchant-authorized refund instructions assigned to
+                    this institution. Accepting an instruction releases it to
+                    merchant operations; it does not confirm that funds were sent.
                 </p>
             </div>
 
@@ -288,22 +298,22 @@ $result_id = filter_input(
         >
             <?php foreach ([
                 'pending' => [
-                    'Pending Verification',
+                    'Pending Review',
                     $counts['pending'],
                     'border-amber-200 bg-amber-50 text-amber-800',
-                    'Awaiting bank decision',
+                    'Awaiting institution action',
                 ],
                 'approved' => [
-                    'Bank Approved',
+                    'Accepted',
                     $counts['approved'],
                     'border-green-200 bg-green-50 text-green-800',
-                    'Ready for admin transfer',
+                    'Released to merchant operations',
                 ],
                 'rejected' => [
-                    'Bank Rejected',
+                    'Declined',
                     $counts['rejected'],
                     'border-red-200 bg-red-50 text-red-800',
-                    'Requires admin closure',
+                    'Requires merchant resolution',
                 ],
             ] as $key => $card): ?>
                 <a
@@ -338,12 +348,12 @@ $result_id = filter_input(
                 <span
                     class="px-3 text-[10px] font-black uppercase tracking-[0.18em] text-slate-400"
                 >
-                    View Queue
+                    Work Queue
                 </span>
                 <?php foreach ([
-                    'pending' => 'Pending',
-                    'approved' => 'Approved',
-                    'rejected' => 'Rejected',
+                    'pending' => 'Pending Review',
+                    'approved' => 'Accepted',
+                    'rejected' => 'Declined',
                     'all' => 'All Records',
                 ] as $value => $label): ?>
                     <a
@@ -364,10 +374,10 @@ $result_id = filter_input(
             >
                 <div class="text-5xl" aria-hidden="true">🏦</div>
                 <p class="mt-4 font-black text-slate-700">
-                    No verification requests in this queue
+                    No transfer instructions in this queue
                 </p>
                 <p class="mt-1 text-sm text-slate-400">
-                    New requests appear after MangaVault administrator approval.
+                    New instructions appear after merchant administrator approval.
                 </p>
             </section>
         <?php else: ?>
@@ -389,21 +399,6 @@ $result_id = filter_input(
                             'user_last_name'
                         ]
                     );
-                    $account_number = '';
-
-                    try {
-                        $account_number =
-                            decryptWalletWithdrawalAccountNumber(
-                                (string) $request[
-                                    'wallet_withdrawal_account_number_encrypted'
-                                ]
-                            );
-                    } catch (Throwable $e) {
-                        app_error_log(
-                            'Bank gateway account decryption failed: ' .
-                            $e->getMessage()
-                        );
-                    }
                     ?>
                     <section
                         class="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-slate-200"
@@ -418,7 +413,7 @@ $result_id = filter_input(
                                     <h2
                                         class="text-lg font-black text-slate-900"
                                     >
-                                        Verification #<?= str_pad(
+                                        Instruction #<?= str_pad(
                                             (string) $withdrawal_id,
                                             4,
                                             '0',
@@ -434,15 +429,17 @@ $result_id = filter_input(
                                                     : 'bg-red-100 text-red-700'
                                             ) ?>"
                                     >
-                                        <?= $bank_status === 'pending'
-                                            ? 'Pending Bank Review'
-                                            : 'Bank ' . ucfirst($bank_status) ?>
+                                        <?= match ($bank_status) {
+                                            'pending' => 'Pending Review',
+                                            'approved' => 'Accepted',
+                                            default => 'Declined',
+                                        } ?>
                                     </span>
                                 </div>
                                 <p
                                     class="mt-1 text-xs text-slate-400"
                                 >
-                                    Gateway submission
+                                    Instruction reference
                                     <span
                                         class="font-mono font-semibold text-slate-500"
                                     >
@@ -557,15 +554,23 @@ $result_id = filter_input(
 
                                         <button
                                             type="button"
-                                            onclick="toggleBankAccount(<?= $withdrawal_id ?>)"
+                                            onclick="openAccountAccessModal(
+                                                <?= $withdrawal_id ?>,
+                                                '<?= htmlspecialchars(
+                                                    (string) $request[
+                                                        'wallet_withdrawal_account_number_last4'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>'
+                                            )"
                                             class="rounded-xl border border-cyan-200 bg-white px-4 py-2 text-xs font-bold text-cyan-700 transition-colors hover:bg-cyan-100"
                                         >
-                                            Reveal Account
+                                            Securely View Account
                                         </button>
                                     </div>
 
                                     <p
-                                        id="maskedAccount<?= $withdrawal_id ?>"
                                         class="mt-4 font-mono text-2xl font-black tracking-[0.18em] text-cyan-900"
                                     >
                                         •••• •••• <?= htmlspecialchars(
@@ -577,17 +582,9 @@ $result_id = filter_input(
                                         ) ?>
                                     </p>
 
-                                    <p
-                                        id="fullAccount<?= $withdrawal_id ?>"
-                                        class="mt-4 hidden break-all font-mono text-2xl font-black tracking-[0.14em] text-cyan-900"
-                                    >
-                                        <?= htmlspecialchars(
-                                            $account_number !== ''
-                                                ? $account_number
-                                                : 'Unavailable',
-                                            ENT_QUOTES,
-                                            'UTF-8'
-                                        ) ?>
+                                    <p class="mt-2 text-[10px] text-cyan-700">
+                                        Full account details require operator
+                                        password re-authorization and are audit logged.
                                     </p>
                                 </div>
 
@@ -668,20 +665,21 @@ $result_id = filter_input(
                                         <p
                                             class="text-sm font-black text-green-900"
                                         >
-                                            Approve Bank Verification
+                                            Accept Transfer Instruction
                                         </p>
                                         <p
                                             class="mt-1 text-xs leading-relaxed text-green-700"
                                         >
-                                            Confirm the institution can accept this transfer instruction for the displayed account.
+                                            Record that this institution accepts
+                                            the instruction for subsequent merchant processing.
                                         </p>
 
                                         <form
                                             method="POST"
                                             class="mt-4 space-y-3"
-                                            data-confirm-title="Approve Bank Verification"
-                                            data-confirm-message="Confirm this bank can accept the transfer instruction? MangaVault Admin will immediately receive the bank approval proof."
-                                            data-confirm-button="Approve Verification"
+                                            data-confirm-title="Accept Transfer Instruction"
+                                            data-confirm-message="Confirm that the destination institution accepts this instruction? Merchant operations will receive the signed institution decision record."
+                                            data-confirm-button="Accept Instruction"
                                             onsubmit="return openBankDecisionModal(event, this)"
                                         >
                                             <?php csrf_field(); ?>
@@ -703,7 +701,7 @@ $result_id = filter_input(
                                                 pattern="[A-Za-z0-9][A-Za-z0-9._/-]{7,79}"
                                                 autocomplete="off"
                                                 required
-                                                placeholder="Bank authorization reference"
+                                                placeholder="Institution authorization reference"
                                                 class="w-full rounded-xl border border-green-200 bg-white px-4 py-3 text-sm outline-none focus:border-green-500"
                                             >
                                             <textarea
@@ -740,7 +738,7 @@ $result_id = filter_input(
                                                 type="submit"
                                                 class="w-full rounded-xl bg-green-600 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-green-700"
                                             >
-                                                Approve Bank Verification
+                                                Accept Transfer Instruction
                                             </button>
                                         </form>
                                     </div>
@@ -751,7 +749,7 @@ $result_id = filter_input(
                                         <p
                                             class="text-sm font-black text-red-900"
                                         >
-                                            Reject Verification
+                                            Decline Transfer Instruction
                                         </p>
                                         <p
                                             class="mt-1 text-xs leading-relaxed text-red-700"
@@ -762,9 +760,9 @@ $result_id = filter_input(
                                         <form
                                             method="POST"
                                             class="mt-4 space-y-3"
-                                            data-confirm-title="Reject Bank Verification"
-                                            data-confirm-message="Reject this verification request? MangaVault Admin will receive the reason and must close the failed workflow."
-                                            data-confirm-button="Reject Verification"
+                                            data-confirm-title="Decline Transfer Instruction"
+                                            data-confirm-message="Decline this transfer instruction? Merchant operations will receive the reason for resolution."
+                                            data-confirm-button="Decline Instruction"
                                             onsubmit="return openBankDecisionModal(event, this)"
                                         >
                                             <?php csrf_field(); ?>
@@ -783,7 +781,7 @@ $result_id = filter_input(
                                                 maxlength="1000"
                                                 rows="3"
                                                 required
-                                                placeholder="Required rejection reason"
+                                                placeholder="Required decline reason"
                                                 class="w-full resize-none rounded-xl border border-red-200 bg-white px-4 py-3 text-sm outline-none focus:border-red-500"
                                             ></textarea>
                                             <input
@@ -799,7 +797,7 @@ $result_id = filter_input(
                                                 type="submit"
                                                 class="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-red-700"
                                             >
-                                                Reject Verification
+                                                Decline Transfer Instruction
                                             </button>
                                         </form>
                                     </div>
@@ -814,9 +812,9 @@ $result_id = filter_input(
                                                 ? 'text-green-900'
                                                 : 'text-red-900' ?>"
                                         >
-                                            Bank Verification <?= ucfirst(
-                                                $bank_status
-                                            ) ?>
+                                            Instruction <?= $bank_status === 'approved'
+                                                ? 'Accepted'
+                                                : 'Declined' ?>
                                         </p>
                                         <p
                                             class="mt-2 text-xs leading-relaxed <?= $bank_status === 'approved'
@@ -889,7 +887,7 @@ $result_id = filter_input(
                                                 href="confirmation.php?id=<?= $withdrawal_id ?>&amp;download=1"
                                                 class="mt-4 inline-flex items-center gap-2 rounded-xl bg-green-600 px-4 py-2.5 text-xs font-black text-white transition-colors hover:bg-green-700"
                                             >
-                                                📄 Download Bank Confirmation PDF
+                                                📄 Download Institution Decision PDF
                                             </a>
                                         <?php endif; ?>
                                     </div>
@@ -901,6 +899,118 @@ $result_id = filter_input(
             </div>
         <?php endif; ?>
     </main>
+
+    <input
+        type="hidden"
+        id="bankAccountCsrf"
+        value="<?= htmlspecialchars(
+            csrf_token(),
+            ENT_QUOTES,
+            'UTF-8'
+        ) ?>"
+    >
+
+    <div
+        id="bankAccountAccessModal"
+        class="fixed inset-0 z-[125] hidden items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bankAccountAccessTitle"
+    >
+        <div class="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div class="bg-gradient-to-r from-[#0d3158] to-[#071b33] px-6 py-5 text-white">
+                <p class="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">
+                    Protected customer information
+                </p>
+                <h2
+                    id="bankAccountAccessTitle"
+                    class="mt-1 text-xl font-black"
+                >
+                    Re-authorize account access
+                </h2>
+                <p class="mt-2 text-xs leading-5 text-slate-300">
+                    This access is restricted to the assigned institution and
+                    will be recorded in the audit log.
+                </p>
+            </div>
+
+            <form id="bankAccountAccessForm" class="p-6" novalidate>
+                <input type="hidden" id="accountAccessWithdrawalId">
+
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <span class="text-sm text-slate-500">Instruction</span>
+                        <strong id="accountAccessNumber" class="text-slate-900">
+                            #0000
+                        </strong>
+                    </div>
+                    <div class="mt-3 flex items-center justify-between gap-4">
+                        <span class="text-sm text-slate-500">Masked account</span>
+                        <strong
+                            id="accountAccessMasked"
+                            class="font-mono text-slate-900"
+                        >
+                            •••• •••• 0000
+                        </strong>
+                    </div>
+                </div>
+
+                <label
+                    for="accountAccessPassword"
+                    class="mt-5 block text-xs font-black uppercase tracking-wider text-slate-500"
+                >
+                    Current Operator Password
+                </label>
+                <input
+                    type="password"
+                    id="accountAccessPassword"
+                    maxlength="72"
+                    autocomplete="current-password"
+                    required
+                    class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                >
+
+                <p
+                    id="accountAccessError"
+                    class="mt-2 min-h-5 text-xs text-red-600"
+                    role="alert"
+                    aria-live="polite"
+                ></p>
+
+                <div
+                    id="accountAccessResult"
+                    class="mt-4 hidden rounded-2xl border border-blue-200 bg-blue-50 p-4"
+                    aria-live="polite"
+                >
+                    <p class="text-[10px] font-black uppercase tracking-wider text-blue-600">
+                        Authorized Account Number
+                    </p>
+                    <p
+                        id="accountAccessFullNumber"
+                        class="mt-2 break-all font-mono text-xl font-black tracking-[0.12em] text-blue-950"
+                    ></p>
+                    <p id="accountAccessHolder" class="mt-2 text-xs text-blue-700"></p>
+                </div>
+
+                <div class="mt-6 grid grid-cols-2 gap-3">
+                    <button
+                        type="button"
+                        onclick="closeAccountAccessModal()"
+                        class="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50"
+                    >
+                        Close
+                    </button>
+                    <button
+                        type="submit"
+                        id="accountAccessSubmit"
+                        class="rounded-xl bg-blue-700 px-4 py-3 text-sm font-black text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        Authorize Access
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <div
         id="bankDecisionModal"
@@ -946,7 +1056,7 @@ $result_id = filter_input(
                         class="flex items-center justify-between gap-4"
                     >
                         <span class="text-sm text-slate-500">
-                            Withdrawal
+                            Instruction
                         </span>
                         <strong
                             id="bankDecisionModalNumber"
@@ -1008,13 +1118,71 @@ $result_id = filter_input(
                 ' MYT';
         }
 
-        function toggleBankAccount(withdrawalId) {
+        function openAccountAccessModal(
+            withdrawalId,
+            last4
+        ) {
+            const modal = document.getElementById(
+                'bankAccountAccessModal'
+            );
+
             document.getElementById(
-                'maskedAccount' + withdrawalId
-            ).classList.toggle('hidden');
+                'accountAccessWithdrawalId'
+            ).value = String(withdrawalId);
             document.getElementById(
-                'fullAccount' + withdrawalId
-            ).classList.toggle('hidden');
+                'accountAccessNumber'
+            ).textContent =
+                '#' + String(withdrawalId).padStart(4, '0');
+            document.getElementById(
+                'accountAccessMasked'
+            ).textContent = '•••• •••• ' + last4;
+            document.getElementById(
+                'accountAccessPassword'
+            ).value = '';
+            document.getElementById(
+                'accountAccessError'
+            ).textContent = '';
+            document.getElementById(
+                'accountAccessResult'
+            ).classList.add('hidden');
+            document.getElementById(
+                'accountAccessSubmit'
+            ).disabled = false;
+            document.getElementById(
+                'accountAccessSubmit'
+            ).textContent = 'Authorize Access';
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.body.classList.add('overflow-hidden');
+
+            window.requestAnimationFrame(
+                () => document.getElementById(
+                    'accountAccessPassword'
+                ).focus()
+            );
+        }
+
+        function closeAccountAccessModal() {
+            const modal = document.getElementById(
+                'bankAccountAccessModal'
+            );
+
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.body.classList.remove('overflow-hidden');
+            document.getElementById(
+                'accountAccessPassword'
+            ).value = '';
+            document.getElementById(
+                'accountAccessFullNumber'
+            ).textContent = '';
+            document.getElementById(
+                'accountAccessHolder'
+            ).textContent = '';
+            document.getElementById(
+                'accountAccessResult'
+            ).classList.add('hidden');
         }
 
         function openBankDecisionModal(
@@ -1022,6 +1190,11 @@ $result_id = filter_input(
             form
         ) {
             event.preventDefault();
+
+            if (!form.reportValidity()) {
+                return false;
+            }
+
             pendingBankDecisionForm = form;
 
             const withdrawal = form.querySelector(
@@ -1101,10 +1274,107 @@ $result_id = filter_input(
             }
         );
 
+        document.getElementById(
+            'bankAccountAccessModal'
+        ).addEventListener(
+            'click',
+            function (event) {
+                if (event.target === this) {
+                    closeAccountAccessModal();
+                }
+            }
+        );
+
+        document.getElementById(
+            'bankAccountAccessForm'
+        ).addEventListener(
+            'submit',
+            async function (event) {
+                event.preventDefault();
+
+                const password = document.getElementById(
+                    'accountAccessPassword'
+                );
+                const error = document.getElementById(
+                    'accountAccessError'
+                );
+                const button = document.getElementById(
+                    'accountAccessSubmit'
+                );
+
+                error.textContent = '';
+
+                if (
+                    password.value.length < 1 ||
+                    password.value.length > 72
+                ) {
+                    error.textContent =
+                        'Enter your current operator password.';
+                    password.focus();
+                    return;
+                }
+
+                const body = new URLSearchParams({
+                    csrf_token: document.getElementById(
+                        'bankAccountCsrf'
+                    ).value,
+                    withdrawal_id: document.getElementById(
+                        'accountAccessWithdrawalId'
+                    ).value,
+                    current_password: password.value,
+                });
+
+                button.disabled = true;
+                button.textContent = 'Authorizing…';
+
+                try {
+                    const response = await fetch(
+                        'account_details.php',
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type':
+                                    'application/x-www-form-urlencoded;charset=UTF-8',
+                                'X-Requested-With': 'XMLHttpRequest',
+                            },
+                            body: body.toString(),
+                            credentials: 'same-origin',
+                        }
+                    );
+                    const result = await response.json();
+
+                    if (!response.ok || !result.ok) {
+                        throw new Error(
+                            result.message ||
+                            'Account access could not be authorized.'
+                        );
+                    }
+
+                    document.getElementById(
+                        'accountAccessFullNumber'
+                    ).textContent = result.account_number;
+                    document.getElementById(
+                        'accountAccessHolder'
+                    ).textContent =
+                        result.account_holder + ' · ' + result.bank_name;
+                    document.getElementById(
+                        'accountAccessResult'
+                    ).classList.remove('hidden');
+                    password.value = '';
+                    button.textContent = 'Access Authorized';
+                } catch (requestError) {
+                    error.textContent = requestError.message;
+                    button.disabled = false;
+                    button.textContent = 'Authorize Access';
+                }
+            }
+        );
+
         document.addEventListener(
             'keydown',
             function (event) {
                 if (event.key === 'Escape') {
+                    closeAccountAccessModal();
                     closeBankDecisionModal();
                 }
             }
