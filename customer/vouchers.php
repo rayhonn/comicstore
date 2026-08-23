@@ -1110,6 +1110,114 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </div>
 
+    <!-- Voucher Redemption Confirmation Modal -->
+    <div
+        id="voucherConfirmModal"
+        class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/50 px-4 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="voucherConfirmTitle"
+    >
+        <div
+            class="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl"
+        >
+            <div
+                class="bg-gradient-to-r from-red-600 to-red-700 px-6 py-5 text-white"
+            >
+                <div class="flex items-center gap-4">
+                    <div
+                        class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-white/20 text-2xl"
+                    >
+                        ⭐
+                    </div>
+
+                    <div>
+                        <h2
+                            id="voucherConfirmTitle"
+                            class="text-xl font-black"
+                        >
+                            Confirm Redemption
+                        </h2>
+
+                        <p class="mt-1 text-sm text-white/80">
+                            Please review before redeeming this voucher.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-5 p-6">
+                <div
+                    class="rounded-2xl border border-gray-200 bg-gray-50 p-4"
+                >
+                    <div
+                        class="flex items-center justify-between gap-4 border-b border-gray-200 pb-3"
+                    >
+                        <span class="text-sm text-gray-500">
+                            Voucher Code
+                        </span>
+
+                        <span
+                            id="voucherConfirmCode"
+                            class="rounded-lg border border-dashed border-red-300 bg-red-50 px-3 py-1 font-mono text-sm font-black text-red-700"
+                        >
+                            -
+                        </span>
+                    </div>
+
+                    <div
+                        class="flex items-center justify-between gap-4 pt-3"
+                    >
+                        <span class="text-sm text-gray-500">
+                            Points to Deduct
+                        </span>
+
+                        <span
+                            id="voucherConfirmPoints"
+                            class="text-lg font-black text-yellow-600"
+                        >
+                            0 points
+                        </span>
+                    </div>
+                </div>
+
+                <div
+                    class="flex items-start gap-3 rounded-2xl border border-yellow-200 bg-yellow-50 p-4"
+                >
+                    <span class="mt-0.5 text-lg">
+                        ⚠️
+                    </span>
+
+                    <p class="text-sm leading-6 text-yellow-800">
+                        Your points will be deducted immediately after confirmation. This action cannot be undone.
+                    </p>
+                </div>
+
+                <div class="flex gap-3">
+                    <button
+                        type="button"
+                        id="voucherCancelButton"
+                        onclick="closeVoucherConfirmModal()"
+                        class="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-bold text-gray-600 transition-colors hover:bg-gray-50"
+                    >
+                        Cancel
+                    </button>
+
+                    <button
+                        type="button"
+                        id="voucherConfirmButton"
+                        onclick="submitVoucherRedemption()"
+                        class="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        <span id="voucherConfirmButtonText">
+                            Confirm Redemption
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         function switchTab(tab) {
             [
@@ -1155,6 +1263,8 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
             switchTab(requestedVoucherTab);
         }
 
+        let pendingVoucherForm = null;
+
         function confirmVoucherRedemption(form) {
             if (
                 form.dataset.submitting ===
@@ -1162,6 +1272,8 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
             ) {
                 return false;
             }
+
+            pendingVoucherForm = form;
 
             const voucherCode =
                 form.dataset.voucherCode ||
@@ -1172,39 +1284,171 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                 0
             );
 
-            const confirmed = window.confirm(
-                'Confirm voucher redemption?\n\n' +
-                'Voucher: ' +
-                voucherCode +
-                '\n' +
-                'Points to deduct: ' +
+            document.getElementById(
+                'voucherConfirmCode'
+            ).textContent = voucherCode;
+
+            document.getElementById(
+                'voucherConfirmPoints'
+            ).textContent =
                 pointsRequired.toLocaleString(
                     'en-MY'
                 ) +
-                '\n\n' +
-                'Your points will be deducted immediately. ' +
-                'This action cannot be undone.'
+                ' points';
+
+            const confirmButton =
+                document.getElementById(
+                    'voucherConfirmButton'
+                );
+
+            const confirmButtonText =
+                document.getElementById(
+                    'voucherConfirmButtonText'
+                );
+
+            confirmButton.disabled = false;
+
+            confirmButtonText.textContent =
+                'Confirm Redemption';
+
+            const modal = document.getElementById(
+                'voucherConfirmModal'
             );
 
-            if (!confirmed) {
-                return false;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            document.body.classList.add(
+                'overflow-hidden'
+            );
+
+            window.setTimeout(() => {
+                confirmButton.focus();
+            }, 50);
+
+            return false;
+        }
+
+        function closeVoucherConfirmModal() {
+            if (
+                pendingVoucherForm &&
+                pendingVoucherForm.dataset.submitting ===
+                    'true'
+            ) {
+                return;
             }
 
-            form.dataset.submitting = 'true';
+            const modal = document.getElementById(
+                'voucherConfirmModal'
+            );
 
-            const submitButton =
-                form.querySelector(
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+
+            document.body.classList.remove(
+                'overflow-hidden'
+            );
+
+            pendingVoucherForm = null;
+        }
+
+        function submitVoucherRedemption() {
+            if (!pendingVoucherForm) {
+                return;
+            }
+
+            if (
+                pendingVoucherForm.dataset.submitting ===
+                'true'
+            ) {
+                return;
+            }
+
+            const formToSubmit =
+                pendingVoucherForm;
+
+            formToSubmit.dataset.submitting =
+                'true';
+
+            const confirmButton =
+                document.getElementById(
+                    'voucherConfirmButton'
+                );
+
+            const confirmButtonText =
+                document.getElementById(
+                    'voucherConfirmButtonText'
+                );
+
+            confirmButton.disabled = true;
+
+            confirmButtonText.textContent =
+                'Redeeming...';
+
+            const originalSubmitButton =
+                formToSubmit.querySelector(
                     'button[type="submit"]'
                 );
 
-            if (submitButton) {
-                submitButton.disabled = true;
-                submitButton.textContent =
+            if (originalSubmitButton) {
+                originalSubmitButton.disabled =
+                    true;
+
+                originalSubmitButton.textContent =
                     'Redeeming...';
             }
 
-            return true;
+            const modal = document.getElementById(
+                'voucherConfirmModal'
+            );
+
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+
+            document.body.classList.remove(
+                'overflow-hidden'
+            );
+
+            pendingVoucherForm = null;
+
+            HTMLFormElement.prototype.submit.call(
+                formToSubmit
+            );
         }
+
+        document.getElementById(
+            'voucherConfirmModal'
+        ).addEventListener(
+            'click',
+            function (event) {
+                if (event.target === this) {
+                    closeVoucherConfirmModal();
+                }
+            }
+        );
+
+        document.addEventListener(
+            'keydown',
+            function (event) {
+                if (event.key !== 'Escape') {
+                    return;
+                }
+
+                const modal =
+                    document.getElementById(
+                        'voucherConfirmModal'
+                    );
+
+                if (
+                    !modal.classList.contains(
+                        'hidden'
+                    )
+                ) {
+                    closeVoucherConfirmModal();
+                }
+            }
+        );
+
 
         function togglePointsHistory() {
             const shortHistory =
