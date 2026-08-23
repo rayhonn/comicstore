@@ -552,33 +552,73 @@ if (
     try {
         $pdo->beginTransaction();
 
-        $inv_stmt = $pdo->prepare(
-            "SELECT invoice_credit_note_id
-             FROM supplier_invoices
-             WHERE invoice_id = ?
-             AND invoice_status = 'unpaid'
-             FOR UPDATE"
-        );
+        $inv_stmt = $pdo->prepare("
+            SELECT
+                si.invoice_credit_note_id,
+                si.invoice_amount,
+                po.po_total_amount
+            FROM supplier_invoices si
+            JOIN purchase_orders po
+                ON po.po_id = si.invoice_po_id
+            WHERE si.invoice_id = ?
+            AND si.invoice_status = 'unpaid'
+            FOR UPDATE
+        ");
 
         $inv_stmt->execute([$invoice_id]);
-        $return_id = $inv_stmt->fetchColumn();
+        $invoice = $inv_stmt->fetch(
+            PDO::FETCH_ASSOC
+        );
 
-        if (!$return_id) {
+        if (
+            !$invoice ||
+            empty(
+                $invoice[
+                    'invoice_credit_note_id'
+                ]
+            )
+        ) {
             throw new RuntimeException(
                 'No credit note to remove, or invoice already paid.'
             );
         }
 
-        $invoice_update = $pdo->prepare(
-            "UPDATE supplier_invoices
-             SET invoice_credit_note_id = NULL,
-                 invoice_credit_applied_amount = 0
-             WHERE invoice_id = ?
-             AND invoice_status = 'unpaid'
-             AND invoice_credit_note_id = ?"
-        );
+        $return_id = (int) $invoice[
+            'invoice_credit_note_id'
+        ];
+
+        $invoice_amount_sen =
+            moneyDecimalToSen(
+                (string) $invoice[
+                    'invoice_amount'
+                ]
+            );
+
+        $po_total_sen =
+            moneyDecimalToSen(
+                (string) $invoice[
+                    'po_total_amount'
+                ]
+            );
+
+        $restored_mismatch =
+            $invoice_amount_sen ===
+            $po_total_sen
+                ? 0
+                : 1;
+
+        $invoice_update = $pdo->prepare("
+            UPDATE supplier_invoices
+            SET invoice_credit_note_id = NULL,
+                invoice_credit_applied_amount = 0,
+                invoice_is_mismatch = ?
+            WHERE invoice_id = ?
+            AND invoice_status = 'unpaid'
+            AND invoice_credit_note_id = ?
+        ");
 
         $invoice_update->execute([
+            $restored_mismatch,
             $invoice_id,
             $return_id,
         ]);
@@ -589,12 +629,12 @@ if (
             );
         }
 
-        $credit_update = $pdo->prepare(
-            "UPDATE supplier_returns
-             SET return_credit_note_used_invoice_id = NULL
-             WHERE return_id = ?
-             AND return_credit_note_used_invoice_id = ?"
-        );
+        $credit_update = $pdo->prepare("
+            UPDATE supplier_returns
+            SET return_credit_note_used_invoice_id = NULL
+            WHERE return_id = ?
+            AND return_credit_note_used_invoice_id = ?
+        ");
 
         $credit_update->execute([
             $return_id,
@@ -607,10 +647,15 @@ if (
             );
         }
 
+        $removal_message =
+            $restored_mismatch === 1
+                ? 'Credit note removed. The invoice total no longer matches the correct PO payable amount and requires review.'
+                : 'Credit note removed. The invoice total matches the correct PO payable amount.';
+
         $pdo->commit();
 
         redirectInvoicePage(
-            'Credit note removed from this invoice and made available again.'
+            $removal_message
         );
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
