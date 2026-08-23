@@ -276,20 +276,53 @@ $my_vouchers = $pdo->prepare("
 $my_vouchers->execute([$user_id, $user_id, $user_id]);
 $my_vouchers = $my_vouchers->fetchAll(PDO::FETCH_ASSOC);
 
-// // Get available promo vouchers (non-points, not yet used by user)
-// $promo_vouchers = $pdo->query("
-//     SELECT v.*
-//     FROM vouchers v
-//     WHERE v.voucher_is_active = 1
-//     AND v.voucher_is_points_redeem = 0
-//     AND (v.voucher_end_date IS NULL OR v.voucher_end_date >= NOW())
-//     AND (v.voucher_usage_limit IS NULL OR v.voucher_used_count < v.voucher_usage_limit)
-//     AND NOT EXISTS (
-//         SELECT 1 FROM voucher_usage vu 
-//         WHERE vu.usage_voucher_id = v.voucher_id AND vu.usage_user_id = $user_id
-//     )
-//     ORDER BY v.voucher_created_at DESC
-// ")->fetchAll(PDO::FETCH_ASSOC);
+// Get public General Promotion vouchers
+$promo_vouchers = $pdo->prepare("
+    SELECT v.*
+    FROM vouchers v
+    WHERE v.voucher_is_active = 1
+    AND v.voucher_is_points_redeem = 0
+    AND v.voucher_is_system_generated = 0
+    AND v.voucher_is_birthday_template = 0
+    AND (
+        v.voucher_usage_limit IS NULL
+        OR v.voucher_used_count <
+            v.voucher_usage_limit
+    )
+    AND (
+        v.voucher_start_date IS NULL
+        OR v.voucher_start_date <= NOW()
+    )
+    AND (
+        v.voucher_end_date IS NULL
+        OR v.voucher_end_date >= NOW()
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM user_vouchers uv_any
+        WHERE uv_any.uv_voucher_id =
+            v.voucher_id
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM voucher_usage vu
+        WHERE vu.usage_voucher_id =
+            v.voucher_id
+        AND vu.usage_user_id = ?
+    )
+    ORDER BY
+        v.voucher_created_at DESC,
+        v.voucher_code ASC
+");
+
+$promo_vouchers->execute([
+    $user_id,
+]);
+
+$promo_vouchers =
+    $promo_vouchers->fetchAll(
+        PDO::FETCH_ASSOC
+    );
 
 // Points history
 $points_history = $pdo->prepare("
@@ -431,19 +464,301 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
                     return !$v['uv_is_used'] && !$is_expired && !$is_pending;
                 }));
                 ?>
-                <div class="flex gap-1 bg-white rounded-2xl shadow-sm p-1 w-fit">
-                    <button onclick="switchTab('points')" id="tab-points"
-                            class="px-5 py-2 rounded-xl text-sm font-semibold transition-colors bg-red-600 text-white">
+                <div
+                    class="flex w-fit flex-wrap gap-1 rounded-2xl bg-white p-1 shadow-sm"
+                >
+                    <button
+                        type="button"
+                        onclick="switchTab('promotions')"
+                        id="tab-promotions"
+                        class="rounded-xl bg-red-600 px-5 py-2 text-sm font-semibold text-white transition-colors"
+                    >
+                        🎟️ Promotions
+                        <?= count($promo_vouchers) > 0
+                            ? '(' .
+                                count($promo_vouchers) .
+                                ')'
+                            : '' ?>
+                    </button>
+
+                    <button
+                        type="button"
+                        onclick="switchTab('points')"
+                        id="tab-points"
+                        class="rounded-xl px-5 py-2 text-sm font-semibold text-gray-500 transition-colors hover:text-red-600"
+                    >
                         ⭐ Redeem Points
                     </button>
-                    <button onclick="switchTab('myvouchers')" id="tab-myvouchers"
-                            class="px-5 py-2 rounded-xl text-sm font-semibold transition-colors text-gray-500 hover:text-red-600">
-                        💼 My Vouchers <?= $available_count > 0 ? "($available_count)" : '' ?>
+
+                    <button
+                        type="button"
+                        onclick="switchTab('myvouchers')"
+                        id="tab-myvouchers"
+                        class="rounded-xl px-5 py-2 text-sm font-semibold text-gray-500 transition-colors hover:text-red-600"
+                    >
+                        💼 My Vouchers
+                        <?= $available_count > 0
+                            ? "($available_count)"
+                            : '' ?>
                     </button>
                 </div>
 
+                <!-- General Promotions Tab -->
+                <div id="content-promotions">
+                    <div
+                        class="mb-5 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-4"
+                    >
+                        <span class="text-2xl">
+                            🎟️
+                        </span>
+
+                        <div>
+                            <p
+                                class="text-sm font-semibold text-red-800"
+                            >
+                                Available MangaVault Promotions
+                            </p>
+
+                            <p class="text-xs text-red-600">
+                                These promotional vouchers were added by MangaVault Admin and can be used directly at checkout.
+                            </p>
+                        </div>
+                    </div>
+
+                    <?php if (
+                        empty($promo_vouchers)
+                    ): ?>
+                    <div
+                        class="rounded-2xl bg-white p-12 text-center shadow-sm"
+                    >
+                        <div class="mb-4 text-5xl">
+                            🎟️
+                        </div>
+
+                        <p
+                            class="font-medium text-gray-500"
+                        >
+                            No promotions available
+                        </p>
+
+                        <p
+                            class="mt-1 text-sm text-gray-400"
+                        >
+                            New promotional vouchers will appear here automatically.
+                        </p>
+                    </div>
+                    <?php else: ?>
+                    <div class="space-y-4">
+                        <?php foreach (
+                            $promo_vouchers as $voucher
+                        ): ?>
+                            <?php
+                            $promotion_expiry =
+                                !empty(
+                                    $voucher[
+                                        'voucher_end_date'
+                                    ]
+                                )
+                                    ? strtotime(
+                                        $voucher[
+                                            'voucher_end_date'
+                                        ]
+                                    )
+                                    : null;
+
+                            $remaining_usage =
+                                $voucher[
+                                    'voucher_usage_limit'
+                                ] === null
+                                    ? null
+                                    : max(
+                                        0,
+                                        (int) $voucher[
+                                            'voucher_usage_limit'
+                                        ] -
+                                        (int) $voucher[
+                                            'voucher_used_count'
+                                        ]
+                                    );
+                            ?>
+
+                            <div
+                                class="voucher-card mx-3 shadow-sm"
+                            >
+                                <div class="flex">
+                                    <div
+                                        class="w-3 flex-shrink-0 bg-red-600"
+                                    ></div>
+
+                                    <div
+                                        class="flex flex-1 items-stretch"
+                                    >
+                                        <div class="flex-1 p-5">
+                                            <div
+                                                class="mb-2 flex items-start gap-3"
+                                            >
+                                                <span class="text-2xl">
+                                                    🎟️
+                                                </span>
+
+                                                <div>
+                                                    <span
+                                                        class="mb-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700"
+                                                    >
+                                                        ADMIN PROMOTION
+                                                    </span>
+
+                                                    <h3
+                                                        class="text-lg font-black text-gray-800"
+                                                    >
+                                                        <?php if (
+                                                            $voucher[
+                                                                'voucher_type'
+                                                            ] ===
+                                                            'percentage'
+                                                        ): ?>
+                                                            <?= htmlspecialchars(
+                                                                (string) $voucher[
+                                                                    'voucher_value'
+                                                                ],
+                                                                ENT_QUOTES,
+                                                                'UTF-8'
+                                                            ) ?>% OFF
+                                                        <?php else: ?>
+                                                            RM
+                                                            <?= number_format(
+                                                                (float) $voucher[
+                                                                    'voucher_value'
+                                                                ],
+                                                                2
+                                                            ) ?>
+                                                            OFF
+                                                        <?php endif; ?>
+                                                    </h3>
+
+                                                    <?php if (
+                                                        !empty(
+                                                            $voucher[
+                                                                'voucher_max_discount'
+                                                            ]
+                                                        )
+                                                    ): ?>
+                                                    <p
+                                                        class="text-xs text-gray-400"
+                                                    >
+                                                        Maximum discount:
+                                                        RM
+                                                        <?= number_format(
+                                                            (float) $voucher[
+                                                                'voucher_max_discount'
+                                                            ],
+                                                            2
+                                                        ) ?>
+                                                    </p>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
+
+                                            <div
+                                                class="mt-3 flex flex-wrap items-center gap-4 text-xs text-gray-400"
+                                            >
+                                                <?php if (
+                                                    (float) $voucher[
+                                                        'voucher_min_order'
+                                                    ] > 0
+                                                ): ?>
+                                                <span>
+                                                    Minimum spend:
+                                                    RM
+                                                    <?= number_format(
+                                                        (float) $voucher[
+                                                            'voucher_min_order'
+                                                        ],
+                                                        2
+                                                    ) ?>
+                                                </span>
+                                                <?php else: ?>
+                                                <span>
+                                                    No minimum spend
+                                                </span>
+                                                <?php endif; ?>
+
+                                                <?php if (
+                                                    $promotion_expiry !==
+                                                    null
+                                                ): ?>
+                                                <span>
+                                                    Valid until:
+                                                    <?= date(
+                                                        'd M Y',
+                                                        $promotion_expiry
+                                                    ) ?>
+                                                </span>
+                                                <?php else: ?>
+                                                <span>
+                                                    No expiry
+                                                </span>
+                                                <?php endif; ?>
+
+                                                <?php if (
+                                                    $remaining_usage !==
+                                                    null
+                                                ): ?>
+                                                <span>
+                                                    <?= number_format(
+                                                        $remaining_usage
+                                                    ) ?>
+                                                    redemptions remaining
+                                                </span>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+
+                                        <div
+                                            class="voucher-divider my-4 w-px"
+                                        ></div>
+
+                                        <div
+                                            class="flex w-44 flex-col items-center justify-center gap-3 p-4"
+                                        >
+                                            <p
+                                                class="text-xs font-semibold uppercase tracking-wide text-gray-400"
+                                            >
+                                                Voucher Code
+                                            </p>
+
+                                            <p
+                                                class="rounded-lg border border-dashed border-red-300 bg-red-50 px-3 py-1.5 text-center font-mono text-sm font-black text-red-700"
+                                            >
+                                                <?= htmlspecialchars(
+                                                    (string) $voucher[
+                                                        'voucher_code'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </p>
+
+                                            <a
+                                                href="cart.php"
+                                                class="rounded-xl bg-red-600 px-4 py-2 text-center text-xs font-semibold text-white transition-colors hover:bg-red-700"
+                                            >
+                                                Use at Checkout →
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
                 <!-- Points Redeem Tab -->
-                <div id="content-points">
+                <div
+                    id="content-points"
+                    class="hidden"
+                >
                     <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 flex items-center gap-3">
                         <span class="text-2xl">⭐</span>
                         <div>
@@ -619,7 +934,11 @@ $points_history = $points_history->fetchAll(PDO::FETCH_ASSOC);
 
     <script>
     function switchTab(tab) {
-        ['points', 'myvouchers'].forEach(t => {
+        [
+            'promotions',
+            'points',
+            'myvouchers'
+        ].forEach(t => {
             document.getElementById('tab-' + t).className = 'px-5 py-2 rounded-xl text-sm font-semibold transition-colors ' +
                 (t === tab ? 'bg-red-600 text-white' : 'text-gray-500 hover:text-red-600');
             document.getElementById('content-' + t).classList.toggle('hidden', t !== tab);
