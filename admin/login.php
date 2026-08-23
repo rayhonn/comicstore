@@ -141,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($error === '') {
-                session_regenerate_id(true);
+                regenerate_session();
 
                 $_SESSION['user_id'] =
                     (int) $user['user_id'];
@@ -151,6 +151,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $user['user_first_name'];
                 $_SESSION['role'] =
                     $user['user_role'];
+                $_SESSION['auth_last_activity_at'] =
+                    time();
 
                 unset($_SESSION['admin_level']);
 
@@ -218,7 +220,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <?php endif; ?>
 
-            <form method="POST" class="space-y-4">
+            <form
+                method="POST"
+                target="_self"
+                class="space-y-4"
+            >
                 <?php csrf_field(); ?>
                 <input
                     type="hidden"

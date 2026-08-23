@@ -66,13 +66,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $supplier['supplier_password']
             )
         ) {
-            session_regenerate_id(true);
+            regenerate_session();
 
             $_SESSION['supplier_id'] =
                 (int) $supplier['supplier_id'];
             $_SESSION['supplier_name'] =
                 $supplier['supplier_name'];
             $_SESSION['role'] = 'supplier';
+            $_SESSION['auth_last_activity_at'] =
+                time();
 
             redirect_to(
                 app_path('supplier/dashboard.php')
@@ -109,7 +111,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <?php endif; ?>
 
-            <form method="POST">
+            <form
+                method="POST"
+                target="_self"
+            >
                 <?php csrf_field(); ?>
                 <div class="mb-4">
                     <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Username</label>

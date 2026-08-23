@@ -607,14 +607,21 @@ $admin_access_label =
                 </p>
             </div>
 
-            <a
-                href="../logout.php"
+            <button
+                type="button"
+                onclick="openSharedLogoutModal()"
                 class="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-white/60 hover:text-white hover:bg-white/10 transition-colors"
             >
                 Log Out
-            </a>
+            </button>
         </div>
     </aside>
+
+    <?php
+    $logout_modal_action = app_path('logout.php');
+    $logout_modal_account_label = 'Admin account';
+    require_once __DIR__ . '/../includes/logout_modal.php';
+    ?>
 
     <main class="min-h-screen lg:ml-64">
         <header

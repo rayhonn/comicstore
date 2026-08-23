@@ -329,6 +329,10 @@ try {
         $_SESSION['stripe_expires_at'] =
             $session_expires_at;
 
+        app_begin_external_auth_flow(
+            $session_expires_at
+        );
+
         header(
             'Location: ' .
             $checkout_url

@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../includes/auth.php';
 require_customer();
+app_clear_external_auth_flow();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ .

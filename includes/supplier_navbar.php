@@ -399,8 +399,9 @@ function supplier_nav_item_class(
                 </div>
             </div>
 
-            <a
-                href="logout.php"
+            <button
+                type="button"
+                onclick="openSharedLogoutModal()"
                 class="mt-3 w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-red-500/15 text-slate-400 hover:text-red-300 text-xs font-semibold px-3 py-2.5 rounded-xl transition-colors"
             >
                 <svg
@@ -418,10 +419,16 @@ function supplier_nav_item_class(
                 </svg>
 
                 Logout
-            </a>
+            </button>
         </div>
     </div>
 </aside>
+
+<?php
+$logout_modal_action = app_path('supplier/logout.php');
+$logout_modal_account_label = 'Supplier account';
+require_once __DIR__ . '/logout_modal.php';
+?>
 
 <script>
 function openSupplierSidebar() {

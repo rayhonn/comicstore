@@ -432,6 +432,10 @@ if (
     csrf_verify();
 
     if ($has_active_stripe_session) {
+        app_begin_external_auth_flow(
+            (int) $stripe_expires_at
+        );
+
         header(
             'Location: ' .
             $stripe_checkout_url
@@ -444,7 +448,6 @@ if (
         STRIPE_SECRET_KEY
     );
 
-    $app_url = rtrim(APP_URL, '/');
     $line_items = [];
 
     foreach ($order['items'] as $item) {
@@ -576,14 +579,16 @@ if (
                     ],
 
                     'success_url' =>
-                        $app_url .
-                        '/customer/payment_success.php' .
+                        app_absolute_url(
+                            'customer/payment_success.php'
+                        ) .
                         '?session_id=' .
                         '{CHECKOUT_SESSION_ID}',
 
                     'cancel_url' =>
-                        $app_url .
-                        '/customer/payment_cancel.php',
+                        app_absolute_url(
+                            'customer/payment_cancel.php'
+                        ),
 
                     'expires_at' =>
                         $session_expires_at,
@@ -632,6 +637,11 @@ if (
         $_SESSION['stripe_expires_at'] =
             (int) $checkout_session
                 ->expires_at;
+
+        app_begin_external_auth_flow(
+            (int) $checkout_session
+                ->expires_at
+        );
 
         header(
             'Location: ' .

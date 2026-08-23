@@ -3,9 +3,6 @@
 require_once __DIR__ .
     '/includes/auth.php';
 
-$forcedIdle =
-    ($_GET['idle'] ?? '') === '1';
-
 $serverExpired =
     !empty(
         $_SESSION[
@@ -13,22 +10,35 @@ $serverExpired =
         ]
     );
 
+if (!$serverExpired) {
+    $activeRole = (string) (
+        $_SESSION['role'] ?? ''
+    );
+
+    $activeDestination = match ($activeRole) {
+        'admin' =>
+            app_path('admin/dashboard.php'),
+
+        'staff' =>
+            app_path('staff/dashboard.php'),
+
+        'supplier' =>
+            app_path('supplier/dashboard.php'),
+
+        'customer' =>
+            app_path('index.php'),
+
+        default =>
+            app_path('login.php'),
+    };
+
+    redirect_to($activeDestination);
+}
+
 $expiredRole = (string) (
-    $_SESSION[
-        'auth_expired_role'
-    ] ??
-    $_SESSION['role'] ??
+    $_SESSION['auth_expired_role'] ??
     'customer'
 );
-
-if (
-    !$forcedIdle &&
-    !$serverExpired
-) {
-    redirect_to(
-        app_path('login.php')
-    );
-}
 
 $loginUrl = match ($expiredRole) {
     'admin',
@@ -200,7 +210,7 @@ destroy_session();
                 >
                     For your security, you were
                     automatically signed out after
-                    30 minutes of inactivity.
+                    15 minutes of inactivity.
                 </p>
 
                 <div

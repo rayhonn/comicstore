@@ -4,11 +4,28 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/csrf.php';
 
+$redirect_raw =
+    $_GET['redirect'] ??
+    $_POST['redirect'] ??
+    'index.php';
+
+if (
+    !is_string($redirect_raw) ||
+    strlen($redirect_raw) > 500
+) {
+    $redirect_raw = 'index.php';
+}
+
+$redirect_to = safe_redirect_target(
+    $redirect_raw,
+    app_path('index.php')
+);
+
 if (
     !empty($_SESSION['user_id']) &&
     ($_SESSION['role'] ?? '') === 'customer'
 ) {
-    redirect_to(app_path('index.php'));
+    redirect_to($redirect_to);
 }
 
 $error = '';
@@ -136,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'Your account has been deactivated. Please contact an administrator for assistance.';
                 }
             } else {
-                session_regenerate_id(true);
+                regenerate_session();
 
                 $_SESSION['user_id'] =
                     (int) $user['user_id'];
@@ -145,6 +162,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['user_first_name'] =
                     $user['user_first_name'];
                 $_SESSION['role'] = 'customer';
+                $_SESSION['auth_last_activity_at'] =
+                    time();
 
                 $update_login = $pdo->prepare("
                     UPDATE users
@@ -155,9 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (int) $user['user_id'],
                 ]);
 
-                redirect_to(
-                    app_path('index.php')
-                );
+                redirect_to($redirect_to);
             }
         } else {
             $error =
@@ -928,10 +945,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <form
                         method="POST"
+                        target="_self"
                         class="space-y-5"
                         id="customerLoginForm"
                     >
                         <?php csrf_field(); ?>
+
+                        <input
+                            type="hidden"
+                            name="redirect"
+                            value="<?= htmlspecialchars(
+                                $redirect_to,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>"
+                        >
 
                         <div>
                             <label
@@ -980,12 +1008,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     <span class="text-red-600">*</span>
                                 </span>
 
-                                <a
-                                    href="forgot_password.php"
-                                    class="mini-link text-xs"
+                                <span
+                                    class="flex items-center gap-3 text-xs"
                                 >
-                                    Forgot password?
-                                </a>
+                                    <a
+                                        href="forgot_password.php"
+                                        class="mini-link"
+                                    >
+                                        Forgot password?
+                                    </a>
+
+                                    <?php if (
+                                        $support_email !== ''
+                                    ): ?>
+                                    <span
+                                        class="text-gray-300"
+                                        aria-hidden="true"
+                                    >
+                                        ·
+                                    </span>
+
+                                    <a
+                                        href="<?= htmlspecialchars(
+                                            $support_mailto,
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        class="mini-link"
+                                    >
+                                        Contact Admin
+                                    </a>
+                                    <?php endif; ?>
+                                </span>
                             </label>
 
                             <div class="field-shell">
@@ -1033,40 +1087,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </a>
                     </p>
 
-                    <?php if (
-                        $support_email !== ''
-                    ): ?>
-                    <div
-                        class="mt-4 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-center"
-                    >
-                        <p
-                            class="text-xs font-semibold text-blue-800"
-                        >
-                            Unable to access your account?
-                        </p>
-
-                        <a
-                            href="<?= htmlspecialchars(
-                                $support_mailto,
-                                ENT_QUOTES,
-                                'UTF-8'
-                            ) ?>"
-                            class="mini-link mt-1 inline-flex items-center justify-center gap-1 text-sm"
-                        >
-                            ✉ Contact Admin
-                        </a>
-
-                        <p
-                            class="mt-1 break-all text-xs text-blue-600"
-                        >
-                            <?= htmlspecialchars(
-                                $support_email,
-                                ENT_QUOTES,
-                                'UTF-8'
-                            ) ?>
-                        </p>
-                    </div>
-                    <?php endif; ?>                    
                 </div>
 
                 <aside
@@ -1214,6 +1234,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (form && button && buttonText) {
                 form.addEventListener('submit', () => {
+                    form.setAttribute(
+                        'target',
+                        '_self'
+                    );
+
                     button.disabled = true;
                     button.style.opacity = '0.78';
                     button.style.cursor = 'wait';

@@ -91,7 +91,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
 
         $expires_at = time() + 1860;
-        $app_url = rtrim(APP_URL, '/');
 
         $checkout_session =
             \Stripe\Checkout\Session::create(
@@ -135,8 +134,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ],
                     ],
                     'success_url' =>
-                        $app_url .
-                        '/customer/wallet_topup_success.php' .
+                        app_absolute_url(
+                            'customer/wallet_topup_success.php'
+                        ) .
                         '?session_id=' .
                         '{CHECKOUT_SESSION_ID}' .
                         '&return_to=' .
@@ -144,8 +144,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $return_to
                         ),
                     'cancel_url' =>
-                        $app_url .
-                        '/customer/wallet_topup_cancel.php' .
+                        app_absolute_url(
+                            'customer/wallet_topup_cancel.php'
+                        ) .
                         '?topup_id=' .
                         $topup_id .
                         '&return_to=' .
@@ -186,6 +187,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             (string) $checkout_session->url,
             (int) $checkout_session->expires_at,
             $payment_intent_id
+        );
+
+        app_begin_external_auth_flow(
+            (int) $checkout_session->expires_at
         );
 
         header(

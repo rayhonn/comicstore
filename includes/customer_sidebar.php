@@ -54,7 +54,11 @@ $initials = strtoupper(substr($sidebar_user['user_first_name'] ?? 'U', 0, 1) . s
             </li>
             <?php endforeach; ?>
             <li class="border-t border-gray-100 mt-1">
-                <button onclick="confirmLogout()" class="w-full flex items-center gap-3 px-5 py-3 text-sm text-gray-400 hover:text-red-600 hover:bg-gray-50 border-l-4 border-transparent transition-all duration-200">
+                <button
+                    type="button"
+                    onclick="openSharedLogoutModal()"
+                    class="w-full flex items-center gap-3 px-5 py-3 text-sm text-gray-400 hover:text-red-600 hover:bg-gray-50 border-l-4 border-transparent transition-all duration-200"
+                >
                     <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                     Sign Out
                 </button>
@@ -63,37 +67,8 @@ $initials = strtoupper(substr($sidebar_user['user_first_name'] ?? 'U', 0, 1) . s
     </div>
 </div>
 
-<!-- Logout Modal -->
-<div id="logoutModal" class="hidden fixed inset-0 bg-black/50 z-[100] flex items-center justify-center px-6">
-    <div class="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center">
-        <div class="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg class="w-7 h-7 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
-            </svg>
-        </div>
-        <h3 class="text-xl font-black text-gray-800 mb-2">Logging Out?</h3>
-        <p class="text-sm text-gray-500 mb-6">Are you sure you want to log out of MangaVault?</p>
-        <div class="flex gap-3">
-            <button onclick="closeLogoutModal()"
-                    class="flex-1 py-3 border-2 border-gray-100 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
-                Cancel
-            </button>
-            <a href="../logout.php"
-               class="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors text-center block">
-                Yes, Sign Out
-            </a>
-        </div>
-    </div>
-</div>
-
-<script>
-function confirmLogout() {
-    document.getElementById('logoutModal').classList.remove('hidden');
-}
-function closeLogoutModal() {
-    document.getElementById('logoutModal').classList.add('hidden');
-}
-document.getElementById('logoutModal').addEventListener('click', function(e) {
-    if (e.target === this) closeLogoutModal();
-});
-</script>
+<?php
+$logout_modal_action = app_path('logout.php');
+$logout_modal_account_label = 'Customer account';
+require_once __DIR__ . '/logout_modal.php';
+?>

@@ -41,6 +41,73 @@ function app_path(string $path = ''): string
 }
 
 /**
+ * Return the validated host and optional port used by this request.
+ * This keeps external payment callbacks on the same host as the
+ * customer's active browser session.
+ */
+function app_request_host(): string
+{
+    $host = trim(
+        (string) (
+            $_SERVER['HTTP_HOST'] ?? ''
+        )
+    );
+
+    if (
+        $host !== '' &&
+        preg_match(
+            '/\A(?:\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+)(?::[0-9]{1,5})?\z/',
+            $host
+        ) === 1
+    ) {
+        return $host;
+    }
+
+    if (defined('APP_URL')) {
+        $configuredHost = parse_url(
+            (string) APP_URL,
+            PHP_URL_HOST
+        );
+
+        $configuredPort = parse_url(
+            (string) APP_URL,
+            PHP_URL_PORT
+        );
+
+        if (
+            is_string($configuredHost) &&
+            $configuredHost !== ''
+        ) {
+            return $configuredHost .
+                (
+                    is_int($configuredPort)
+                        ? ':' . $configuredPort
+                        : ''
+                );
+        }
+    }
+
+    throw new RuntimeException(
+        'Unable to determine the application host.'
+    );
+}
+
+/**
+ * Build an absolute same-origin application URL.
+ */
+function app_absolute_url(
+    string $path = ''
+): string {
+    return (
+        app_request_uses_https()
+            ? 'https://'
+            : 'http://'
+    ) .
+        app_request_host() .
+        app_path($path);
+}
+
+/**
  * Redirect to another page and stop the current script.
  */
 function redirect_to(string $url): void
@@ -150,8 +217,12 @@ function safe_redirect_target(string $target, string $default): string
         'customer/addresses.php',
         'customer/wallet.php',
         'customer/wallet_topup.php',
+        'customer/wallet_topup_success.php',
+        'customer/wallet_topup_cancel.php',
         'customer/wallet_withdrawal.php',
         'customer/wallet_withdrawal_receipt.php',
+        'customer/payment_success.php',
+        'customer/payment_cancel.php',
 
         'admin/index.php',
         'admin/dashboard.php',
@@ -288,6 +359,70 @@ function safe_redirect_target(string $target, string $default): string
         return app_path($path) .
             '?id=' .
             (int) $withdrawalId;
+    }
+
+    if (
+        in_array(
+            $path,
+            [
+                'customer/wallet_topup_success.php',
+                'customer/payment_success.php',
+            ],
+            true
+        )
+    ) {
+        $query = parse_url(
+            $target,
+            PHP_URL_QUERY
+        );
+
+        if (!is_string($query)) {
+            return $default;
+        }
+
+        parse_str(
+            $query,
+            $queryParameters
+        );
+
+        $sessionId = trim(
+            (string) (
+                $queryParameters['session_id'] ?? ''
+            )
+        );
+
+        if (
+            strlen($sessionId) > 255 ||
+            preg_match(
+                '/\Acs_[A-Za-z0-9_]+\z/',
+                $sessionId
+            ) !== 1
+        ) {
+            return $default;
+        }
+
+        $validatedQuery = [
+            'session_id' => $sessionId,
+        ];
+
+        if (
+            $path ===
+                'customer/wallet_topup_success.php' &&
+            ($queryParameters['return_to'] ?? '') ===
+                'checkout'
+        ) {
+            $validatedQuery['return_to'] =
+                'checkout';
+        }
+
+        return app_path($path) .
+            '?' .
+            http_build_query(
+                $validatedQuery,
+                '',
+                '&',
+                PHP_QUERY_RFC3986
+            );
     }
 
     return app_path($path);
@@ -476,6 +611,7 @@ function regenerate_session(): void
         $_SESSION['admin_level'],
         $_SESSION['role'],
         $_SESSION['auth_last_activity_at'],
+        $_SESSION['auth_external_flow_until'],
         $_SESSION['auth_session_expired'],
         $_SESSION['auth_expired_role'],
         $_SESSION['auth_expired_at']

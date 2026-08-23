@@ -2,7 +2,8 @@
 
 require_once __DIR__ . '/logger.php';
 
-const APP_SESSION_IDLE_TIMEOUT_SECONDS = 1800;
+const APP_SESSION_IDLE_TIMEOUT_SECONDS = 900;
+const APP_EXTERNAL_FLOW_GRACE_MAX_SECONDS = 2400;
 
 /**
  * Determine whether the current request is using HTTPS.
@@ -133,7 +134,106 @@ function app_session_account_id(): int
 }
 
 /**
- * Expire authenticated sessions after 30 minutes of inactivity.
+ * Return the request path without query parameters.
+ */
+function app_session_request_path(): string
+{
+    $requestUri = (string) (
+        $_SERVER['REQUEST_URI'] ?? ''
+    );
+
+    $path = parse_url(
+        $requestUri,
+        PHP_URL_PATH
+    );
+
+    return is_string($path)
+        ? '/' . ltrim($path, '/')
+        : '';
+}
+
+/**
+ * Determine whether the current request is an approved return from
+ * an external Stripe Checkout flow.
+ */
+function app_is_external_flow_return_request(): bool
+{
+    $requestPath = app_session_request_path();
+
+    foreach (
+        [
+            '/customer/payment_success.php',
+            '/customer/payment_cancel.php',
+            '/customer/wallet_topup_success.php',
+            '/customer/wallet_topup_cancel.php',
+        ] as $allowedSuffix
+    ) {
+        if (
+            str_ends_with(
+                $requestPath,
+                $allowedSuffix
+            )
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Temporarily allow one approved Stripe return request to resume the
+ * authenticated session after the normal idle limit.
+ */
+function app_begin_external_auth_flow(
+    int $externalExpiresAt
+): void {
+    if (
+        session_status() !== PHP_SESSION_ACTIVE ||
+        !app_session_is_authenticated()
+    ) {
+        return;
+    }
+
+    $now = time();
+
+    $_SESSION['auth_external_flow_until'] = min(
+        $now + APP_EXTERNAL_FLOW_GRACE_MAX_SECONDS,
+        max(
+            $now + 60,
+            $externalExpiresAt + 300
+        )
+    );
+}
+
+/**
+ * Remove the temporary Stripe return allowance.
+ */
+function app_clear_external_auth_flow(): void
+{
+    unset(
+        $_SESSION['auth_external_flow_until']
+    );
+}
+
+/**
+ * Determine whether an approved Stripe return may resume this session.
+ */
+function app_can_resume_external_auth_flow(
+    int $now
+): bool {
+    $graceUntil = (int) (
+        $_SESSION['auth_external_flow_until'] ?? 0
+    );
+
+    return (
+        $graceUntil >= $now &&
+        app_is_external_flow_return_request()
+    );
+}
+
+/**
+ * Expire authenticated sessions after 15 minutes of inactivity.
  */
 function app_enforce_session_idle_timeout(): void
 {
@@ -142,7 +242,10 @@ function app_enforce_session_idle_timeout(): void
     }
 
     if (!app_session_is_authenticated()) {
-        unset($_SESSION['auth_last_activity_at']);
+        unset(
+            $_SESSION['auth_last_activity_at'],
+            $_SESSION['auth_external_flow_until']
+        );
         return;
     }
 
@@ -157,6 +260,31 @@ function app_enforce_session_idle_timeout(): void
         ($now - $lastActivity) >=
             APP_SESSION_IDLE_TIMEOUT_SECONDS
     ) {
+        if (
+            app_can_resume_external_auth_flow(
+                $now
+            )
+        ) {
+            $_SESSION['auth_last_activity_at'] =
+                $now;
+
+            app_clear_external_auth_flow();
+
+            app_log(
+                'INFO',
+                'Session',
+                'Session resumed from an approved external payment return.',
+                [
+                    'account_id' =>
+                        app_session_account_id(),
+                    'role' =>
+                        (string) $_SESSION['role'],
+                ]
+            );
+
+            return;
+        }
+
         $accountId = app_session_account_id();
         $role = (string) $_SESSION['role'];
 

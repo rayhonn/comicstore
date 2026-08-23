@@ -29,8 +29,11 @@ $supplier_stmt->execute([$supplier_id]);
 $supplier = $supplier_stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$supplier) {
-    header('Location: logout.php');
-    exit;
+    destroy_session();
+
+    redirect_to(
+        app_path('supplier/login.php')
+    );
 }
 
 $pending_rfqs_stmt = $pdo->prepare("

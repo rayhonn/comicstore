@@ -48,9 +48,19 @@ $my_pending_prs = $pdo->query("SELECT COUNT(*) FROM purchase_requisitions WHERE 
                 <?= htmlspecialchars($_SESSION['user_name']) ?>
                 <span class="text-white/30 text-xs ml-1">(Staff)</span>
             </span>
-            <a href="../logout.php" class="bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-xs px-3 py-2 rounded-lg transition-colors">
+            <button
+                type="button"
+                onclick="openSharedLogoutModal()"
+                class="bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-xs px-3 py-2 rounded-lg transition-colors"
+            >
                 Logout
-            </a>
+            </button>
         </div>
     </div>
 </nav>
+
+<?php
+$logout_modal_action = app_path('logout.php');
+$logout_modal_account_label = 'Staff account';
+require_once __DIR__ . '/logout_modal.php';
+?>

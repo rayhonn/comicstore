@@ -26,7 +26,7 @@ $nav_session_activity_url =
 
 $nav_session_expired_url =
     app_path(
-        'session_expired.php?idle=1'
+        'session_expired.php'
     );
 
 // Auto-check one expired pending confirmation order.
@@ -1008,11 +1008,43 @@ $nav_mobile_account_links = [
             sessionIdleTimer =
                 window.setTimeout(
                     () => {
-                        window.location.href =
-                            sessionExpiredUrl;
+                        verifySessionBeforeExpiry();
                     },
                     sessionIdleTimeoutMs
                 );
+        }
+
+        function verifySessionBeforeExpiry() {
+            fetch(
+                sessionActivityUrl,
+                {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    headers: {
+                        'X-Requested-With':
+                            'XMLHttpRequest',
+                        'Accept':
+                            'application/json',
+                    },
+                }
+            )
+            .then(response => {
+                if (
+                    response.status === 401
+                ) {
+                    window.location.replace(
+                        sessionExpiredUrl
+                    );
+
+                    return;
+                }
+
+                scheduleSessionExpiry();
+            })
+            .catch(() => {
+                scheduleSessionExpiry();
+            });
         }
 
         function sendSessionHeartbeat() {
