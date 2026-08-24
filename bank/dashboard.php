@@ -331,167 +331,147 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
 
 <?php require '../includes/bank_navbar.php'; ?>
 
-<div class="ops-app">
-    <aside class="ops-sidebar" aria-label="Institution operations navigation">
-        <p class="ops-sidebar-kicker">Settlement Operations</p>
-        <nav class="ops-nav">
-            <?php
-            $navItems = [
-                'pending' => ['RV', 'Review Queue', $counts['pending']],
-                'accepted' => ['AC', 'Accepted', $counts['accepted']],
-                'processing' => ['ST', 'Settlement Queue', $counts['processing']],
-                'settled' => ['OK', 'Settled Records', $counts['settled']],
-                'rejected' => ['RJ', 'Rejected', $counts['rejected']],
-                'failed' => ['FL', 'Settlement Failed', $counts['failed']],
-                'exceptions' => ['EX', 'Reconciliation', $counts['exceptions']],
-                'all' => ['AR', 'All Instructions', array_sum($counts)],
-            ];
-            ?>
-            <?php foreach ($navItems as $key => $item): ?>
-                <a
-                    class="ops-nav-link <?= $statusFilter === $key ? 'is-active' : '' ?>"
-                    href="?<?= htmlspecialchars(http_build_query(['status' => $key]), ENT_QUOTES, 'UTF-8') ?>"
-                >
-                    <span class="ops-nav-icon"><?= htmlspecialchars($item[0], ENT_QUOTES, 'UTF-8') ?></span>
-                    <span><?= htmlspecialchars($item[1], ENT_QUOTES, 'UTF-8') ?></span>
-                    <span class="ops-nav-count"><?= (int) $item[2] ?></span>
-                </a>
-            <?php endforeach; ?>
-        </nav>
-
-        <div class="ops-sidebar-card">
-            <div class="ops-sidebar-card-label">Institution Scope</div>
-            <div class="ops-sidebar-card-value">
-                <?= htmlspecialchars($bankName, ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars($bankCode, ENT_QUOTES, 'UTF-8') ?>
-            </div>
-            <div class="ops-sidebar-card-copy">
-                This operator can only access instructions routed to this destination institution.
-            </div>
+<div class="bo-shell">
+    <aside class="bo-sidebar" aria-label="Payment operations navigation">
+        <div class="bo-sidebar-section">
+            <div class="bo-sidebar-heading">PAYMENTS OPERATIONS</div>
+            <nav class="bo-menu">
+                <?php
+                $navItems = [
+                    'pending' => ['Review Queue', $counts['pending']],
+                    'accepted' => ['Settlement Ready', $counts['accepted']],
+                    'processing' => ['In Processing', $counts['processing']],
+                    'exceptions' => ['Reconciliation', $counts['exceptions']],
+                    'settled' => ['Settled', $counts['settled']],
+                    'rejected' => ['Rejected', $counts['rejected']],
+                    'failed' => ['Failed', $counts['failed']],
+                    'all' => ['All Instructions', array_sum($counts)],
+                ];
+                ?>
+                <?php foreach ($navItems as $key => $item): ?>
+                    <a
+                        class="bo-menu-link <?= $statusFilter === $key ? 'is-active' : '' ?>"
+                        href="?<?= htmlspecialchars(http_build_query(['status' => $key]), ENT_QUOTES, 'UTF-8') ?>"
+                    >
+                        <span><?= htmlspecialchars($item[0], ENT_QUOTES, 'UTF-8') ?></span>
+                        <span class="bo-menu-count"><?= (int) $item[1] ?></span>
+                    </a>
+                <?php endforeach; ?>
+            </nav>
         </div>
 
-        <div class="ops-sidebar-card">
-            <div class="ops-sidebar-card-label">Controls</div>
-            <div class="ops-sidebar-card-value">Re-authentication enforced</div>
-            <div class="ops-sidebar-card-copy">
-                Protected account access and material settlement actions require the current operator password and are audit logged.
-            </div>
+        <div class="bo-sidebar-footer">
+            <div class="bo-scope-label">Institution</div>
+            <div class="bo-scope-value"><?= htmlspecialchars($bankName, ENT_QUOTES, 'UTF-8') ?></div>
+            <div class="bo-scope-meta"><?= htmlspecialchars($bankCode, ENT_QUOTES, 'UTF-8') ?> · Operator scope enforced</div>
         </div>
     </aside>
 
-    <main class="ops-main">
-        <header class="ops-workspace-header">
+    <main class="bo-main">
+        <header class="bo-page-header">
             <div>
-                <div class="ops-eyebrow">BankLink · Institution Settlement Console</div>
-                <h1 class="ops-title">Transfer Operations Workspace</h1>
-                <p class="ops-subtitle">
-                    Independent beneficiary verification, settlement processing, wallet-ledger synchronization and exception reconciliation for merchant-authorized refund instructions. Merchant approval does not complete a transfer; final wallet debit occurs only after institution settlement is confirmed.
-                </p>
+                <div class="bo-breadcrumb">Operations / Payments / Refund Settlement</div>
+                <h1>Refund Settlement Instructions</h1>
+                <p>Review and settle merchant-authorized refund instructions routed to <?= htmlspecialchars($bankName, ENT_QUOTES, 'UTF-8') ?>.</p>
             </div>
-            <div class="ops-clock">
-                <div class="ops-clock-label">Malaysia Time · MYT</div>
-                <div id="malaysiaClock" class="ops-clock-value">Loading...</div>
+            <div class="bo-header-meta">
+                <div class="bo-header-meta-label">BUSINESS DATE / MYT</div>
+                <div id="malaysiaClock" class="bo-header-clock">Loading...</div>
+                <div class="bo-header-operator"><?= htmlspecialchars($operatorName, ENT_QUOTES, 'UTF-8') ?></div>
             </div>
         </header>
 
         <?php if ($error !== ''): ?>
-            <div class="ops-alert is-error">
-                <strong>Action blocked.</strong>
+            <div class="bo-message is-error">
+                <strong>Action not completed.</strong>
                 <span><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></span>
             </div>
         <?php elseif ($result !== ''): ?>
-            <div class="ops-alert">
-                <strong>Operation recorded.</strong>
-                <span>The institution lifecycle and MangaVault wallet state were synchronized successfully.</span>
+            <div class="bo-message is-success">
+                <strong>Operation completed.</strong>
+                <span>The instruction and wallet ledger states were synchronized.</span>
             </div>
         <?php endif; ?>
 
         <?php if ($metrics['reconciliation_exceptions'] > 0): ?>
-            <div class="ops-alert is-warning">
-                <strong>Reconciliation attention required.</strong>
-                <span>
-                    <?= (int) $metrics['reconciliation_exceptions'] ?> historical rejected instruction(s) still have merchant status Approved. Open Reconciliation and resolve them so reserved funds are released and both systems match.
-                </span>
+            <div class="bo-message is-warning">
+                <strong>Reconciliation required.</strong>
+                <span><?= (int) $metrics['reconciliation_exceptions'] ?> historical rejected instruction(s) require reserve release synchronization.</span>
+                <a href="?status=exceptions">Open reconciliation queue</a>
             </div>
         <?php endif; ?>
 
-        <section class="ops-metrics" aria-label="Institution operations metrics">
-            <div class="ops-metric is-amber">
-                <div class="ops-metric-label">Pending Review</div>
-                <div class="ops-metric-value"><?= (int) $metrics['pending_review'] ?></div>
-                <div class="ops-metric-foot">Awaiting institution verification</div>
+        <section class="bo-summary" aria-label="Operations summary">
+            <div class="bo-summary-item">
+                <span>Pending review</span>
+                <strong><?= (int) $metrics['pending_review'] ?></strong>
             </div>
-            <div class="ops-metric is-blue">
-                <div class="ops-metric-label">Settlement Ready</div>
-                <div class="ops-metric-value"><?= (int) $metrics['ready_settlement'] ?></div>
-                <div class="ops-metric-foot">Accepted, not yet processing</div>
+            <div class="bo-summary-item">
+                <span>Settlement ready</span>
+                <strong><?= (int) $metrics['ready_settlement'] ?></strong>
             </div>
-            <div class="ops-metric is-cyan">
-                <div class="ops-metric-label">Processing</div>
-                <div class="ops-metric-value"><?= (int) $metrics['processing'] ?></div>
-                <div class="ops-metric-foot">Settlement in progress</div>
+            <div class="bo-summary-item">
+                <span>Processing</span>
+                <strong><?= (int) $metrics['processing'] ?></strong>
             </div>
-            <div class="ops-metric is-green">
-                <div class="ops-metric-label">Settled Today</div>
-                <div class="ops-metric-value"><?= (int) $metrics['settled_today'] ?></div>
-                <div class="ops-metric-foot">RM <?= moneyFormatSen($metrics['settled_value_today_sen']) ?> posted today</div>
+            <div class="bo-summary-item">
+                <span>Settled today</span>
+                <strong><?= (int) $metrics['settled_today'] ?></strong>
+                <small>RM <?= moneyFormatSen($metrics['settled_value_today_sen']) ?></small>
             </div>
-            <div class="ops-metric is-red">
-                <div class="ops-metric-label">Rejected Today</div>
-                <div class="ops-metric-value"><?= (int) $metrics['rejected_today'] ?></div>
-                <div class="ops-metric-foot">Funds auto-released</div>
+            <div class="bo-summary-item">
+                <span>Rejected today</span>
+                <strong><?= (int) $metrics['rejected_today'] ?></strong>
             </div>
-            <div class="ops-metric is-violet">
-                <div class="ops-metric-label">SLA Exceptions</div>
-                <div class="ops-metric-value"><?= (int) $metrics['sla_exceptions'] ?></div>
-                <div class="ops-metric-foot">Pending longer than 30 minutes</div>
+            <div class="bo-summary-item <?= (int) $metrics['sla_exceptions'] > 0 ? 'is-attention' : '' ?>">
+                <span>SLA exceptions</span>
+                <strong><?= (int) $metrics['sla_exceptions'] ?></strong>
+                <small>&gt; 30 min pending</small>
             </div>
         </section>
 
-        <div class="ops-grid">
-            <section class="ops-card">
-                <div class="ops-card-header">
+        <div class="bo-work-area">
+            <section class="bo-panel bo-queue-panel">
+                <div class="bo-panel-header">
                     <div>
-                        <h2 class="ops-card-title">Institution Work Queue</h2>
-                        <div class="ops-card-caption">
-                            <?= htmlspecialchars(ucwords(str_replace('_', ' ', $statusFilter)), ENT_QUOTES, 'UTF-8') ?> · <?= count($requests) ?> record(s)
-                        </div>
+                        <h2><?= htmlspecialchars(ucwords(str_replace('_', ' ', $statusFilter)), ENT_QUOTES, 'UTF-8') ?></h2>
+                        <span><?= count($requests) ?> instruction(s)</span>
                     </div>
-                    <form method="GET" class="ops-toolbar">
+                    <form method="GET" class="bo-search-form">
                         <input type="hidden" name="status" value="<?= htmlspecialchars($statusFilter, ENT_QUOTES, 'UTF-8') ?>">
                         <input
-                            class="ops-search"
                             type="search"
                             name="q"
                             maxlength="100"
                             value="<?= htmlspecialchars($search, ENT_QUOTES, 'UTF-8') ?>"
-                            placeholder="Search instruction, customer, ref, last 4..."
-                            aria-label="Search institution work queue"
+                            placeholder="Instruction, beneficiary, reference, last 4"
+                            aria-label="Search instructions"
                         >
-                        <button class="ops-btn ops-btn-dark" type="submit">Search</button>
+                        <button type="submit">Search</button>
                         <?php if ($search !== ''): ?>
-                            <a class="ops-btn ops-btn-ghost" href="?status=<?= urlencode($statusFilter) ?>">Clear</a>
+                            <a href="?status=<?= urlencode($statusFilter) ?>">Clear</a>
                         <?php endif; ?>
                     </form>
                 </div>
 
                 <?php if ($requests === []): ?>
-                    <div class="ops-empty">
-                        <div class="ops-empty-mark">BL</div>
-                        <div class="ops-empty-title">No instructions in this queue</div>
-                        <div class="ops-empty-copy">New merchant-authorized instructions will appear here automatically.</div>
+                    <div class="bo-empty-state">
+                        <strong>No instructions found</strong>
+                        <span>There are no records matching this queue and search criteria.</span>
                     </div>
                 <?php else: ?>
-                    <div class="ops-table-wrap">
-                        <table class="ops-table">
+                    <div class="bo-table-scroll">
+                        <table class="bo-table">
                             <thead>
                                 <tr>
-                                    <th>Instruction</th>
+                                    <th>ID</th>
+                                    <th>Received</th>
                                     <th>Beneficiary</th>
-                                    <th>Destination</th>
-                                    <th>Amount</th>
-                                    <th>Queue Age</th>
-                                    <th>Stage</th>
-                                    <th>Action</th>
+                                    <th>Account</th>
+                                    <th class="is-right">Amount</th>
+                                    <th>Status</th>
+                                    <th>Age</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -504,43 +484,33 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
                                     (string) $request['user_last_name']
                                 );
                                 $ageMinutes = (int) ($request['queue_age_minutes'] ?? 0);
-                                $isSlaBreach =
-                                    $stageKey === 'pending' && $ageMinutes > 30;
+                                $isSlaBreach = $stageKey === 'pending' && $ageMinutes > 30;
                                 ?>
                                 <tr class="<?= $selected !== null && (int) $selected['wallet_withdrawal_id'] === $rowId ? 'is-selected' : '' ?>">
-                                    <td>
-                                        <span class="ops-instruction">#<?= str_pad((string) $rowId, 4, '0', STR_PAD_LEFT) ?></span>
-                                        <span class="ops-subtext">
-                                            <?= htmlspecialchars(substr((string) $request['wallet_withdrawal_bank_submission_id'], 0, 12), ENT_QUOTES, 'UTF-8') ?>…
-                                        </span>
+                                    <td class="bo-id-cell">
+                                        <strong>#<?= str_pad((string) $rowId, 4, '0', STR_PAD_LEFT) ?></strong>
+                                        <span><?= htmlspecialchars(substr((string) $request['wallet_withdrawal_bank_submission_id'], 0, 8), ENT_QUOTES, 'UTF-8') ?></span>
                                     </td>
+                                    <td><?= htmlspecialchars(bankOpsMyt((string) ($request['wallet_withdrawal_bank_submitted_at'] ?? ''), 'd M H:i'), ENT_QUOTES, 'UTF-8') ?></td>
                                     <td>
                                         <strong><?= htmlspecialchars($customerName, ENT_QUOTES, 'UTF-8') ?></strong>
-                                        <span class="ops-subtext"><?= htmlspecialchars((string) $request['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?></span>
+                                        <span class="bo-cell-subtext"><?= htmlspecialchars((string) $request['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?></span>
                                     </td>
                                     <td>
-                                        <?= htmlspecialchars((string) $request['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?>
-                                        <span class="ops-subtext">••••<?= htmlspecialchars((string) $request['wallet_withdrawal_account_number_last4'], ENT_QUOTES, 'UTF-8') ?></span>
+                                        <?= htmlspecialchars((string) $request['wallet_withdrawal_bank_code'], ENT_QUOTES, 'UTF-8') ?> · ••••<?= htmlspecialchars((string) $request['wallet_withdrawal_account_number_last4'], ENT_QUOTES, 'UTF-8') ?>
                                     </td>
-                                    <td class="ops-money">
-                                        RM <?= moneyFormatSen(moneyDecimalToSen((string) $request['wallet_withdrawal_amount'])) ?>
+                                    <td class="is-right bo-amount-cell">RM <?= moneyFormatSen(moneyDecimalToSen((string) $request['wallet_withdrawal_amount'])) ?></td>
+                                    <td><span class="bo-status bo-status-<?= htmlspecialchars($stageKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($stageLabel, ENT_QUOTES, 'UTF-8') ?></span></td>
+                                    <td class="<?= $isSlaBreach ? 'bo-sla-breach' : '' ?>">
+                                        <?= htmlspecialchars(bankOpsQueueAgeLabel($ageMinutes), ENT_QUOTES, 'UTF-8') ?>
+                                        <?= $isSlaBreach ? ' SLA' : '' ?>
                                     </td>
-                                    <td>
-                                        <span class="ops-sla <?= $isSlaBreach ? 'is-breach' : '' ?>">
-                                            <?= htmlspecialchars(bankOpsQueueAgeLabel($ageMinutes), ENT_QUOTES, 'UTF-8') ?>
-                                            <?= $isSlaBreach ? ' · SLA' : '' ?>
-                                        </span>
-                                    </td>
-                                    <td><span class="ops-badge <?= htmlspecialchars($stageKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($stageLabel, ENT_QUOTES, 'UTF-8') ?></span></td>
-                                    <td>
-                                        <a
-                                            class="ops-btn ops-btn-ghost"
-                                            href="?<?= htmlspecialchars(http_build_query([
-                                                'status' => $statusFilter,
-                                                'q' => $search,
-                                                'view' => $rowId,
-                                            ]), ENT_QUOTES, 'UTF-8') ?>"
-                                        >Open</a>
+                                    <td class="bo-open-cell">
+                                        <a href="?<?= htmlspecialchars(http_build_query([
+                                            'status' => $statusFilter,
+                                            'q' => $search,
+                                            'view' => $rowId,
+                                        ]), ENT_QUOTES, 'UTF-8') ?>">View</a>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -550,12 +520,11 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
                 <?php endif; ?>
             </section>
 
-            <aside class="ops-card ops-detail" aria-label="Selected instruction detail">
+            <aside class="bo-panel bo-detail-panel" aria-label="Instruction details">
                 <?php if ($selected === null): ?>
-                    <div class="ops-empty">
-                        <div class="ops-empty-mark">ID</div>
-                        <div class="ops-empty-title">Select an instruction</div>
-                        <div class="ops-empty-copy">Open a queue record to view verification, settlement and audit details.</div>
+                    <div class="bo-empty-state bo-empty-detail">
+                        <strong>No instruction selected</strong>
+                        <span>Select a record from the queue to review details and available actions.</span>
                     </div>
                 <?php else: ?>
                     <?php
@@ -598,262 +567,151 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
                         ['completed', 'failed'],
                         true
                     );
+                    $validations = [
+                        ['Merchant authorization', $isMerchantAuthorized],
+                        ['Submission identifier', $hasSubmission],
+                        ['Encrypted account payload', $encryptedPayloadValid],
+                        ['Institution routing scope', (string) $selected['wallet_withdrawal_bank_code'] === $bankCode],
+                        ['Verification integrity hash', $stepReviewDone ? $hasVerificationHash : null],
+                        ['Settlement integrity hash', $selectedStageKey === 'settled' ? $hasSettlementHash : null],
+                    ];
                     ?>
-                    <div class="ops-detail-head">
-                        <div class="ops-detail-head-top">
-                            <div>
-                                <div class="ops-detail-kicker">Instruction Detail · <?= htmlspecialchars($selectedPhase, ENT_QUOTES, 'UTF-8') ?></div>
-                                <h2 class="ops-detail-title">#<?= str_pad((string) $selectedWithdrawalId, 4, '0', STR_PAD_LEFT) ?></h2>
-                            </div>
-                            <div class="ops-detail-amount">
-                                RM <?= moneyFormatSen(moneyDecimalToSen((string) $selected['wallet_withdrawal_amount'])) ?>
-                            </div>
+
+                    <div class="bo-detail-header">
+                        <div>
+                            <div class="bo-detail-label">INSTRUCTION</div>
+                            <div class="bo-detail-id">#<?= str_pad((string) $selectedWithdrawalId, 4, '0', STR_PAD_LEFT) ?></div>
+                            <div class="bo-detail-ref"><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_submission_id'], ENT_QUOTES, 'UTF-8') ?></div>
                         </div>
-                        <div class="ops-detail-reference">
-                            Submission <?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_submission_id'], ENT_QUOTES, 'UTF-8') ?>
+                        <div class="bo-detail-header-right">
+                            <span class="bo-status bo-status-<?= htmlspecialchars($selectedStageKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($selectedStageLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                            <strong>RM <?= moneyFormatSen(moneyDecimalToSen((string) $selected['wallet_withdrawal_amount'])) ?></strong>
                         </div>
                     </div>
 
-                    <div class="ops-detail-body">
-                        <div class="ops-section">
-                            <div class="ops-section-title">
-                                <span>Lifecycle</span>
-                                <span class="ops-badge <?= htmlspecialchars($selectedStageKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($selectedStageLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                    <div class="bo-detail-scroll">
+                        <section class="bo-detail-section">
+                            <h3>Processing status</h3>
+                            <div class="bo-lifecycle">
+                                <div class="is-complete"><span>1</span><strong>Merchant approval</strong><small>Authorized</small></div>
+                                <div class="<?= $stepReviewDone ? 'is-complete' : 'is-current' ?>"><span>2</span><strong>Bank review</strong><small><?= $stepReviewDone ? 'Decision posted' : 'In review' ?></small></div>
+                                <div class="<?= $stepSettlementStarted ? ($stepFinalDone ? 'is-complete' : 'is-current') : ($selectedStageKey === 'accepted' ? 'is-current' : '') ?>"><span>3</span><strong>Settlement</strong><small><?= htmlspecialchars(ucfirst(str_replace('_', ' ', (string) ($selected['wallet_withdrawal_bank_settlement_status'] ?? 'not_required'))), ENT_QUOTES, 'UTF-8') ?></small></div>
+                                <div class="<?= $stepFinalDone ? 'is-complete' : '' ?>"><span>4</span><strong>Wallet ledger</strong><small><?= $stepFinalDone ? ucfirst((string) $selected['wallet_withdrawal_status']) : 'Reserved' ?></small></div>
                             </div>
-                            <div class="ops-stepper">
-                                <div class="ops-step is-done">
-                                    <div class="ops-step-label">1 · Merchant</div>
-                                    <div class="ops-step-value">Authorized</div>
-                                </div>
-                                <div class="ops-step <?= $stepReviewDone ? 'is-done' : 'is-current' ?>">
-                                    <div class="ops-step-label">2 · Bank</div>
-                                    <div class="ops-step-value"><?= $stepReviewDone ? 'Decision Posted' : 'Verification' ?></div>
-                                </div>
-                                <div class="ops-step <?= $stepSettlementStarted ? ($stepFinalDone ? 'is-done' : 'is-current') : ($selectedStageKey === 'accepted' ? 'is-current' : '') ?>">
-                                    <div class="ops-step-label">3 · Settlement</div>
-                                    <div class="ops-step-value"><?= htmlspecialchars(ucfirst((string) ($selected['wallet_withdrawal_bank_settlement_status'] ?? 'not_required')), ENT_QUOTES, 'UTF-8') ?></div>
-                                </div>
-                                <div class="ops-step <?= $stepFinalDone ? 'is-done' : '' ?>">
-                                    <div class="ops-step-label">4 · Ledger</div>
-                                    <div class="ops-step-value"><?= $stepFinalDone ? ucfirst((string) $selected['wallet_withdrawal_status']) : 'Reserved' ?></div>
-                                </div>
-                            </div>
-                        </div>
+                        </section>
 
-                        <div class="ops-section">
-                            <div class="ops-section-title">Beneficiary & Instruction</div>
-                            <div class="ops-info-grid">
-                                <div class="ops-info">
-                                    <div class="ops-info-label">Customer</div>
-                                    <div class="ops-info-value"><?= htmlspecialchars($selectedCustomerName, ENT_QUOTES, 'UTF-8') ?></div>
-                                    <div class="ops-info-note"><?= htmlspecialchars((string) $selected['user_gmail'], ENT_QUOTES, 'UTF-8') ?></div>
-                                </div>
-                                <div class="ops-info">
-                                    <div class="ops-info-label">Account Holder</div>
-                                    <div class="ops-info-value"><?= htmlspecialchars((string) $selected['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?></div>
-                                    <div class="ops-info-note">Captured by merchant identity control</div>
-                                </div>
-                                <div class="ops-info">
-                                    <div class="ops-info-label">Destination Institution</div>
-                                    <div class="ops-info-value"><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?></div>
-                                    <div class="ops-info-note"><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_code'], ENT_QUOTES, 'UTF-8') ?> routing scope</div>
-                                </div>
-                                <div class="ops-info">
-                                    <div class="ops-info-label">Protected Account</div>
-                                    <div class="ops-info-value">•••• <?= htmlspecialchars((string) $selected['wallet_withdrawal_account_number_last4'], ENT_QUOTES, 'UTF-8') ?></div>
-                                    <button
-                                        type="button"
-                                        class="ops-btn ops-btn-ghost"
-                                        style="margin-top:7px"
-                                        onclick="openAccountModal(<?= $selectedWithdrawalId ?>, '<?= htmlspecialchars((string) $selected['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?>', '<?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?>')"
-                                    >Securely View</button>
-                                </div>
-                            </div>
-                        </div>
+                        <section class="bo-detail-section">
+                            <h3>Instruction details</h3>
+                            <dl class="bo-detail-grid">
+                                <div><dt>Customer</dt><dd><?= htmlspecialchars($selectedCustomerName, ENT_QUOTES, 'UTF-8') ?></dd><small><?= htmlspecialchars((string) $selected['user_gmail'], ENT_QUOTES, 'UTF-8') ?></small></div>
+                                <div><dt>Account holder</dt><dd><?= htmlspecialchars((string) $selected['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?></dd></div>
+                                <div><dt>Destination bank</dt><dd><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?></dd><small><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_code'], ENT_QUOTES, 'UTF-8') ?></small></div>
+                                <div><dt>Destination account</dt><dd>•••• <?= htmlspecialchars((string) $selected['wallet_withdrawal_account_number_last4'], ENT_QUOTES, 'UTF-8') ?></dd><button type="button" class="bo-link-button" onclick="openAccountModal(<?= $selectedWithdrawalId ?>, '<?= htmlspecialchars((string) $selected['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?>', '<?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?>')">View protected data</button></div>
+                                <div><dt>Submitted</dt><dd><?= htmlspecialchars(bankOpsMyt((string) ($selected['wallet_withdrawal_bank_submitted_at'] ?? '')), ENT_QUOTES, 'UTF-8') ?> MYT</dd></div>
+                                <div><dt>Current phase</dt><dd><?= htmlspecialchars($selectedPhase, ENT_QUOTES, 'UTF-8') ?></dd></div>
+                            </dl>
+                        </section>
 
-                        <div class="ops-section">
-                            <div class="ops-section-title">Control Validation Matrix</div>
-                            <div class="ops-validation">
-                                <?php
-                                $validations = [
-                                    ['Merchant authorization recorded', $isMerchantAuthorized],
-                                    ['Unique bank submission identifier present', $hasSubmission],
-                                    ['Account data stored as encrypted payload', $encryptedPayloadValid],
-                                    ['Institution routing matches operator scope', (string) $selected['wallet_withdrawal_bank_code'] === $bankCode],
-                                    ['Bank verification integrity hash', $stepReviewDone ? $hasVerificationHash : null],
-                                    ['Settlement integrity hash', $selectedStageKey === 'settled' ? $hasSettlementHash : null],
-                                ];
-                                ?>
+                        <section class="bo-detail-section">
+                            <h3>Control checks</h3>
+                            <table class="bo-control-table">
+                                <tbody>
                                 <?php foreach ($validations as [$label, $ok]): ?>
-                                    <div class="ops-validation-row">
-                                        <div class="ops-validation-icon <?= $ok === false ? 'is-warn' : '' ?>"><?= $ok === false ? '!' : '✓' ?></div>
-                                        <div class="ops-validation-label"><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></div>
-                                        <div class="ops-validation-status <?= $ok === false ? 'is-warn' : '' ?>">
-                                            <?= $ok === null ? 'Pending' : ($ok ? 'Pass' : 'Review') ?>
-                                        </div>
-                                    </div>
+                                    <tr>
+                                        <td><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></td>
+                                        <td class="is-right">
+                                            <?php if ($ok === null): ?>
+                                                <span class="bo-control-state is-pending">Pending</span>
+                                            <?php elseif ($ok): ?>
+                                                <span class="bo-control-state is-pass">Pass</span>
+                                            <?php else: ?>
+                                                <span class="bo-control-state is-review">Review</span>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
                                 <?php endforeach; ?>
-                            </div>
-                        </div>
+                                </tbody>
+                            </table>
+                        </section>
 
                         <?php if (!empty($selected['wallet_withdrawal_bank_decision_reference'])): ?>
-                            <div class="ops-section">
-                                <div class="ops-section-title">Bank Decision</div>
-                                <div class="ops-info-grid">
-                                    <div class="ops-info">
-                                        <div class="ops-info-label">Authorization Reference</div>
-                                        <div class="ops-info-value"><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_decision_reference'], ENT_QUOTES, 'UTF-8') ?></div>
-                                    </div>
-                                    <div class="ops-info">
-                                        <div class="ops-info-label">Decision Time</div>
-                                        <div class="ops-info-value"><?= htmlspecialchars(bankOpsMyt((string) $selected['wallet_withdrawal_bank_decided_at']), ENT_QUOTES, 'UTF-8') ?> MYT</div>
-                                    </div>
-                                </div>
+                            <section class="bo-detail-section">
+                                <h3>Bank decision</h3>
+                                <dl class="bo-detail-grid">
+                                    <div><dt>Authorization reference</dt><dd class="bo-mono"><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_decision_reference'], ENT_QUOTES, 'UTF-8') ?></dd></div>
+                                    <div><dt>Decision time</dt><dd><?= htmlspecialchars(bankOpsMyt((string) $selected['wallet_withdrawal_bank_decided_at']), ENT_QUOTES, 'UTF-8') ?> MYT</dd></div>
+                                </dl>
                                 <?php if (!empty($selected['wallet_withdrawal_bank_decision_note'])): ?>
-                                    <div class="ops-info" style="margin-top:8px">
-                                        <div class="ops-info-label">Decision Note</div>
-                                        <div class="ops-info-value"><?= nl2br(htmlspecialchars((string) $selected['wallet_withdrawal_bank_decision_note'], ENT_QUOTES, 'UTF-8')) ?></div>
-                                    </div>
+                                    <div class="bo-note"><strong>Decision note</strong><p><?= nl2br(htmlspecialchars((string) $selected['wallet_withdrawal_bank_decision_note'], ENT_QUOTES, 'UTF-8')) ?></p></div>
                                 <?php endif; ?>
-                            </div>
+                            </section>
                         <?php endif; ?>
 
                         <?php if (!empty($selected['wallet_withdrawal_transfer_reference'])): ?>
-                            <div class="ops-section">
-                                <div class="ops-section-title">Final Settlement</div>
-                                <div class="ops-info-grid">
-                                    <div class="ops-info">
-                                        <div class="ops-info-label">Settlement Reference</div>
-                                        <div class="ops-info-value"><?= htmlspecialchars((string) $selected['wallet_withdrawal_transfer_reference'], ENT_QUOTES, 'UTF-8') ?></div>
-                                    </div>
-                                    <div class="ops-info">
-                                        <div class="ops-info-label">Settled At</div>
-                                        <div class="ops-info-value"><?= htmlspecialchars(bankOpsMyt((string) ($selected['wallet_withdrawal_bank_settled_at'] ?? '')), ENT_QUOTES, 'UTF-8') ?> MYT</div>
-                                    </div>
-                                </div>
-                            </div>
+                            <section class="bo-detail-section">
+                                <h3>Settlement result</h3>
+                                <dl class="bo-detail-grid">
+                                    <div><dt>Settlement reference</dt><dd class="bo-mono"><?= htmlspecialchars((string) $selected['wallet_withdrawal_transfer_reference'], ENT_QUOTES, 'UTF-8') ?></dd></div>
+                                    <div><dt>Settled at</dt><dd><?= htmlspecialchars(bankOpsMyt((string) ($selected['wallet_withdrawal_bank_settled_at'] ?? '')), ENT_QUOTES, 'UTF-8') ?> MYT</dd></div>
+                                </dl>
+                            </section>
                         <?php endif; ?>
 
-                        <div class="ops-section">
-                            <div class="ops-section-title">Operational Action</div>
-
+                        <section class="bo-detail-section bo-action-section">
+                            <h3>Available action</h3>
                             <?php if ($selectedStageKey === 'pending'): ?>
-                                <div class="ops-action-panel is-blue">
-                                    <div class="ops-action-title">Independent Verification Decision</div>
-                                    <p class="ops-action-copy">
-                                        Accepting releases this instruction to the bank settlement queue. Rejecting immediately synchronizes the merchant withdrawal to Failed and releases the reserved wallet amount in the same transaction.
-                                    </p>
-                                    <div class="ops-action-buttons">
-                                        <button
-                                            class="ops-btn ops-btn-success"
-                                            type="button"
-                                            onclick="openActionModal('approve', <?= $selectedWithdrawalId ?>)"
-                                        >Accept for Settlement</button>
-                                        <button
-                                            class="ops-btn ops-btn-danger"
-                                            type="button"
-                                            onclick="openActionModal('reject', <?= $selectedWithdrawalId ?>)"
-                                        >Reject Instruction</button>
-                                    </div>
+                                <p>Complete the independent beneficiary review before accepting or rejecting this instruction.</p>
+                                <div class="bo-action-row">
+                                    <button class="ops-btn ops-btn-success" type="button" onclick="openActionModal('approve', <?= $selectedWithdrawalId ?>)">Accept for settlement</button>
+                                    <button class="ops-btn ops-btn-danger" type="button" onclick="openActionModal('reject', <?= $selectedWithdrawalId ?>)">Reject instruction</button>
                                 </div>
                             <?php elseif ($selectedStageKey === 'accepted'): ?>
-                                <div class="ops-action-panel is-blue">
-                                    <div class="ops-action-title">Settlement Ready</div>
-                                    <p class="ops-action-copy">
-                                        Verification has passed. Starting settlement moves the instruction into processing while the MangaVault amount remains reserved.
-                                    </p>
-                                    <div class="ops-action-buttons">
-                                        <button
-                                            class="ops-btn ops-btn-primary"
-                                            type="button"
-                                            onclick="openActionModal('start_settlement', <?= $selectedWithdrawalId ?>)"
-                                        >Start Settlement</button>
-                                    </div>
-                                </div>
+                                <p>Verification is complete. Move the instruction to settlement processing when ready.</p>
+                                <div class="bo-action-row"><button class="ops-btn ops-btn-primary" type="button" onclick="openActionModal('start_settlement', <?= $selectedWithdrawalId ?>)">Start settlement</button></div>
                             <?php elseif ($selectedStageKey === 'processing'): ?>
-                                <div class="ops-action-panel is-green">
-                                    <div class="ops-action-title">Settlement Processing</div>
-                                    <p class="ops-action-copy">
-                                        Confirm settlement only after the simulated payment rail has completed. The system will generate the final settlement reference and atomically post the wallet debit. If settlement fails, reserved funds are automatically released.
-                                    </p>
-                                    <div class="ops-action-buttons">
-                                        <button
-                                            class="ops-btn ops-btn-success"
-                                            type="button"
-                                            onclick="openActionModal('settle', <?= $selectedWithdrawalId ?>)"
-                                        >Confirm Settled</button>
-                                        <button
-                                            class="ops-btn ops-btn-warning"
-                                            type="button"
-                                            onclick="openActionModal('fail_settlement', <?= $selectedWithdrawalId ?>)"
-                                        >Settlement Failed</button>
-                                    </div>
+                                <p>Post the final result only after the simulated settlement rail has completed.</p>
+                                <div class="bo-action-row">
+                                    <button class="ops-btn ops-btn-success" type="button" onclick="openActionModal('settle', <?= $selectedWithdrawalId ?>)">Confirm settled</button>
+                                    <button class="ops-btn ops-btn-warning" type="button" onclick="openActionModal('fail_settlement', <?= $selectedWithdrawalId ?>)">Mark failed</button>
                                 </div>
                             <?php elseif ($selectedStageKey === 'exception'): ?>
-                                <div class="ops-action-panel is-violet">
-                                    <div class="ops-action-title">Historical Reconciliation Exception</div>
-                                    <p class="ops-action-copy">
-                                        This rejected instruction was created before automatic bank-to-wallet synchronization. Reconcile it once to release the reserved amount and change merchant withdrawal status from Approved to Failed.
-                                    </p>
-                                    <div class="ops-action-buttons">
-                                        <button
-                                            class="ops-btn ops-btn-dark"
-                                            type="button"
-                                            onclick="openActionModal('reconcile_rejection', <?= $selectedWithdrawalId ?>)"
-                                        >Reconcile & Release</button>
-                                    </div>
-                                </div>
+                                <p>This historical bank rejection has not yet released the merchant-side reserve.</p>
+                                <div class="bo-action-row"><button class="ops-btn ops-btn-dark" type="button" onclick="openActionModal('reconcile_rejection', <?= $selectedWithdrawalId ?>)">Reconcile and release</button></div>
                             <?php elseif ($selectedStageKey === 'settled'): ?>
-                                <div class="ops-action-panel is-green">
-                                    <div class="ops-action-title">Settlement Finalized</div>
-                                    <p class="ops-action-copy">
-                                        This instruction is read-only. The bank settlement and MangaVault wallet debit are both final and linked by the settlement reference and ledger transaction.
-                                    </p>
-                                </div>
+                                <p class="bo-final-state">Final. Settlement and wallet debit are complete.</p>
                             <?php elseif ($selectedStageKey === 'rejected'): ?>
-                                <div class="ops-action-panel is-red">
-                                    <div class="ops-action-title">Rejected · Funds Released</div>
-                                    <p class="ops-action-copy">
-                                        Verification was declined and the wallet reserve was automatically released. No merchant administrator follow-up is required.
-                                    </p>
-                                </div>
+                                <p class="bo-final-state">Final. Bank review rejected the instruction and reserved funds were released.</p>
                             <?php elseif ($selectedStageKey === 'failed'): ?>
-                                <div class="ops-action-panel is-orange">
-                                    <div class="ops-action-title">Settlement Failed · Funds Released</div>
-                                    <p class="ops-action-copy">
-                                        Verification passed, but settlement did not complete. The wallet reserve was released automatically and the record is final.
-                                    </p>
-                                </div>
+                                <p class="bo-final-state">Final. Settlement failed and reserved funds were released.</p>
                             <?php endif; ?>
-                        </div>
+                        </section>
 
-                        <div class="ops-section">
-                            <div class="ops-section-title">Operator Audit Trail</div>
+                        <section class="bo-detail-section">
+                            <h3>Operator audit</h3>
                             <?php if ($auditTrail === []): ?>
-                                <div class="ops-info-note">No operator audit events have been recorded yet.</div>
+                                <div class="bo-muted">No operator events recorded.</div>
                             <?php else: ?>
-                                <div class="ops-audit">
+                                <table class="bo-audit-table">
+                                    <thead><tr><th>Time</th><th>Operator</th><th>Event</th></tr></thead>
+                                    <tbody>
                                     <?php foreach ($auditTrail as $audit): ?>
-                                        <div class="ops-audit-item">
-                                            <div class="ops-audit-dot"></div>
-                                            <div>
-                                                <div class="ops-audit-title"><?= htmlspecialchars(ucwords(str_replace('_', ' ', (string) $audit['bank_gateway_log_action'])), ENT_QUOTES, 'UTF-8') ?></div>
-                                                <div class="ops-audit-copy"><?= htmlspecialchars((string) $audit['bank_gateway_log_details'], ENT_QUOTES, 'UTF-8') ?></div>
-                                                <div class="ops-audit-meta">
-                                                    <?= htmlspecialchars((string) $audit['bank_gateway_operator_display_name'], ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars(bankOpsMyt((string) $audit['bank_gateway_log_created_at']), ENT_QUOTES, 'UTF-8') ?> MYT
-                                                </div>
-                                            </div>
-                                        </div>
+                                        <tr>
+                                            <td><?= htmlspecialchars(bankOpsMyt((string) $audit['bank_gateway_log_created_at'], 'd M H:i:s'), ENT_QUOTES, 'UTF-8') ?></td>
+                                            <td><?= htmlspecialchars((string) $audit['bank_gateway_operator_display_name'], ENT_QUOTES, 'UTF-8') ?></td>
+                                            <td><strong><?= htmlspecialchars(ucwords(str_replace('_', ' ', (string) $audit['bank_gateway_log_action'])), ENT_QUOTES, 'UTF-8') ?></strong><span><?= htmlspecialchars((string) $audit['bank_gateway_log_details'], ENT_QUOTES, 'UTF-8') ?></span></td>
+                                        </tr>
                                     <?php endforeach; ?>
-                                </div>
+                                    </tbody>
+                                </table>
                             <?php endif; ?>
-                        </div>
+                        </section>
                     </div>
                 <?php endif; ?>
             </aside>
         </div>
     </main>
 </div>
+
 
 <div id="actionModal" class="ops-modal" role="dialog" aria-modal="true" aria-labelledby="actionModalTitle">
     <div class="ops-modal-card">
