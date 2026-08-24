@@ -8,16 +8,13 @@ require_once __DIR__ . '/../includes/wallet_withdrawal_helper.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 
 $withdrawalId = filter_input(
     INPUT_GET,
     'id',
     FILTER_VALIDATE_INT,
-    [
-        'options' => [
-            'min_range' => 1,
-        ],
-    ]
+    ['options' => ['min_range' => 1]]
 );
 
 if ($withdrawalId === false || $withdrawalId === null) {
@@ -34,47 +31,53 @@ try {
         $pdo,
         (int) $withdrawalId
     );
+
     $bankStatus = (string) (
-        $request['wallet_withdrawal_bank_status'] ??
-        'not_submitted'
+        $request['wallet_withdrawal_bank_status'] ?? 'not_submitted'
+    );
+    $settlementStatus = (string) (
+        $request['wallet_withdrawal_bank_settlement_status'] ?? 'not_required'
+    );
+    $withdrawalStatus = (string) (
+        $request['wallet_withdrawal_status'] ?? ''
     );
 
-    echo json_encode(
-        [
-            'ok' => true,
-            'withdrawal_id' => (int) $withdrawalId,
-            'withdrawal_status' => (string) (
-                $request['wallet_withdrawal_status'] ?? ''
-            ),
-            'bank_status' => $bankStatus,
-            'bank_reference' => (string) (
-                $request[
-                    'wallet_withdrawal_bank_decision_reference'
-                ] ?? ''
-            ),
-            'bank_decided_at_myt' =>
-                walletWithdrawalMalaysiaDateTime(
-                    (string) (
-                        $request[
-                            'wallet_withdrawal_bank_decided_at'
-                        ] ?? ''
-                    ),
-                    'd M Y, h:i A',
-                    ''
-                ),
-            'proof_url' => $bankStatus === 'approved'
-                ? 'wallet_withdrawal_bank_confirmation.php?' .
-                    http_build_query([
-                        'id' => (int) $withdrawalId,
-                        'download' => 1,
-                    ])
-                : '',
-        ],
-        JSON_UNESCAPED_SLASHES
-    );
+    echo json_encode([
+        'ok' => true,
+        'withdrawal_id' => (int) $withdrawalId,
+        'withdrawal_status' => $withdrawalStatus,
+        'bank_status' => $bankStatus,
+        'settlement_status' => $settlementStatus,
+        'bank_reference' => (string) (
+            $request['wallet_withdrawal_bank_decision_reference'] ?? ''
+        ),
+        'settlement_reference' => (string) (
+            $request['wallet_withdrawal_transfer_reference'] ?? ''
+        ),
+        'bank_decided_at_myt' => walletWithdrawalMalaysiaDateTime(
+            (string) ($request['wallet_withdrawal_bank_decided_at'] ?? ''),
+            'd M Y, h:i A',
+            ''
+        ),
+        'settlement_started_at_myt' => walletWithdrawalMalaysiaDateTime(
+            (string) ($request['wallet_withdrawal_bank_settlement_started_at'] ?? ''),
+            'd M Y, h:i A',
+            ''
+        ),
+        'settled_at_myt' => walletWithdrawalMalaysiaDateTime(
+            (string) ($request['wallet_withdrawal_bank_settled_at'] ?? ''),
+            'd M Y, h:i A',
+            ''
+        ),
+        'is_final' => in_array(
+            $withdrawalStatus,
+            ['completed', 'failed', 'rejected'],
+            true
+        ),
+    ], JSON_UNESCAPED_SLASHES);
 } catch (Throwable $exception) {
     app_error_log(
-        'Withdrawal bank status check failed: ' .
+        'Withdrawal bank lifecycle status check failed: ' .
         $exception->getMessage()
     );
 

@@ -5,1386 +5,1167 @@ require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/money_helper.php';
 require_once __DIR__ . '/../includes/notifications.php';
-require_once __DIR__ .
-    '/../includes/bank_gateway_helper.php';
+require_once __DIR__ . '/../includes/bank_gateway_helper.php';
 
 requireBankOperator();
 
-$bank_code = currentBankOperatorCode();
-$bank_name = (string) (
-    $_SESSION['bank_operator_bank_name'] ??
-    $bank_code
-);
+$bankCode = currentBankOperatorCode();
+$bankName = trim((string) (
+    $_SESSION['bank_operator_bank_name'] ?? $bankCode
+));
+$operatorName = currentBankOperatorName();
 $error = '';
+
+try {
+    assertBankGatewayEnterpriseSchema($pdo);
+} catch (BankGatewayException $e) {
+    http_response_code(500);
+    exit(htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'));
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
-    $withdrawal_id = filter_input(
+    $withdrawalId = filter_input(
         INPUT_POST,
         'withdrawal_id',
         FILTER_VALIDATE_INT,
-        [
-            'options' => [
-                'min_range' => 1,
-            ],
-        ]
+        ['options' => ['min_range' => 1]]
     );
     $action = $_POST['action'] ?? null;
+    $allowedActions = [
+        'approve',
+        'reject',
+        'start_settlement',
+        'settle',
+        'fail_settlement',
+        'reconcile_rejection',
+    ];
 
     if (
-        $withdrawal_id === false ||
-        $withdrawal_id === null ||
+        $withdrawalId === false ||
+        $withdrawalId === null ||
         !is_string($action) ||
-        !in_array(
-            $action,
-            [
-                'approve',
-                'reject',
-            ],
-            true
-        )
+        !in_array($action, $allowedActions, true)
     ) {
-        $error =
-            'Invalid bank verification action.';
-    } elseif (
-        $action === 'approve' &&
-        ($_POST['verification_ack'] ?? '') !== '1'
-    ) {
-        $error =
-            'Confirm that the destination account and transfer instruction were verified.';
+        $error = 'Invalid institution operations action.';
     } else {
         try {
-            $result = decideBankGatewayWithdrawal(
-                $pdo,
-                (int) $withdrawal_id,
-                currentBankOperatorId(),
-                $bank_code,
-                $action,
-                $_POST[
-                    'authorization_reference'
-                ] ?? '',
-                $_POST['decision_note'] ?? '',
-                $_POST['current_password'] ?? null
-            );
+            $requestResult = null;
+            $nextQueue = 'all';
+            $notificationTitle = '';
+            $notificationMessage = '';
+
+            if ($action === 'approve') {
+                if (($_POST['verification_ack'] ?? '') !== '1') {
+                    throw new BankGatewayException(
+                        'Confirm the beneficiary and instruction verification before accepting this instruction.'
+                    );
+                }
+
+                $requestResult = decideBankGatewayWithdrawal(
+                    $pdo,
+                    (int) $withdrawalId,
+                    currentBankOperatorId(),
+                    $bankCode,
+                    'approve',
+                    '',
+                    $_POST['decision_note'] ?? '',
+                    $_POST['current_password'] ?? null
+                );
+                $nextQueue = 'accepted';
+                $notificationTitle = 'Bank Verification Accepted';
+                $notificationMessage =
+                    'Your destination bank accepted withdrawal #%s for settlement. The funds remain reserved while settlement is processed.';
+            } elseif ($action === 'reject') {
+                $requestResult = decideBankGatewayWithdrawal(
+                    $pdo,
+                    (int) $withdrawalId,
+                    currentBankOperatorId(),
+                    $bankCode,
+                    'reject',
+                    '',
+                    $_POST['decision_note'] ?? '',
+                    $_POST['current_password'] ?? null
+                );
+                $nextQueue = 'rejected';
+                $notificationTitle = 'Bank Verification Rejected';
+                $notificationMessage =
+                    'Your destination bank rejected withdrawal #%s. The reserved amount was automatically released back to your MangaVault Wallet.';
+            } elseif ($action === 'start_settlement') {
+                $requestResult = startBankGatewaySettlement(
+                    $pdo,
+                    (int) $withdrawalId,
+                    currentBankOperatorId(),
+                    $bankCode,
+                    $_POST['current_password'] ?? null,
+                    $_POST['settlement_note'] ?? ''
+                );
+                $nextQueue = 'processing';
+                $notificationTitle = 'Bank Settlement Processing';
+                $notificationMessage =
+                    'Settlement processing has started for withdrawal #%s. The reserved amount remains locked until settlement finishes.';
+            } elseif ($action === 'settle') {
+                if (($_POST['settlement_ack'] ?? '') !== '1') {
+                    throw new BankGatewayException(
+                        'Confirm that settlement is complete before posting the final debit.'
+                    );
+                }
+
+                $requestResult = settleBankGatewayWithdrawal(
+                    $pdo,
+                    (int) $withdrawalId,
+                    currentBankOperatorId(),
+                    $bankCode,
+                    $_POST['current_password'] ?? null,
+                    $_POST['settlement_note'] ?? ''
+                );
+                $nextQueue = 'settled';
+                $notificationTitle = 'Bank Transfer Settled';
+                $notificationMessage =
+                    'Withdrawal #%s has been settled successfully. Settlement reference: ' .
+                    (string) ($requestResult['wallet_withdrawal_transfer_reference'] ?? '') .
+                    '. The reserved amount has been permanently debited.';
+            } elseif ($action === 'fail_settlement') {
+                $requestResult = failBankGatewaySettlement(
+                    $pdo,
+                    (int) $withdrawalId,
+                    currentBankOperatorId(),
+                    $bankCode,
+                    $_POST['current_password'] ?? null,
+                    $_POST['failure_reason'] ?? ''
+                );
+                $nextQueue = 'failed';
+                $notificationTitle = 'Bank Settlement Failed';
+                $notificationMessage =
+                    'Settlement failed for withdrawal #%s. The reserved amount was automatically released back to your MangaVault Wallet.';
+            } else {
+                $requestResult = reconcileRejectedBankGatewayWithdrawal(
+                    $pdo,
+                    (int) $withdrawalId,
+                    currentBankOperatorId(),
+                    $bankCode,
+                    $_POST['current_password'] ?? null
+                );
+                $nextQueue = 'rejected';
+                $notificationTitle = 'Bank Rejection Reconciled';
+                $notificationMessage =
+                    'A historical rejected bank instruction for withdrawal #%s was reconciled. The reserved amount has been released back to your MangaVault Wallet.';
+            }
+
+            if (!is_array($requestResult)) {
+                throw new BankGatewayException('Institution operation result is missing.');
+            }
 
             try {
-                $request_number = '#' . str_pad(
-                    (string) $withdrawal_id,
+                $requestNumber = str_pad(
+                    (string) $withdrawalId,
                     4,
                     '0',
                     STR_PAD_LEFT
                 );
                 $amount = moneyFormatSen(
                     moneyDecimalToSen(
-                        (string) $result[
-                            'wallet_withdrawal_amount'
-                        ]
+                        (string) $requestResult['wallet_withdrawal_amount']
                     )
                 );
+                $message = sprintf($notificationMessage, $requestNumber) .
+                    ' Amount: RM ' . $amount . '.';
 
-                if ($action === 'approve') {
-                    sendNotification(
-                        $pdo,
-                        (int) $result[
-                            'wallet_withdrawal_user_id'
-                        ],
-                        'Bank Verification Approved',
-                        "The destination bank verified withdrawal $request_number for RM $amount. MangaVault administration can now perform and record the final transfer.",
-                        'system'
-                    );
-                } else {
-                    sendNotification(
-                        $pdo,
-                        (int) $result[
-                            'wallet_withdrawal_user_id'
-                        ],
-                        'Bank Verification Rejected',
-                        "The destination bank could not verify withdrawal $request_number for RM $amount. MangaVault administration will review the rejection and release the reserved funds if the transfer cannot proceed.",
-                        'system'
-                    );
-                }
+                sendNotification(
+                    $pdo,
+                    (int) $requestResult['wallet_withdrawal_user_id'],
+                    $notificationTitle,
+                    $message,
+                    'system'
+                );
             } catch (Throwable $notificationError) {
                 app_error_log(
-                    'Bank gateway notification failed: ' .
+                    'Bank settlement notification failed: ' .
                     $notificationError->getMessage()
                 );
             }
 
             redirect_to(
-                app_path('bank/dashboard.php') .
-                '?' .
-                http_build_query([
-                    'status' => $action === 'approve'
-                        ? 'approved'
-                        : 'rejected',
+                app_path('bank/dashboard.php') . '?' . http_build_query([
+                    'status' => $nextQueue,
+                    'view' => (int) $withdrawalId,
                     'result' => $action,
-                    'id' => (int) $withdrawal_id,
                 ])
             );
-        } catch (
-            BankGatewayException |
-            WalletWithdrawalException $e
-        ) {
+        } catch (BankGatewayException | WalletWithdrawalException $e) {
             $error = $e->getMessage();
         } catch (Throwable $e) {
             app_error_log(
-                'Bank gateway decision failed: ' .
-                $e->getMessage()
+                'Enterprise bank operation failed: ' . $e->getMessage()
             );
-
-            $error =
-                'Unable to process the bank verification decision.';
+            $error = 'Unable to complete the institution operation.';
         }
     }
 }
 
-$allowed_filters = [
+$allowedFilters = [
     'pending',
-    'approved',
+    'accepted',
+    'processing',
+    'settled',
     'rejected',
+    'failed',
+    'exceptions',
     'all',
 ];
-$status_filter = $_GET['status'] ?? 'pending';
+$statusFilter = $_GET['status'] ?? 'pending';
+if (!is_string($statusFilter) || !in_array($statusFilter, $allowedFilters, true)) {
+    $statusFilter = 'pending';
+}
 
-if (
-    !is_string($status_filter) ||
-    !in_array(
-        $status_filter,
-        $allowed_filters,
-        true
-    )
-) {
-    $status_filter = 'pending';
+$search = isset($_GET['q']) && is_string($_GET['q'])
+    ? trim($_GET['q'])
+    : '';
+if (strlen($search) > 100) {
+    $search = substr($search, 0, 100);
 }
 
 try {
-    $counts = getBankGatewayQueueCounts(
-        $pdo,
-        $bank_code
-    );
+    $metrics = getBankGatewayMetrics($pdo, $bankCode);
+    $counts = getBankGatewayQueueCounts($pdo, $bankCode);
     $requests = getBankGatewayQueue(
         $pdo,
-        $bank_code,
-        $status_filter
+        $bankCode,
+        $statusFilter,
+        $search,
+        120
     );
 } catch (Throwable $e) {
-    app_error_log(
-        'Bank gateway queue failed: ' .
-        $e->getMessage()
-    );
-
+    app_error_log('Bank operations queue failed: ' . $e->getMessage());
     http_response_code(500);
-    exit('Unable to load the bank verification queue.');
+    exit('Unable to load the institution operations workspace.');
 }
 
-$result = $_GET['result'] ?? '';
-$result_id = filter_input(
+$selectedId = filter_input(
     INPUT_GET,
-    'id',
-    FILTER_VALIDATE_INT
+    'view',
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
 );
+$selected = null;
+$auditTrail = [];
+
+if ($selectedId !== false && $selectedId !== null) {
+    try {
+        $selected = loadBankGatewayWithdrawal(
+            $pdo,
+            (int) $selectedId,
+            $bankCode,
+            false
+        );
+        $auditTrail = getBankGatewayAuditTrail(
+            $pdo,
+            (int) $selectedId,
+            $bankCode,
+            30
+        );
+    } catch (BankGatewayException $e) {
+        $error = $error !== '' ? $error : $e->getMessage();
+    }
+}
+
+if ($selected === null && $requests !== []) {
+    $selected = $requests[0];
+    try {
+        $auditTrail = getBankGatewayAuditTrail(
+            $pdo,
+            (int) $selected['wallet_withdrawal_id'],
+            $bankCode,
+            30
+        );
+    } catch (Throwable $e) {
+        $auditTrail = [];
+    }
+}
+
+$result = isset($_GET['result']) && is_string($_GET['result'])
+    ? $_GET['result']
+    : '';
+
+function bankOpsMyt(string $utc, string $format = 'd M Y, h:i A'): string
+{
+    return walletWithdrawalMalaysiaDateTime(
+        $utc,
+        $format,
+        'Not available'
+    );
+}
+
+function bankOpsQueueAgeLabel(mixed $minutes): string
+{
+    $minutes = max(0, (int) $minutes);
+    if ($minutes < 60) {
+        return $minutes . 'm';
+    }
+    $hours = intdiv($minutes, 60);
+    $remainder = $minutes % 60;
+    if ($hours < 24) {
+        return $hours . 'h ' . $remainder . 'm';
+    }
+    return intdiv($hours, 24) . 'd ' . ($hours % 24) . 'h';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-    <title><?= htmlspecialchars(
-        $bank_name,
-        ENT_QUOTES,
-        'UTF-8'
-    ) ?> Transfer Instruction Review</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= htmlspecialchars($bankName, ENT_QUOTES, 'UTF-8') ?> Institution Operations</title>
     <link
         rel="stylesheet"
-        href="<?= htmlspecialchars(
-            app_path('assets/css/bank_portal.css'),
-            ENT_QUOTES,
-            'UTF-8'
-        ) ?>"
+        href="<?= htmlspecialchars(app_path('assets/css/bank_portal.css'), ENT_QUOTES, 'UTF-8') ?>"
+    >
+    <link
+        rel="stylesheet"
+        href="<?= htmlspecialchars(app_path('assets/css/bank_operations.css'), ENT_QUOTES, 'UTF-8') ?>"
     >
 </head>
-<body class="bank-portal-body min-h-screen">
+<body class="bank-portal-body">
 
-    <?php require '../includes/bank_navbar.php'; ?>
+<?php require '../includes/bank_navbar.php'; ?>
 
-    <main class="mx-auto max-w-7xl px-5 py-8 md:px-8">
-        <div
-            class="mb-6 flex items-start justify-between gap-5 flex-wrap"
-        >
-            <div>
-                <div class="flex items-center gap-3 flex-wrap">
-                    <h1 class="text-2xl font-black text-slate-900">
-                        Transfer Instruction Review
-                    </h1>
-                    <span
-                        class="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-cyan-700"
-                    >
-                        <?= htmlspecialchars(
-                            $bank_name,
-                            ENT_QUOTES,
-                            'UTF-8'
-                        ) ?> only
-                    </span>
-                </div>
-                <p
-                    class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-500"
+<div class="ops-app">
+    <aside class="ops-sidebar" aria-label="Institution operations navigation">
+        <p class="ops-sidebar-kicker">Settlement Operations</p>
+        <nav class="ops-nav">
+            <?php
+            $navItems = [
+                'pending' => ['RV', 'Review Queue', $counts['pending']],
+                'accepted' => ['AC', 'Accepted', $counts['accepted']],
+                'processing' => ['ST', 'Settlement Queue', $counts['processing']],
+                'settled' => ['OK', 'Settled Records', $counts['settled']],
+                'rejected' => ['RJ', 'Rejected', $counts['rejected']],
+                'failed' => ['FL', 'Settlement Failed', $counts['failed']],
+                'exceptions' => ['EX', 'Reconciliation', $counts['exceptions']],
+                'all' => ['AR', 'All Instructions', array_sum($counts)],
+            ];
+            ?>
+            <?php foreach ($navItems as $key => $item): ?>
+                <a
+                    class="ops-nav-link <?= $statusFilter === $key ? 'is-active' : '' ?>"
+                    href="?<?= htmlspecialchars(http_build_query(['status' => $key]), ENT_QUOTES, 'UTF-8') ?>"
                 >
-                    Review merchant-authorized refund instructions assigned to
-                    this institution. Accepting an instruction releases it to
-                    merchant operations; it does not confirm that funds were sent.
-                </p>
+                    <span class="ops-nav-icon"><?= htmlspecialchars($item[0], ENT_QUOTES, 'UTF-8') ?></span>
+                    <span><?= htmlspecialchars($item[1], ENT_QUOTES, 'UTF-8') ?></span>
+                    <span class="ops-nav-count"><?= (int) $item[2] ?></span>
+                </a>
+            <?php endforeach; ?>
+        </nav>
+
+        <div class="ops-sidebar-card">
+            <div class="ops-sidebar-card-label">Institution Scope</div>
+            <div class="ops-sidebar-card-value">
+                <?= htmlspecialchars($bankName, ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars($bankCode, ENT_QUOTES, 'UTF-8') ?>
             </div>
-
-            <div
-                class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-right shadow-sm"
-            >
-                <p
-                    class="text-[10px] font-black uppercase tracking-wider text-slate-400"
-                >
-                    Malaysia Time
-                </p>
-                <p
-                    id="malaysiaClock"
-                    class="mt-1 font-mono text-sm font-black text-slate-800"
-                >
-                    Loading MYT...
-                </p>
+            <div class="ops-sidebar-card-copy">
+                This operator can only access instructions routed to this destination institution.
             </div>
         </div>
 
-        <?php if ($error !== ''): ?>
-            <div
-                class="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-            >
-                <?= htmlspecialchars(
-                    $error,
-                    ENT_QUOTES,
-                    'UTF-8'
-                ) ?>
+        <div class="ops-sidebar-card">
+            <div class="ops-sidebar-card-label">Controls</div>
+            <div class="ops-sidebar-card-value">Re-authentication enforced</div>
+            <div class="ops-sidebar-card-copy">
+                Protected account access and material settlement actions require the current operator password and are audit logged.
             </div>
-        <?php elseif (
-            in_array(
-                $result,
-                [
-                    'approve',
-                    'reject',
-                ],
-                true
-            ) &&
-            $result_id !== false &&
-            $result_id !== null
-        ): ?>
-            <div
-                class="mb-5 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
-            >
-                Withdrawal #<?= str_pad(
-                    (string) $result_id,
-                    4,
-                    '0',
-                    STR_PAD_LEFT
-                ) ?> was <?= $result === 'approve'
-                    ? 'verified and approved'
-                    : 'rejected' ?> successfully.
+        </div>
+    </aside>
+
+    <main class="ops-main">
+        <header class="ops-workspace-header">
+            <div>
+                <div class="ops-eyebrow">BankLink · Institution Settlement Console</div>
+                <h1 class="ops-title">Transfer Operations Workspace</h1>
+                <p class="ops-subtitle">
+                    Independent beneficiary verification, settlement processing, wallet-ledger synchronization and exception reconciliation for merchant-authorized refund instructions. Merchant approval does not complete a transfer; final wallet debit occurs only after institution settlement is confirmed.
+                </p>
+            </div>
+            <div class="ops-clock">
+                <div class="ops-clock-label">Malaysia Time · MYT</div>
+                <div id="malaysiaClock" class="ops-clock-value">Loading...</div>
+            </div>
+        </header>
+
+        <?php if ($error !== ''): ?>
+            <div class="ops-alert is-error">
+                <strong>Action blocked.</strong>
+                <span><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></span>
+            </div>
+        <?php elseif ($result !== ''): ?>
+            <div class="ops-alert">
+                <strong>Operation recorded.</strong>
+                <span>The institution lifecycle and MangaVault wallet state were synchronized successfully.</span>
             </div>
         <?php endif; ?>
 
-        <section
-            class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3"
-        >
-            <?php foreach ([
-                'pending' => [
-                    'Pending Review',
-                    $counts['pending'],
-                    'border-amber-200 bg-amber-50 text-amber-800',
-                    'Awaiting institution action',
-                ],
-                'approved' => [
-                    'Accepted',
-                    $counts['approved'],
-                    'border-green-200 bg-green-50 text-green-800',
-                    'Released to merchant operations',
-                ],
-                'rejected' => [
-                    'Declined',
-                    $counts['rejected'],
-                    'border-red-200 bg-red-50 text-red-800',
-                    'Requires merchant resolution',
-                ],
-            ] as $key => $card): ?>
-                <a
-                    href="?status=<?= urlencode($key) ?>"
-                    class="rounded-2xl border p-5 transition-all hover:-translate-y-0.5 hover:shadow-md <?= $card[2] ?> <?= $status_filter === $key
-                        ? 'ring-2 ring-slate-300 ring-offset-2'
-                        : '' ?>"
-                >
-                    <p
-                        class="text-xs font-black uppercase tracking-wider opacity-70"
-                    >
-                        <?= $card[0] ?>
-                    </p>
-                    <div
-                        class="mt-2 flex items-end justify-between gap-4"
-                    >
-                        <p class="text-3xl font-black">
-                            <?= (int) $card[1] ?>
-                        </p>
-                        <p class="text-xs opacity-70">
-                            <?= $card[3] ?>
-                        </p>
-                    </div>
-                </a>
-            <?php endforeach; ?>
+        <?php if ($metrics['reconciliation_exceptions'] > 0): ?>
+            <div class="ops-alert is-warning">
+                <strong>Reconciliation attention required.</strong>
+                <span>
+                    <?= (int) $metrics['reconciliation_exceptions'] ?> historical rejected instruction(s) still have merchant status Approved. Open Reconciliation and resolve them so reserved funds are released and both systems match.
+                </span>
+            </div>
+        <?php endif; ?>
+
+        <section class="ops-metrics" aria-label="Institution operations metrics">
+            <div class="ops-metric is-amber">
+                <div class="ops-metric-label">Pending Review</div>
+                <div class="ops-metric-value"><?= (int) $metrics['pending_review'] ?></div>
+                <div class="ops-metric-foot">Awaiting institution verification</div>
+            </div>
+            <div class="ops-metric is-blue">
+                <div class="ops-metric-label">Settlement Ready</div>
+                <div class="ops-metric-value"><?= (int) $metrics['ready_settlement'] ?></div>
+                <div class="ops-metric-foot">Accepted, not yet processing</div>
+            </div>
+            <div class="ops-metric is-cyan">
+                <div class="ops-metric-label">Processing</div>
+                <div class="ops-metric-value"><?= (int) $metrics['processing'] ?></div>
+                <div class="ops-metric-foot">Settlement in progress</div>
+            </div>
+            <div class="ops-metric is-green">
+                <div class="ops-metric-label">Settled Today</div>
+                <div class="ops-metric-value"><?= (int) $metrics['settled_today'] ?></div>
+                <div class="ops-metric-foot">RM <?= moneyFormatSen($metrics['settled_value_today_sen']) ?> posted today</div>
+            </div>
+            <div class="ops-metric is-red">
+                <div class="ops-metric-label">Rejected Today</div>
+                <div class="ops-metric-value"><?= (int) $metrics['rejected_today'] ?></div>
+                <div class="ops-metric-foot">Funds auto-released</div>
+            </div>
+            <div class="ops-metric is-violet">
+                <div class="ops-metric-label">SLA Exceptions</div>
+                <div class="ops-metric-value"><?= (int) $metrics['sla_exceptions'] ?></div>
+                <div class="ops-metric-foot">Pending longer than 30 minutes</div>
+            </div>
         </section>
 
-        <div
-            class="mb-6 overflow-x-auto rounded-2xl bg-white p-3 shadow-sm"
-        >
-            <div class="flex min-w-max items-center gap-2">
-                <span
-                    class="px-3 text-[10px] font-black uppercase tracking-[0.18em] text-slate-400"
-                >
-                    Work Queue
-                </span>
-                <?php foreach ([
-                    'pending' => 'Pending Review',
-                    'approved' => 'Accepted',
-                    'rejected' => 'Declined',
-                    'all' => 'All Records',
-                ] as $value => $label): ?>
-                    <a
-                        href="?status=<?= urlencode($value) ?>"
-                        class="rounded-xl px-4 py-2.5 text-sm font-bold transition-colors <?= $status_filter === $value
-                            ? 'bg-[#12233f] text-white'
-                            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800' ?>"
-                    >
-                        <?= $label ?>
-                    </a>
-                <?php endforeach; ?>
-            </div>
-        </div>
+        <div class="ops-grid">
+            <section class="ops-card">
+                <div class="ops-card-header">
+                    <div>
+                        <h2 class="ops-card-title">Institution Work Queue</h2>
+                        <div class="ops-card-caption">
+                            <?= htmlspecialchars(ucwords(str_replace('_', ' ', $statusFilter)), ENT_QUOTES, 'UTF-8') ?> · <?= count($requests) ?> record(s)
+                        </div>
+                    </div>
+                    <form method="GET" class="ops-toolbar">
+                        <input type="hidden" name="status" value="<?= htmlspecialchars($statusFilter, ENT_QUOTES, 'UTF-8') ?>">
+                        <input
+                            class="ops-search"
+                            type="search"
+                            name="q"
+                            maxlength="100"
+                            value="<?= htmlspecialchars($search, ENT_QUOTES, 'UTF-8') ?>"
+                            placeholder="Search instruction, customer, ref, last 4..."
+                            aria-label="Search institution work queue"
+                        >
+                        <button class="ops-btn ops-btn-dark" type="submit">Search</button>
+                        <?php if ($search !== ''): ?>
+                            <a class="ops-btn ops-btn-ghost" href="?status=<?= urlencode($statusFilter) ?>">Clear</a>
+                        <?php endif; ?>
+                    </form>
+                </div>
 
-        <?php if ($requests === []): ?>
-            <section
-                class="rounded-3xl bg-white px-6 py-16 text-center shadow-sm"
-            >
-                <div class="text-5xl" aria-hidden="true">🏦</div>
-                <p class="mt-4 font-black text-slate-700">
-                    No transfer instructions in this queue
-                </p>
-                <p class="mt-1 text-sm text-slate-400">
-                    New instructions appear after merchant administrator approval.
-                </p>
+                <?php if ($requests === []): ?>
+                    <div class="ops-empty">
+                        <div class="ops-empty-mark">BL</div>
+                        <div class="ops-empty-title">No instructions in this queue</div>
+                        <div class="ops-empty-copy">New merchant-authorized instructions will appear here automatically.</div>
+                    </div>
+                <?php else: ?>
+                    <div class="ops-table-wrap">
+                        <table class="ops-table">
+                            <thead>
+                                <tr>
+                                    <th>Instruction</th>
+                                    <th>Beneficiary</th>
+                                    <th>Destination</th>
+                                    <th>Amount</th>
+                                    <th>Queue Age</th>
+                                    <th>Stage</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($requests as $request): ?>
+                                <?php
+                                [$stageKey, $stageLabel] = bankGatewayInstructionStage($request);
+                                $rowId = (int) $request['wallet_withdrawal_id'];
+                                $customerName = trim(
+                                    (string) $request['user_first_name'] . ' ' .
+                                    (string) $request['user_last_name']
+                                );
+                                $ageMinutes = (int) ($request['queue_age_minutes'] ?? 0);
+                                $isSlaBreach =
+                                    $stageKey === 'pending' && $ageMinutes > 30;
+                                ?>
+                                <tr class="<?= $selected !== null && (int) $selected['wallet_withdrawal_id'] === $rowId ? 'is-selected' : '' ?>">
+                                    <td>
+                                        <span class="ops-instruction">#<?= str_pad((string) $rowId, 4, '0', STR_PAD_LEFT) ?></span>
+                                        <span class="ops-subtext">
+                                            <?= htmlspecialchars(substr((string) $request['wallet_withdrawal_bank_submission_id'], 0, 12), ENT_QUOTES, 'UTF-8') ?>…
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <strong><?= htmlspecialchars($customerName, ENT_QUOTES, 'UTF-8') ?></strong>
+                                        <span class="ops-subtext"><?= htmlspecialchars((string) $request['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?></span>
+                                    </td>
+                                    <td>
+                                        <?= htmlspecialchars((string) $request['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?>
+                                        <span class="ops-subtext">••••<?= htmlspecialchars((string) $request['wallet_withdrawal_account_number_last4'], ENT_QUOTES, 'UTF-8') ?></span>
+                                    </td>
+                                    <td class="ops-money">
+                                        RM <?= moneyFormatSen(moneyDecimalToSen((string) $request['wallet_withdrawal_amount'])) ?>
+                                    </td>
+                                    <td>
+                                        <span class="ops-sla <?= $isSlaBreach ? 'is-breach' : '' ?>">
+                                            <?= htmlspecialchars(bankOpsQueueAgeLabel($ageMinutes), ENT_QUOTES, 'UTF-8') ?>
+                                            <?= $isSlaBreach ? ' · SLA' : '' ?>
+                                        </span>
+                                    </td>
+                                    <td><span class="ops-badge <?= htmlspecialchars($stageKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($stageLabel, ENT_QUOTES, 'UTF-8') ?></span></td>
+                                    <td>
+                                        <a
+                                            class="ops-btn ops-btn-ghost"
+                                            href="?<?= htmlspecialchars(http_build_query([
+                                                'status' => $statusFilter,
+                                                'q' => $search,
+                                                'view' => $rowId,
+                                            ]), ENT_QUOTES, 'UTF-8') ?>"
+                                        >Open</a>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
             </section>
-        <?php else: ?>
-            <div class="space-y-5">
-                <?php foreach ($requests as $request): ?>
+
+            <aside class="ops-card ops-detail" aria-label="Selected instruction detail">
+                <?php if ($selected === null): ?>
+                    <div class="ops-empty">
+                        <div class="ops-empty-mark">ID</div>
+                        <div class="ops-empty-title">Select an instruction</div>
+                        <div class="ops-empty-copy">Open a queue record to view verification, settlement and audit details.</div>
+                    </div>
+                <?php else: ?>
                     <?php
-                    $withdrawal_id = (int) $request[
-                        'wallet_withdrawal_id'
-                    ];
-                    $bank_status = (string) $request[
-                        'wallet_withdrawal_bank_status'
-                    ];
-                    $customer_name = trim(
-                        (string) $request[
-                            'user_first_name'
-                        ] .
-                        ' ' .
-                        (string) $request[
-                            'user_last_name'
-                        ]
+                    [$selectedStageKey, $selectedStageLabel, $selectedPhase] =
+                        bankGatewayInstructionStage($selected);
+                    $selectedWithdrawalId = (int) $selected['wallet_withdrawal_id'];
+                    $selectedCustomerName = trim(
+                        (string) $selected['user_first_name'] . ' ' .
+                        (string) $selected['user_last_name']
+                    );
+                    $isMerchantAuthorized = in_array(
+                        (string) $selected['wallet_withdrawal_status'],
+                        ['approved', 'completed', 'failed'],
+                        true
+                    ) && !empty($selected['wallet_withdrawal_reviewed_at']);
+                    $hasSubmission = preg_match(
+                        '/\A[a-f0-9]{32}\z/i',
+                        (string) ($selected['wallet_withdrawal_bank_submission_id'] ?? '')
+                    ) === 1;
+                    $encryptedPayloadValid = str_starts_with(
+                        (string) ($selected['wallet_withdrawal_account_number_encrypted'] ?? ''),
+                        'v1:'
+                    );
+                    $hasVerificationHash = preg_match(
+                        '/\A[a-f0-9]{64}\z/i',
+                        (string) ($selected['wallet_withdrawal_bank_verification_hash'] ?? '')
+                    ) === 1;
+                    $hasSettlementHash = preg_match(
+                        '/\A[a-f0-9]{64}\z/i',
+                        (string) ($selected['wallet_withdrawal_bank_settlement_hash'] ?? '')
+                    ) === 1;
+                    $stepReviewDone = $selected['wallet_withdrawal_bank_status'] !== 'pending';
+                    $stepSettlementStarted = in_array(
+                        (string) ($selected['wallet_withdrawal_bank_settlement_status'] ?? ''),
+                        ['processing', 'settled', 'failed'],
+                        true
+                    );
+                    $stepFinalDone = in_array(
+                        (string) $selected['wallet_withdrawal_status'],
+                        ['completed', 'failed'],
+                        true
                     );
                     ?>
-                    <section
-                        class="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-slate-200"
-                    >
-                        <div
-                            class="flex items-start justify-between gap-5 border-b border-slate-100 px-6 py-5 flex-wrap"
-                        >
+                    <div class="ops-detail-head">
+                        <div class="ops-detail-head-top">
                             <div>
-                                <div
-                                    class="flex items-center gap-3 flex-wrap"
-                                >
-                                    <h2
-                                        class="text-lg font-black text-slate-900"
-                                    >
-                                        Instruction #<?= str_pad(
-                                            (string) $withdrawal_id,
-                                            4,
-                                            '0',
-                                            STR_PAD_LEFT
-                                        ) ?>
-                                    </h2>
-                                    <span
-                                        class="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-wider <?= $bank_status === 'pending'
-                                            ? 'bg-amber-100 text-amber-700'
-                                            : (
-                                                $bank_status === 'approved'
-                                                    ? 'bg-green-100 text-green-700'
-                                                    : 'bg-red-100 text-red-700'
-                                            ) ?>"
-                                    >
-                                        <?= match ($bank_status) {
-                                            'pending' => 'Pending Review',
-                                            'approved' => 'Accepted',
-                                            default => 'Declined',
-                                        } ?>
-                                    </span>
-                                </div>
-                                <p
-                                    class="mt-1 text-xs text-slate-400"
-                                >
-                                    Instruction reference
-                                    <span
-                                        class="font-mono font-semibold text-slate-500"
-                                    >
-                                        <?= htmlspecialchars(
-                                            (string) $request[
-                                                'wallet_withdrawal_bank_submission_id'
-                                            ],
-                                            ENT_QUOTES,
-                                            'UTF-8'
-                                        ) ?>
-                                    </span>
-                                </p>
+                                <div class="ops-detail-kicker">Instruction Detail · <?= htmlspecialchars($selectedPhase, ENT_QUOTES, 'UTF-8') ?></div>
+                                <h2 class="ops-detail-title">#<?= str_pad((string) $selectedWithdrawalId, 4, '0', STR_PAD_LEFT) ?></h2>
                             </div>
+                            <div class="ops-detail-amount">
+                                RM <?= moneyFormatSen(moneyDecimalToSen((string) $selected['wallet_withdrawal_amount'])) ?>
+                            </div>
+                        </div>
+                        <div class="ops-detail-reference">
+                            Submission <?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_submission_id'], ENT_QUOTES, 'UTF-8') ?>
+                        </div>
+                    </div>
 
-                            <p class="text-2xl font-black text-cyan-700">
-                                RM <?= moneyFormatSen(
-                                    moneyDecimalToSen(
-                                        (string) $request[
-                                            'wallet_withdrawal_amount'
-                                        ]
-                                    )
-                                ) ?>
-                            </p>
+                    <div class="ops-detail-body">
+                        <div class="ops-section">
+                            <div class="ops-section-title">
+                                <span>Lifecycle</span>
+                                <span class="ops-badge <?= htmlspecialchars($selectedStageKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($selectedStageLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                            </div>
+                            <div class="ops-stepper">
+                                <div class="ops-step is-done">
+                                    <div class="ops-step-label">1 · Merchant</div>
+                                    <div class="ops-step-value">Authorized</div>
+                                </div>
+                                <div class="ops-step <?= $stepReviewDone ? 'is-done' : 'is-current' ?>">
+                                    <div class="ops-step-label">2 · Bank</div>
+                                    <div class="ops-step-value"><?= $stepReviewDone ? 'Decision Posted' : 'Verification' ?></div>
+                                </div>
+                                <div class="ops-step <?= $stepSettlementStarted ? ($stepFinalDone ? 'is-done' : 'is-current') : ($selectedStageKey === 'accepted' ? 'is-current' : '') ?>">
+                                    <div class="ops-step-label">3 · Settlement</div>
+                                    <div class="ops-step-value"><?= htmlspecialchars(ucfirst((string) ($selected['wallet_withdrawal_bank_settlement_status'] ?? 'not_required')), ENT_QUOTES, 'UTF-8') ?></div>
+                                </div>
+                                <div class="ops-step <?= $stepFinalDone ? 'is-done' : '' ?>">
+                                    <div class="ops-step-label">4 · Ledger</div>
+                                    <div class="ops-step-value"><?= $stepFinalDone ? ucfirst((string) $selected['wallet_withdrawal_status']) : 'Reserved' ?></div>
+                                </div>
+                            </div>
                         </div>
 
-                        <div
-                            class="grid grid-cols-1 gap-6 p-6 lg:grid-cols-[1fr_0.86fr]"
-                        >
-                            <div class="space-y-4">
-                                <div
-                                    class="grid grid-cols-1 gap-4 md:grid-cols-2"
-                                >
-                                    <div
-                                        class="rounded-2xl bg-slate-50 p-4"
-                                    >
-                                        <p
-                                            class="text-[10px] font-black uppercase tracking-wider text-slate-400"
-                                        >
-                                            Customer
-                                        </p>
-                                        <p
-                                            class="mt-1 font-black text-slate-800"
-                                        >
-                                            <?= htmlspecialchars(
-                                                $customer_name,
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                        <p
-                                            class="mt-1 text-xs text-slate-400"
-                                        >
-                                            <?= htmlspecialchars(
-                                                (string) $request[
-                                                    'user_gmail'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                    </div>
-
-                                    <div
-                                        class="rounded-2xl bg-slate-50 p-4"
-                                    >
-                                        <p
-                                            class="text-[10px] font-black uppercase tracking-wider text-slate-400"
-                                        >
-                                            Account Holder
-                                        </p>
-                                        <p
-                                            class="mt-1 font-black text-slate-800"
-                                        >
-                                            <?= htmlspecialchars(
-                                                (string) $request[
-                                                    'wallet_withdrawal_account_holder'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                        <p
-                                            class="mt-1 text-xs text-slate-400"
-                                        >
-                                            Name must match bank records
-                                        </p>
-                                    </div>
+                        <div class="ops-section">
+                            <div class="ops-section-title">Beneficiary & Instruction</div>
+                            <div class="ops-info-grid">
+                                <div class="ops-info">
+                                    <div class="ops-info-label">Customer</div>
+                                    <div class="ops-info-value"><?= htmlspecialchars($selectedCustomerName, ENT_QUOTES, 'UTF-8') ?></div>
+                                    <div class="ops-info-note"><?= htmlspecialchars((string) $selected['user_gmail'], ENT_QUOTES, 'UTF-8') ?></div>
                                 </div>
-
-                                <div
-                                    class="rounded-2xl border border-cyan-100 bg-cyan-50 p-5"
-                                >
-                                    <div
-                                        class="flex items-center justify-between gap-4 flex-wrap"
-                                    >
-                                        <div>
-                                            <p
-                                                class="text-[10px] font-black uppercase tracking-wider text-cyan-600"
-                                            >
-                                                Destination Account
-                                            </p>
-                                            <p
-                                                class="mt-1 text-sm font-black text-cyan-950"
-                                            >
-                                                <?= htmlspecialchars(
-                                                    $bank_name,
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ) ?>
-                                            </p>
-                                        </div>
-
-                                        <button
-                                            type="button"
-                                            onclick="openAccountAccessModal(
-                                                <?= $withdrawal_id ?>,
-                                                '<?= htmlspecialchars(
-                                                    (string) $request[
-                                                        'wallet_withdrawal_account_number_last4'
-                                                    ],
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ) ?>'
-                                            )"
-                                            class="rounded-xl border border-cyan-200 bg-white px-4 py-2 text-xs font-bold text-cyan-700 transition-colors hover:bg-cyan-100"
-                                        >
-                                            Securely View Account
-                                        </button>
-                                    </div>
-
-                                    <p
-                                        class="mt-4 font-mono text-2xl font-black tracking-[0.18em] text-cyan-900"
-                                    >
-                                        •••• •••• <?= htmlspecialchars(
-                                            (string) $request[
-                                                'wallet_withdrawal_account_number_last4'
-                                            ],
-                                            ENT_QUOTES,
-                                            'UTF-8'
-                                        ) ?>
-                                    </p>
-
-                                    <p class="mt-2 text-[10px] text-cyan-700">
-                                        Full account details require operator
-                                        password re-authorization and are audit logged.
-                                    </p>
+                                <div class="ops-info">
+                                    <div class="ops-info-label">Account Holder</div>
+                                    <div class="ops-info-value"><?= htmlspecialchars((string) $selected['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?></div>
+                                    <div class="ops-info-note">Captured by merchant identity control</div>
                                 </div>
-
-                                <div
-                                    class="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3"
-                                >
-                                    <div
-                                        class="rounded-xl border border-slate-200 px-3 py-3"
-                                    >
-                                        <p class="text-slate-400">
-                                            Customer request
-                                        </p>
-                                        <p
-                                            class="mt-1 font-bold text-slate-700"
-                                        >
-                                            <?= htmlspecialchars(
-                                                walletWithdrawalMalaysiaDateTime(
-                                                    (string) $request[
-                                                        'wallet_withdrawal_created_at'
-                                                    ],
-                                                    'd M Y, h:i A'
-                                                ) . ' MYT',
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                    </div>
-                                    <div
-                                        class="rounded-xl border border-slate-200 px-3 py-3"
-                                    >
-                                        <p class="text-slate-400">
-                                            Admin approved
-                                        </p>
-                                        <p
-                                            class="mt-1 font-bold text-slate-700"
-                                        >
-                                            <?= htmlspecialchars(
-                                                walletWithdrawalMalaysiaDateTime(
-                                                    (string) $request[
-                                                        'wallet_withdrawal_reviewed_at'
-                                                    ],
-                                                    'd M Y, h:i A'
-                                                ) . ' MYT',
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                    </div>
-                                    <div
-                                        class="rounded-xl border border-slate-200 px-3 py-3"
-                                    >
-                                        <p class="text-slate-400">
-                                            Sent to bank
-                                        </p>
-                                        <p
-                                            class="mt-1 font-bold text-slate-700"
-                                        >
-                                            <?= htmlspecialchars(
-                                                walletWithdrawalMalaysiaDateTime(
-                                                    (string) $request[
-                                                        'wallet_withdrawal_bank_submitted_at'
-                                                    ],
-                                                    'd M Y, h:i A'
-                                                ) . ' MYT',
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                    </div>
+                                <div class="ops-info">
+                                    <div class="ops-info-label">Destination Institution</div>
+                                    <div class="ops-info-value"><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?></div>
+                                    <div class="ops-info-note"><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_code'], ENT_QUOTES, 'UTF-8') ?> routing scope</div>
+                                </div>
+                                <div class="ops-info">
+                                    <div class="ops-info-label">Protected Account</div>
+                                    <div class="ops-info-value">•••• <?= htmlspecialchars((string) $selected['wallet_withdrawal_account_number_last4'], ENT_QUOTES, 'UTF-8') ?></div>
+                                    <button
+                                        type="button"
+                                        class="ops-btn ops-btn-ghost"
+                                        style="margin-top:7px"
+                                        onclick="openAccountModal(<?= $selectedWithdrawalId ?>, '<?= htmlspecialchars((string) $selected['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?>', '<?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?>')"
+                                    >Securely View</button>
                                 </div>
                             </div>
+                        </div>
 
-                            <div>
-                                <?php if ($bank_status === 'pending'): ?>
-                                    <div
-                                        class="rounded-2xl border border-green-200 bg-green-50 p-5"
-                                    >
-                                        <p
-                                            class="text-sm font-black text-green-900"
-                                        >
-                                            Accept Transfer Instruction
-                                        </p>
-                                        <p
-                                            class="mt-1 text-xs leading-relaxed text-green-700"
-                                        >
-                                            Record that this institution accepts
-                                            the instruction for subsequent merchant processing.
-                                        </p>
-
-                                        <form
-                                            method="POST"
-                                            class="mt-4 space-y-3"
-                                            data-confirm-title="Accept Transfer Instruction"
-                                            data-confirm-message="Confirm that the destination institution accepts this instruction? Merchant operations will receive the signed institution decision record."
-                                            data-confirm-button="Accept Instruction"
-                                            onsubmit="return openBankDecisionModal(event, this)"
-                                        >
-                                            <?php csrf_field(); ?>
-                                            <input
-                                                type="hidden"
-                                                name="withdrawal_id"
-                                                value="<?= $withdrawal_id ?>"
-                                            >
-                                            <input
-                                                type="hidden"
-                                                name="action"
-                                                value="approve"
-                                            >
-                                            <input
-                                                type="text"
-                                                name="authorization_reference"
-                                                minlength="8"
-                                                maxlength="80"
-                                                pattern="[A-Za-z0-9][A-Za-z0-9._/-]{7,79}"
-                                                autocomplete="off"
-                                                required
-                                                placeholder="Institution authorization reference"
-                                                class="w-full rounded-xl border border-green-200 bg-white px-4 py-3 text-sm outline-none focus:border-green-500"
-                                            >
-                                            <textarea
-                                                name="decision_note"
-                                                maxlength="1000"
-                                                rows="3"
-                                                placeholder="Optional verification note"
-                                                class="w-full resize-none rounded-xl border border-green-200 bg-white px-4 py-3 text-sm outline-none focus:border-green-500"
-                                            ></textarea>
-                                            <label
-                                                class="flex items-start gap-3 rounded-xl border border-green-200 bg-white px-4 py-3 text-xs leading-relaxed text-green-800"
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    name="verification_ack"
-                                                    value="1"
-                                                    required
-                                                    class="mt-0.5 h-4 w-4 rounded border-green-300 text-green-600"
-                                                >
-                                                <span>
-                                                    I verified the account holder, destination account, amount, and transfer instruction against the institution record.
-                                                </span>
-                                            </label>
-                                            <input
-                                                type="password"
-                                                name="current_password"
-                                                maxlength="72"
-                                                autocomplete="current-password"
-                                                required
-                                                placeholder="Current operator password"
-                                                class="w-full rounded-xl border border-green-200 bg-white px-4 py-3 text-sm outline-none focus:border-green-500"
-                                            >
-                                            <button
-                                                type="submit"
-                                                class="w-full rounded-xl bg-green-600 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-green-700"
-                                            >
-                                                Accept Transfer Instruction
-                                            </button>
-                                        </form>
+                        <div class="ops-section">
+                            <div class="ops-section-title">Control Validation Matrix</div>
+                            <div class="ops-validation">
+                                <?php
+                                $validations = [
+                                    ['Merchant authorization recorded', $isMerchantAuthorized],
+                                    ['Unique bank submission identifier present', $hasSubmission],
+                                    ['Account data stored as encrypted payload', $encryptedPayloadValid],
+                                    ['Institution routing matches operator scope', (string) $selected['wallet_withdrawal_bank_code'] === $bankCode],
+                                    ['Bank verification integrity hash', $stepReviewDone ? $hasVerificationHash : null],
+                                    ['Settlement integrity hash', $selectedStageKey === 'settled' ? $hasSettlementHash : null],
+                                ];
+                                ?>
+                                <?php foreach ($validations as [$label, $ok]): ?>
+                                    <div class="ops-validation-row">
+                                        <div class="ops-validation-icon <?= $ok === false ? 'is-warn' : '' ?>"><?= $ok === false ? '!' : '✓' ?></div>
+                                        <div class="ops-validation-label"><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></div>
+                                        <div class="ops-validation-status <?= $ok === false ? 'is-warn' : '' ?>">
+                                            <?= $ok === null ? 'Pending' : ($ok ? 'Pass' : 'Review') ?>
+                                        </div>
                                     </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
 
-                                    <div
-                                        class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-5"
-                                    >
-                                        <p
-                                            class="text-sm font-black text-red-900"
-                                        >
-                                            Decline Transfer Instruction
-                                        </p>
-                                        <p
-                                            class="mt-1 text-xs leading-relaxed text-red-700"
-                                        >
-                                            Use when the destination account or transfer instruction cannot be accepted.
-                                        </p>
-
-                                        <form
-                                            method="POST"
-                                            class="mt-4 space-y-3"
-                                            data-confirm-title="Decline Transfer Instruction"
-                                            data-confirm-message="Decline this transfer instruction? Merchant operations will receive the reason for resolution."
-                                            data-confirm-button="Decline Instruction"
-                                            onsubmit="return openBankDecisionModal(event, this)"
-                                        >
-                                            <?php csrf_field(); ?>
-                                            <input
-                                                type="hidden"
-                                                name="withdrawal_id"
-                                                value="<?= $withdrawal_id ?>"
-                                            >
-                                            <input
-                                                type="hidden"
-                                                name="action"
-                                                value="reject"
-                                            >
-                                            <textarea
-                                                name="decision_note"
-                                                maxlength="1000"
-                                                rows="3"
-                                                required
-                                                placeholder="Required decline reason"
-                                                class="w-full resize-none rounded-xl border border-red-200 bg-white px-4 py-3 text-sm outline-none focus:border-red-500"
-                                            ></textarea>
-                                            <input
-                                                type="password"
-                                                name="current_password"
-                                                maxlength="72"
-                                                autocomplete="current-password"
-                                                required
-                                                placeholder="Current operator password"
-                                                class="w-full rounded-xl border border-red-200 bg-white px-4 py-3 text-sm outline-none focus:border-red-500"
-                                            >
-                                            <button
-                                                type="submit"
-                                                class="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-red-700"
-                                            >
-                                                Decline Transfer Instruction
-                                            </button>
-                                        </form>
+                        <?php if (!empty($selected['wallet_withdrawal_bank_decision_reference'])): ?>
+                            <div class="ops-section">
+                                <div class="ops-section-title">Bank Decision</div>
+                                <div class="ops-info-grid">
+                                    <div class="ops-info">
+                                        <div class="ops-info-label">Authorization Reference</div>
+                                        <div class="ops-info-value"><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_decision_reference'], ENT_QUOTES, 'UTF-8') ?></div>
                                     </div>
-                                <?php else: ?>
-                                    <div
-                                        class="rounded-2xl border p-5 <?= $bank_status === 'approved'
-                                            ? 'border-green-200 bg-green-50'
-                                            : 'border-red-200 bg-red-50' ?>"
-                                    >
-                                        <p
-                                            class="text-sm font-black <?= $bank_status === 'approved'
-                                                ? 'text-green-900'
-                                                : 'text-red-900' ?>"
-                                        >
-                                            Instruction <?= $bank_status === 'approved'
-                                                ? 'Accepted'
-                                                : 'Declined' ?>
-                                        </p>
-                                        <p
-                                            class="mt-2 text-xs leading-relaxed <?= $bank_status === 'approved'
-                                                ? 'text-green-700'
-                                                : 'text-red-700' ?>"
-                                        >
-                                            Decision recorded
-                                            <?= htmlspecialchars(
-                                                walletWithdrawalMalaysiaDateTime(
-                                                    (string) $request[
-                                                        'wallet_withdrawal_bank_decided_at'
-                                                    ],
-                                                    'd M Y, h:i A'
-                                                ) . ' MYT',
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                            by
-                                            <?= htmlspecialchars(
-                                                (string) $request[
-                                                    'decision_operator_name'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>.
-                                        </p>
-
-                                        <?php if (!empty(
-                                            $request[
-                                                'wallet_withdrawal_bank_decision_reference'
-                                            ]
-                                        )): ?>
-                                            <p
-                                                class="mt-3 font-mono text-xs font-black text-green-800"
-                                            >
-                                                <?= htmlspecialchars(
-                                                    (string) $request[
-                                                        'wallet_withdrawal_bank_decision_reference'
-                                                    ],
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ) ?>
-                                            </p>
-                                        <?php endif; ?>
-
-                                        <?php if (!empty(
-                                            $request[
-                                                'wallet_withdrawal_bank_decision_note'
-                                            ]
-                                        )): ?>
-                                            <p
-                                                class="mt-3 text-xs <?= $bank_status === 'approved'
-                                                    ? 'text-green-700'
-                                                    : 'text-red-700' ?>"
-                                            >
-                                                <?= htmlspecialchars(
-                                                    (string) $request[
-                                                        'wallet_withdrawal_bank_decision_note'
-                                                    ],
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ) ?>
-                                            </p>
-                                        <?php endif; ?>
-
-                                        <?php if (
-                                            $bank_status === 'approved'
-                                        ): ?>
-                                            <a
-                                                href="confirmation.php?id=<?= $withdrawal_id ?>&amp;download=1"
-                                                class="mt-4 inline-flex items-center gap-2 rounded-xl bg-green-600 px-4 py-2.5 text-xs font-black text-white transition-colors hover:bg-green-700"
-                                            >
-                                                📄 Download Institution Decision PDF
-                                            </a>
-                                        <?php endif; ?>
+                                    <div class="ops-info">
+                                        <div class="ops-info-label">Decision Time</div>
+                                        <div class="ops-info-value"><?= htmlspecialchars(bankOpsMyt((string) $selected['wallet_withdrawal_bank_decided_at']), ENT_QUOTES, 'UTF-8') ?> MYT</div>
+                                    </div>
+                                </div>
+                                <?php if (!empty($selected['wallet_withdrawal_bank_decision_note'])): ?>
+                                    <div class="ops-info" style="margin-top:8px">
+                                        <div class="ops-info-label">Decision Note</div>
+                                        <div class="ops-info-value"><?= nl2br(htmlspecialchars((string) $selected['wallet_withdrawal_bank_decision_note'], ENT_QUOTES, 'UTF-8')) ?></div>
                                     </div>
                                 <?php endif; ?>
                             </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($selected['wallet_withdrawal_transfer_reference'])): ?>
+                            <div class="ops-section">
+                                <div class="ops-section-title">Final Settlement</div>
+                                <div class="ops-info-grid">
+                                    <div class="ops-info">
+                                        <div class="ops-info-label">Settlement Reference</div>
+                                        <div class="ops-info-value"><?= htmlspecialchars((string) $selected['wallet_withdrawal_transfer_reference'], ENT_QUOTES, 'UTF-8') ?></div>
+                                    </div>
+                                    <div class="ops-info">
+                                        <div class="ops-info-label">Settled At</div>
+                                        <div class="ops-info-value"><?= htmlspecialchars(bankOpsMyt((string) ($selected['wallet_withdrawal_bank_settled_at'] ?? '')), ENT_QUOTES, 'UTF-8') ?> MYT</div>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+
+                        <div class="ops-section">
+                            <div class="ops-section-title">Operational Action</div>
+
+                            <?php if ($selectedStageKey === 'pending'): ?>
+                                <div class="ops-action-panel is-blue">
+                                    <div class="ops-action-title">Independent Verification Decision</div>
+                                    <p class="ops-action-copy">
+                                        Accepting releases this instruction to the bank settlement queue. Rejecting immediately synchronizes the merchant withdrawal to Failed and releases the reserved wallet amount in the same transaction.
+                                    </p>
+                                    <div class="ops-action-buttons">
+                                        <button
+                                            class="ops-btn ops-btn-success"
+                                            type="button"
+                                            onclick="openActionModal('approve', <?= $selectedWithdrawalId ?>)"
+                                        >Accept for Settlement</button>
+                                        <button
+                                            class="ops-btn ops-btn-danger"
+                                            type="button"
+                                            onclick="openActionModal('reject', <?= $selectedWithdrawalId ?>)"
+                                        >Reject Instruction</button>
+                                    </div>
+                                </div>
+                            <?php elseif ($selectedStageKey === 'accepted'): ?>
+                                <div class="ops-action-panel is-blue">
+                                    <div class="ops-action-title">Settlement Ready</div>
+                                    <p class="ops-action-copy">
+                                        Verification has passed. Starting settlement moves the instruction into processing while the MangaVault amount remains reserved.
+                                    </p>
+                                    <div class="ops-action-buttons">
+                                        <button
+                                            class="ops-btn ops-btn-primary"
+                                            type="button"
+                                            onclick="openActionModal('start_settlement', <?= $selectedWithdrawalId ?>)"
+                                        >Start Settlement</button>
+                                    </div>
+                                </div>
+                            <?php elseif ($selectedStageKey === 'processing'): ?>
+                                <div class="ops-action-panel is-green">
+                                    <div class="ops-action-title">Settlement Processing</div>
+                                    <p class="ops-action-copy">
+                                        Confirm settlement only after the simulated payment rail has completed. The system will generate the final settlement reference and atomically post the wallet debit. If settlement fails, reserved funds are automatically released.
+                                    </p>
+                                    <div class="ops-action-buttons">
+                                        <button
+                                            class="ops-btn ops-btn-success"
+                                            type="button"
+                                            onclick="openActionModal('settle', <?= $selectedWithdrawalId ?>)"
+                                        >Confirm Settled</button>
+                                        <button
+                                            class="ops-btn ops-btn-warning"
+                                            type="button"
+                                            onclick="openActionModal('fail_settlement', <?= $selectedWithdrawalId ?>)"
+                                        >Settlement Failed</button>
+                                    </div>
+                                </div>
+                            <?php elseif ($selectedStageKey === 'exception'): ?>
+                                <div class="ops-action-panel is-violet">
+                                    <div class="ops-action-title">Historical Reconciliation Exception</div>
+                                    <p class="ops-action-copy">
+                                        This rejected instruction was created before automatic bank-to-wallet synchronization. Reconcile it once to release the reserved amount and change merchant withdrawal status from Approved to Failed.
+                                    </p>
+                                    <div class="ops-action-buttons">
+                                        <button
+                                            class="ops-btn ops-btn-dark"
+                                            type="button"
+                                            onclick="openActionModal('reconcile_rejection', <?= $selectedWithdrawalId ?>)"
+                                        >Reconcile & Release</button>
+                                    </div>
+                                </div>
+                            <?php elseif ($selectedStageKey === 'settled'): ?>
+                                <div class="ops-action-panel is-green">
+                                    <div class="ops-action-title">Settlement Finalized</div>
+                                    <p class="ops-action-copy">
+                                        This instruction is read-only. The bank settlement and MangaVault wallet debit are both final and linked by the settlement reference and ledger transaction.
+                                    </p>
+                                </div>
+                            <?php elseif ($selectedStageKey === 'rejected'): ?>
+                                <div class="ops-action-panel is-red">
+                                    <div class="ops-action-title">Rejected · Funds Released</div>
+                                    <p class="ops-action-copy">
+                                        Verification was declined and the wallet reserve was automatically released. No merchant administrator follow-up is required.
+                                    </p>
+                                </div>
+                            <?php elseif ($selectedStageKey === 'failed'): ?>
+                                <div class="ops-action-panel is-orange">
+                                    <div class="ops-action-title">Settlement Failed · Funds Released</div>
+                                    <p class="ops-action-copy">
+                                        Verification passed, but settlement did not complete. The wallet reserve was released automatically and the record is final.
+                                    </p>
+                                </div>
+                            <?php endif; ?>
                         </div>
-                    </section>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
+
+                        <div class="ops-section">
+                            <div class="ops-section-title">Operator Audit Trail</div>
+                            <?php if ($auditTrail === []): ?>
+                                <div class="ops-info-note">No operator audit events have been recorded yet.</div>
+                            <?php else: ?>
+                                <div class="ops-audit">
+                                    <?php foreach ($auditTrail as $audit): ?>
+                                        <div class="ops-audit-item">
+                                            <div class="ops-audit-dot"></div>
+                                            <div>
+                                                <div class="ops-audit-title"><?= htmlspecialchars(ucwords(str_replace('_', ' ', (string) $audit['bank_gateway_log_action'])), ENT_QUOTES, 'UTF-8') ?></div>
+                                                <div class="ops-audit-copy"><?= htmlspecialchars((string) $audit['bank_gateway_log_details'], ENT_QUOTES, 'UTF-8') ?></div>
+                                                <div class="ops-audit-meta">
+                                                    <?= htmlspecialchars((string) $audit['bank_gateway_operator_display_name'], ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars(bankOpsMyt((string) $audit['bank_gateway_log_created_at']), ENT_QUOTES, 'UTF-8') ?> MYT
+                                                </div>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endif; ?>
+            </aside>
+        </div>
     </main>
+</div>
 
-    <input
-        type="hidden"
-        id="bankAccountCsrf"
-        value="<?= htmlspecialchars(
-            csrf_token(),
-            ENT_QUOTES,
-            'UTF-8'
-        ) ?>"
-    >
+<div id="actionModal" class="ops-modal" role="dialog" aria-modal="true" aria-labelledby="actionModalTitle">
+    <div class="ops-modal-card">
+        <div class="ops-modal-head">
+            <div class="ops-modal-kicker">Controlled Institution Action</div>
+            <h2 id="actionModalTitle" class="ops-modal-title">Confirm Operation</h2>
+        </div>
+        <form method="POST" class="ops-modal-body" id="actionForm">
+            <?php csrf_field(); ?>
+            <input type="hidden" name="withdrawal_id" id="actionWithdrawalId" value="">
+            <input type="hidden" name="action" id="actionName" value="">
 
-    <div
-        id="bankAccountAccessModal"
-        class="fixed inset-0 z-[125] hidden items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-sm"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bankAccountAccessTitle"
-    >
-        <div class="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div class="bg-gradient-to-r from-[#0d3158] to-[#071b33] px-6 py-5 text-white">
-                <p class="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">
-                    Protected customer information
-                </p>
-                <h2
-                    id="bankAccountAccessTitle"
-                    class="mt-1 text-xl font-black"
-                >
-                    Re-authorize account access
-                </h2>
-                <p class="mt-2 text-xs leading-5 text-slate-300">
-                    This access is restricted to the assigned institution and
-                    will be recorded in the audit log.
-                </p>
+            <p id="actionModalCopy" class="ops-modal-copy"></p>
+
+            <div id="decisionNoteGroup" class="ops-form-group" style="display:none">
+                <label class="ops-form-label" for="decisionNote">Decision Note</label>
+                <textarea class="ops-textarea" id="decisionNote" name="decision_note" maxlength="1000" placeholder="Record the verification rationale or rejection reason..."></textarea>
             </div>
 
-            <form id="bankAccountAccessForm" class="p-6" novalidate>
-                <input type="hidden" id="accountAccessWithdrawalId">
+            <div id="settlementNoteGroup" class="ops-form-group" style="display:none">
+                <label class="ops-form-label" for="settlementNote">Settlement Note</label>
+                <textarea class="ops-textarea" id="settlementNote" name="settlement_note" maxlength="1000" placeholder="Optional settlement operations note..."></textarea>
+            </div>
 
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div class="flex items-center justify-between gap-4">
-                        <span class="text-sm text-slate-500">Instruction</span>
-                        <strong id="accountAccessNumber" class="text-slate-900">
-                            #0000
-                        </strong>
-                    </div>
-                    <div class="mt-3 flex items-center justify-between gap-4">
-                        <span class="text-sm text-slate-500">Masked account</span>
-                        <strong
-                            id="accountAccessMasked"
-                            class="font-mono text-slate-900"
-                        >
-                            •••• •••• 0000
-                        </strong>
-                    </div>
-                </div>
+            <div id="failureReasonGroup" class="ops-form-group" style="display:none">
+                <label class="ops-form-label" for="failureReason">Failure Reason</label>
+                <textarea class="ops-textarea" id="failureReason" name="failure_reason" maxlength="1000" placeholder="Describe why settlement could not complete..."></textarea>
+            </div>
 
-                <label
-                    for="accountAccessPassword"
-                    class="mt-5 block text-xs font-black uppercase tracking-wider text-slate-500"
-                >
-                    Current Operator Password
-                </label>
+            <div class="ops-form-group">
+                <label class="ops-form-label" for="actionPassword">Current Operator Password</label>
                 <input
+                    class="ops-input"
                     type="password"
-                    id="accountAccessPassword"
+                    id="actionPassword"
+                    name="current_password"
                     maxlength="72"
                     autocomplete="current-password"
                     required
-                    class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                    placeholder="Re-authenticate this operation"
                 >
-
-                <p
-                    id="accountAccessError"
-                    class="mt-2 min-h-5 text-xs text-red-600"
-                    role="alert"
-                    aria-live="polite"
-                ></p>
-
-                <div
-                    id="accountAccessResult"
-                    class="mt-4 hidden rounded-2xl border border-blue-200 bg-blue-50 p-4"
-                    aria-live="polite"
-                >
-                    <p class="text-[10px] font-black uppercase tracking-wider text-blue-600">
-                        Authorized Account Number
-                    </p>
-                    <p
-                        id="accountAccessFullNumber"
-                        class="mt-2 break-all font-mono text-xl font-black tracking-[0.12em] text-blue-950"
-                    ></p>
-                    <p id="accountAccessHolder" class="mt-2 text-xs text-blue-700"></p>
-                </div>
-
-                <div class="mt-6 grid grid-cols-2 gap-3">
-                    <button
-                        type="button"
-                        onclick="closeAccountAccessModal()"
-                        class="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50"
-                    >
-                        Close
-                    </button>
-                    <button
-                        type="submit"
-                        id="accountAccessSubmit"
-                        class="rounded-xl bg-blue-700 px-4 py-3 text-sm font-black text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                        Authorize Access
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <div
-        id="bankDecisionModal"
-        class="fixed inset-0 z-[120] hidden items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-sm"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bankDecisionModalTitle"
-    >
-        <div
-            class="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl"
-        >
-            <div
-                class="bg-gradient-to-r from-[#12233f] to-[#08111f] px-6 py-5 text-white"
-            >
-                <div class="flex items-center gap-4">
-                    <div
-                        class="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-300/15 text-2xl"
-                        aria-hidden="true"
-                    >
-                        🏦
-                    </div>
-                    <div>
-                        <p
-                            class="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300"
-                        >
-                            Dual authorization control
-                        </p>
-                        <h2
-                            id="bankDecisionModalTitle"
-                            class="mt-1 text-xl font-black"
-                        >
-                            Confirm Decision
-                        </h2>
-                    </div>
-                </div>
             </div>
 
-            <div class="p-6">
-                <div
-                    class="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                >
-                    <div
-                        class="flex items-center justify-between gap-4"
-                    >
-                        <span class="text-sm text-slate-500">
-                            Instruction
-                        </span>
-                        <strong
-                            id="bankDecisionModalNumber"
-                            class="text-slate-900"
-                        >
-                            #0000
-                        </strong>
-                    </div>
-                </div>
+            <label id="verificationAckWrap" class="ops-check" style="display:none">
+                <input type="checkbox" name="verification_ack" value="1" id="verificationAck">
+                <span>I confirm that the destination institution, beneficiary details and merchant-authorized instruction were independently reviewed before acceptance.</span>
+            </label>
 
-                <p
-                    id="bankDecisionModalMessage"
-                    class="mt-5 text-sm leading-6 text-slate-600"
-                ></p>
+            <label id="settlementAckWrap" class="ops-check" style="display:none">
+                <input type="checkbox" name="settlement_ack" value="1" id="settlementAck">
+                <span>I confirm that the simulated settlement rail completed successfully and the final wallet debit may now be posted.</span>
+            </label>
 
-                <div class="mt-6 grid grid-cols-2 gap-3">
-                    <button
-                        type="button"
-                        onclick="closeBankDecisionModal()"
-                        class="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        type="button"
-                        id="bankDecisionModalConfirm"
-                        onclick="confirmBankDecision()"
-                        class="rounded-xl bg-[#12233f] px-4 py-3 text-sm font-black text-white hover:bg-[#08111f]"
-                    >
-                        Confirm
-                    </button>
+            <div class="ops-modal-actions">
+                <button class="ops-btn ops-btn-ghost" type="button" onclick="closeActionModal()">Cancel</button>
+                <button class="ops-btn ops-btn-dark" type="submit" id="actionSubmitButton">Confirm</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="accountModal" class="ops-modal" role="dialog" aria-modal="true" aria-labelledby="accountModalTitle">
+    <div class="ops-modal-card">
+        <div class="ops-modal-head">
+            <div class="ops-modal-kicker">Protected Data Access</div>
+            <h2 id="accountModalTitle" class="ops-modal-title">Secure Account Reveal</h2>
+        </div>
+        <div class="ops-modal-body">
+            <p class="ops-modal-copy">
+                Protected destination account data is encrypted at rest. Re-authentication is required and every reveal is written to the bank audit trail.
+            </p>
+            <div class="ops-info-grid">
+                <div class="ops-info">
+                    <div class="ops-info-label">Account Holder</div>
+                    <div class="ops-info-value" id="accountHolderLabel">—</div>
                 </div>
+                <div class="ops-info">
+                    <div class="ops-info-label">Institution</div>
+                    <div class="ops-info-value" id="accountBankLabel">—</div>
+                </div>
+            </div>
+            <div class="ops-form-group">
+                <label class="ops-form-label" for="accountPassword">Current Operator Password</label>
+                <input class="ops-input" type="password" id="accountPassword" maxlength="72" autocomplete="current-password" placeholder="Re-authenticate protected data access">
+            </div>
+            <div id="accountResult" style="display:none">
+                <div class="ops-account-number" id="accountNumberValue"></div>
+                <div class="ops-info-note">Do not copy protected account data outside the authorized workflow.</div>
+            </div>
+            <div id="accountError" class="ops-alert is-error" style="display:none;margin:12px 0 0"></div>
+            <div class="ops-modal-actions">
+                <button class="ops-btn ops-btn-ghost" type="button" onclick="closeAccountModal()">Close</button>
+                <button class="ops-btn ops-btn-primary" type="button" id="accountRevealButton" onclick="revealAccount()">Reveal Account</button>
             </div>
         </div>
     </div>
+</div>
 
-    <script>
-        let pendingBankDecisionForm = null;
+<script>
+    const accountDetailsUrl = <?= json_encode(app_path('bank/account_details.php'), JSON_UNESCAPED_SLASHES) ?>;
+    const csrfToken = <?= json_encode(csrf_token(), JSON_UNESCAPED_SLASHES) ?>;
+    let accountWithdrawalId = null;
 
-        function updateMalaysiaClock() {
-            const formatter = new Intl.DateTimeFormat(
-                'en-MY',
-                {
-                    timeZone: 'Asia/Kuala_Lumpur',
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: true,
-                }
-            );
+    const actionConfig = {
+        approve: {
+            title: 'Accept for Settlement',
+            copy: 'Accept this independently verified instruction and release it to the settlement queue. This does not yet debit the wallet.',
+            button: 'Accept Instruction',
+            buttonClass: 'ops-btn ops-btn-success',
+            decisionNote: true,
+            decisionRequired: false,
+            verificationAck: true,
+        },
+        reject: {
+            title: 'Reject & Auto-Release Funds',
+            copy: 'Reject this instruction. The merchant withdrawal will become Failed and reserved wallet funds will be released automatically in the same database transaction.',
+            button: 'Reject & Release',
+            buttonClass: 'ops-btn ops-btn-danger',
+            decisionNote: true,
+            decisionRequired: true,
+        },
+        start_settlement: {
+            title: 'Start Settlement Processing',
+            copy: 'Move this accepted instruction into settlement processing. Funds stay reserved until a final settlement result is posted.',
+            button: 'Start Settlement',
+            buttonClass: 'ops-btn ops-btn-primary',
+            settlementNote: true,
+        },
+        settle: {
+            title: 'Confirm Final Settlement',
+            copy: 'Post the final settlement. A settlement reference will be generated automatically and the reserved wallet amount will be permanently debited atomically.',
+            button: 'Confirm Settled',
+            buttonClass: 'ops-btn ops-btn-success',
+            settlementNote: true,
+            settlementAck: true,
+        },
+        fail_settlement: {
+            title: 'Mark Settlement Failed',
+            copy: 'Close this settlement as failed. The wallet reserve will be released automatically and the merchant withdrawal will become Failed.',
+            button: 'Fail & Release Funds',
+            buttonClass: 'ops-btn ops-btn-warning',
+            failureReason: true,
+        },
+        reconcile_rejection: {
+            title: 'Reconcile Historical Rejection',
+            copy: 'Resolve this historical mismatch once. The rejected bank instruction will synchronize to merchant Failed status and release its reserved wallet amount.',
+            button: 'Reconcile & Release',
+            buttonClass: 'ops-btn ops-btn-dark',
+        },
+    };
 
-            document.getElementById(
-                'malaysiaClock'
-            ).textContent =
-                formatter.format(new Date()) +
-                ' MYT';
-        }
+    function setMalaysiaClock() {
+        const formatter = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Kuala_Lumpur',
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true,
+        });
+        document.getElementById('malaysiaClock').textContent =
+            formatter.format(new Date()) + ' MYT';
+    }
 
-        function openAccountAccessModal(
-            withdrawalId,
-            last4
-        ) {
-            const modal = document.getElementById(
-                'bankAccountAccessModal'
-            );
+    setMalaysiaClock();
+    window.setInterval(setMalaysiaClock, 1000);
 
-            document.getElementById(
-                'accountAccessWithdrawalId'
-            ).value = String(withdrawalId);
-            document.getElementById(
-                'accountAccessNumber'
-            ).textContent =
-                '#' + String(withdrawalId).padStart(4, '0');
-            document.getElementById(
-                'accountAccessMasked'
-            ).textContent = '•••• •••• ' + last4;
-            document.getElementById(
-                'accountAccessPassword'
-            ).value = '';
-            document.getElementById(
-                'accountAccessError'
-            ).textContent = '';
-            document.getElementById(
-                'accountAccessResult'
-            ).classList.add('hidden');
-            document.getElementById(
-                'accountAccessSubmit'
-            ).disabled = false;
-            document.getElementById(
-                'accountAccessSubmit'
-            ).textContent = 'Authorize Access';
+    function openActionModal(action, withdrawalId) {
+        const config = actionConfig[action];
+        if (!config) return;
 
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-            document.body.classList.add('overflow-hidden');
+        document.getElementById('actionName').value = action;
+        document.getElementById('actionWithdrawalId').value = withdrawalId;
+        document.getElementById('actionModalTitle').textContent = config.title;
+        document.getElementById('actionModalCopy').textContent = config.copy;
 
-            window.requestAnimationFrame(
-                () => document.getElementById(
-                    'accountAccessPassword'
-                ).focus()
-            );
-        }
+        const submit = document.getElementById('actionSubmitButton');
+        submit.textContent = config.button;
+        submit.className = config.buttonClass;
+        submit.disabled = false;
 
-        function closeAccountAccessModal() {
-            const modal = document.getElementById(
-                'bankAccountAccessModal'
-            );
+        const decisionGroup = document.getElementById('decisionNoteGroup');
+        const decision = document.getElementById('decisionNote');
+        decisionGroup.style.display = config.decisionNote ? 'block' : 'none';
+        decision.required = Boolean(config.decisionRequired);
+        decision.value = '';
 
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-            document.body.classList.remove('overflow-hidden');
-            document.getElementById(
-                'accountAccessPassword'
-            ).value = '';
-            document.getElementById(
-                'accountAccessFullNumber'
-            ).textContent = '';
-            document.getElementById(
-                'accountAccessHolder'
-            ).textContent = '';
-            document.getElementById(
-                'accountAccessResult'
-            ).classList.add('hidden');
-        }
+        const settlementGroup = document.getElementById('settlementNoteGroup');
+        const settlement = document.getElementById('settlementNote');
+        settlementGroup.style.display = config.settlementNote ? 'block' : 'none';
+        settlement.required = false;
+        settlement.value = '';
 
-        function openBankDecisionModal(
-            event,
-            form
-        ) {
-            event.preventDefault();
+        const failureGroup = document.getElementById('failureReasonGroup');
+        const failure = document.getElementById('failureReason');
+        failureGroup.style.display = config.failureReason ? 'block' : 'none';
+        failure.required = Boolean(config.failureReason);
+        failure.value = '';
 
-            if (!form.reportValidity()) {
-                return false;
+        const verificationWrap = document.getElementById('verificationAckWrap');
+        const verificationAck = document.getElementById('verificationAck');
+        verificationWrap.style.display = config.verificationAck ? 'flex' : 'none';
+        verificationAck.required = Boolean(config.verificationAck);
+        verificationAck.checked = false;
+
+        const settlementWrap = document.getElementById('settlementAckWrap');
+        const settlementAck = document.getElementById('settlementAck');
+        settlementWrap.style.display = config.settlementAck ? 'flex' : 'none';
+        settlementAck.required = Boolean(config.settlementAck);
+        settlementAck.checked = false;
+
+        document.getElementById('actionPassword').value = '';
+        document.getElementById('actionModal').classList.add('is-open');
+        document.body.style.overflow = 'hidden';
+        window.setTimeout(() => document.getElementById('actionPassword').focus(), 50);
+    }
+
+    function closeActionModal() {
+        document.getElementById('actionModal').classList.remove('is-open');
+        document.body.style.overflow = '';
+    }
+
+    document.getElementById('actionForm').addEventListener('submit', function () {
+        const submit = document.getElementById('actionSubmitButton');
+        submit.disabled = true;
+        submit.textContent = 'Processing...';
+    });
+
+    function openAccountModal(withdrawalId, holder, bank) {
+        accountWithdrawalId = withdrawalId;
+        document.getElementById('accountHolderLabel').textContent = holder;
+        document.getElementById('accountBankLabel').textContent = bank;
+        document.getElementById('accountPassword').value = '';
+        document.getElementById('accountNumberValue').textContent = '';
+        document.getElementById('accountResult').style.display = 'none';
+        document.getElementById('accountError').style.display = 'none';
+        document.getElementById('accountRevealButton').disabled = false;
+        document.getElementById('accountRevealButton').textContent = 'Reveal Account';
+        document.getElementById('accountModal').classList.add('is-open');
+        document.body.style.overflow = 'hidden';
+        window.setTimeout(() => document.getElementById('accountPassword').focus(), 50);
+    }
+
+    function closeAccountModal() {
+        accountWithdrawalId = null;
+        document.getElementById('accountModal').classList.remove('is-open');
+        document.body.style.overflow = '';
+    }
+
+    async function revealAccount() {
+        if (!accountWithdrawalId) return;
+
+        const password = document.getElementById('accountPassword').value;
+        const button = document.getElementById('accountRevealButton');
+        const error = document.getElementById('accountError');
+        const result = document.getElementById('accountResult');
+
+        error.style.display = 'none';
+        result.style.display = 'none';
+        button.disabled = true;
+        button.textContent = 'Authorizing...';
+
+        const body = new URLSearchParams({
+            csrf_token: csrfToken,
+            withdrawal_id: String(accountWithdrawalId),
+            current_password: password,
+        });
+
+        try {
+            const response = await fetch(accountDetailsUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                cache: 'no-store',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                    'Accept': 'application/json',
+                },
+                body: body.toString(),
+            });
+            const payload = await response.json();
+
+            if (!response.ok || !payload.ok) {
+                throw new Error(payload.message || 'Protected account access failed.');
             }
 
-            pendingBankDecisionForm = form;
-
-            const withdrawal = form.querySelector(
-                '[name="withdrawal_id"]'
-            );
-
-            document.getElementById(
-                'bankDecisionModalTitle'
-            ).textContent =
-                form.dataset.confirmTitle ||
-                'Confirm Decision';
-            document.getElementById(
-                'bankDecisionModalMessage'
-            ).textContent =
-                form.dataset.confirmMessage ||
-                'Confirm this bank verification decision.';
-            document.getElementById(
-                'bankDecisionModalNumber'
-            ).textContent =
-                '#' + String(
-                    withdrawal
-                        ? withdrawal.value
-                        : '0'
-                ).padStart(4, '0');
-            document.getElementById(
-                'bankDecisionModalConfirm'
-            ).textContent =
-                form.dataset.confirmButton ||
-                'Confirm';
-
-            const modal = document.getElementById(
-                'bankDecisionModal'
-            );
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-            document.body.classList.add(
-                'overflow-hidden'
-            );
-
-            return false;
+            document.getElementById('accountNumberValue').textContent = payload.account_number;
+            result.style.display = 'block';
+            button.textContent = 'Access Logged';
+        } catch (e) {
+            error.textContent = e.message || 'Protected account access failed.';
+            error.style.display = 'flex';
+            button.disabled = false;
+            button.textContent = 'Reveal Account';
         }
+    }
 
-        function closeBankDecisionModal() {
-            const modal = document.getElementById(
-                'bankDecisionModal'
-            );
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-            document.body.classList.remove(
-                'overflow-hidden'
-            );
-            pendingBankDecisionForm = null;
+    document.querySelectorAll('.ops-modal').forEach((modal) => {
+        modal.addEventListener('click', (event) => {
+            if (event.target !== modal) return;
+            if (modal.id === 'actionModal') closeActionModal();
+            if (modal.id === 'accountModal') closeAccountModal();
+        });
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closeActionModal();
+            closeAccountModal();
         }
+    });
+</script>
 
-        function confirmBankDecision() {
-            if (!pendingBankDecisionForm) {
-                return;
-            }
-
-            const form = pendingBankDecisionForm;
-            const button = document.getElementById(
-                'bankDecisionModalConfirm'
-            );
-            button.disabled = true;
-            button.textContent = 'Processing...';
-            form.submit();
-        }
-
-        document.getElementById(
-            'bankDecisionModal'
-        ).addEventListener(
-            'click',
-            function (event) {
-                if (event.target === this) {
-                    closeBankDecisionModal();
-                }
-            }
-        );
-
-        document.getElementById(
-            'bankAccountAccessModal'
-        ).addEventListener(
-            'click',
-            function (event) {
-                if (event.target === this) {
-                    closeAccountAccessModal();
-                }
-            }
-        );
-
-        document.getElementById(
-            'bankAccountAccessForm'
-        ).addEventListener(
-            'submit',
-            async function (event) {
-                event.preventDefault();
-
-                const password = document.getElementById(
-                    'accountAccessPassword'
-                );
-                const error = document.getElementById(
-                    'accountAccessError'
-                );
-                const button = document.getElementById(
-                    'accountAccessSubmit'
-                );
-
-                error.textContent = '';
-
-                if (
-                    password.value.length < 1 ||
-                    password.value.length > 72
-                ) {
-                    error.textContent =
-                        'Enter your current operator password.';
-                    password.focus();
-                    return;
-                }
-
-                const body = new URLSearchParams({
-                    csrf_token: document.getElementById(
-                        'bankAccountCsrf'
-                    ).value,
-                    withdrawal_id: document.getElementById(
-                        'accountAccessWithdrawalId'
-                    ).value,
-                    current_password: password.value,
-                });
-
-                button.disabled = true;
-                button.textContent = 'Authorizing…';
-
-                try {
-                    const response = await fetch(
-                        'account_details.php',
-                        {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type':
-                                    'application/x-www-form-urlencoded;charset=UTF-8',
-                                'X-Requested-With': 'XMLHttpRequest',
-                            },
-                            body: body.toString(),
-                            credentials: 'same-origin',
-                        }
-                    );
-                    const result = await response.json();
-
-                    if (!response.ok || !result.ok) {
-                        throw new Error(
-                            result.message ||
-                            'Account access could not be authorized.'
-                        );
-                    }
-
-                    document.getElementById(
-                        'accountAccessFullNumber'
-                    ).textContent = result.account_number;
-                    document.getElementById(
-                        'accountAccessHolder'
-                    ).textContent =
-                        result.account_holder + ' · ' + result.bank_name;
-                    document.getElementById(
-                        'accountAccessResult'
-                    ).classList.remove('hidden');
-                    password.value = '';
-                    button.textContent = 'Access Authorized';
-                } catch (requestError) {
-                    error.textContent = requestError.message;
-                    button.disabled = false;
-                    button.textContent = 'Authorize Access';
-                }
-            }
-        );
-
-        document.addEventListener(
-            'keydown',
-            function (event) {
-                if (event.key === 'Escape') {
-                    closeAccountAccessModal();
-                    closeBankDecisionModal();
-                }
-            }
-        );
-
-        updateMalaysiaClock();
-        window.setInterval(
-            updateMalaysiaClock,
-            1000
-        );
-    </script>
 </body>
 </html>

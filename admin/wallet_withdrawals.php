@@ -14,141 +14,54 @@ $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
 
-    $withdrawal_id = filter_input(
+    $withdrawalId = filter_input(
         INPUT_POST,
         'withdrawal_id',
         FILTER_VALIDATE_INT,
-        [
-            'options' => [
-                'min_range' => 1,
-            ],
-        ]
+        ['options' => ['min_range' => 1]]
     );
     $action = $_POST['action'] ?? null;
 
     if (
-        $withdrawal_id === false ||
-        $withdrawal_id === null ||
+        $withdrawalId === false ||
+        $withdrawalId === null ||
         !is_string($action) ||
-        !in_array(
-            $action,
-            [
-                'approve',
-                'reject',
-                'fail',
-                'complete',
-            ],
-            true
-        )
+        !in_array($action, ['approve', 'reject'], true)
     ) {
-        $error =
-            'Invalid bank withdrawal action.';
+        $error = 'Invalid bank withdrawal action.';
     } else {
-        $request_result = null;
-        $stored_receipt = null;
-
         try {
             if ($action === 'approve') {
-                $request_result =
-                    approveWalletWithdrawalRequest(
-                        $pdo,
-                        (int) $withdrawal_id,
-                        current_user_id(),
-                        normalizeWalletWithdrawalAdminNote(
-                            $_POST['admin_note'] ?? '',
-                            false
-                        )
-                    );
-            } elseif ($action === 'reject') {
-                $request_result =
-                    rejectWalletWithdrawalRequest(
-                        $pdo,
-                        (int) $withdrawal_id,
-                        current_user_id(),
-                        normalizeWalletWithdrawalAdminNote(
-                            $_POST['admin_note'] ?? '',
-                            true
-                        )
-                    );
-            } elseif ($action === 'fail') {
-                verifyWalletActorPassword(
+                $requestResult = approveWalletWithdrawalRequest(
                     $pdo,
+                    (int) $withdrawalId,
                     current_user_id(),
-                    'admin',
-                    $_POST[
-                        'current_password'
-                    ] ?? null
+                    normalizeWalletWithdrawalAdminNote(
+                        $_POST['admin_note'] ?? '',
+                        false
+                    )
                 );
-
-                $request_result =
-                    failApprovedWalletWithdrawalRequest(
-                        $pdo,
-                        (int) $withdrawal_id,
-                        current_user_id(),
-                        normalizeWalletWithdrawalAdminNote(
-                            $_POST[
-                                'failure_reason'
-                            ] ?? '',
-                            true
-                        )
-                    );
             } else {
-                verifyWalletActorPassword(
+                $requestResult = rejectWalletWithdrawalRequest(
                     $pdo,
+                    (int) $withdrawalId,
                     current_user_id(),
-                    'admin',
-                    $_POST['current_password'] ?? null
-                );
-
-                $transfer_reference =
-                    normalizeWalletWithdrawalTransferReference(
-                        $_POST['transfer_reference'] ?? null
-                    );
-
-                $stored_receipt =
-                    storeWalletWithdrawalReceipt(
-                        $_FILES['transfer_receipt'] ?? []
-                    );
-
-                try {
-                    $request_result =
-                        completeWalletWithdrawalRequest(
-                            $pdo,
-                            (int) $withdrawal_id,
-                            current_user_id(),
-                            $transfer_reference,
-                            $stored_receipt
-                        );
-                } catch (Throwable $e) {
-                    deleteWalletWithdrawalReceipt(
-                        $stored_receipt['file_name'] ?? null
-                    );
-
-                    throw $e;
-                }
-            }
-
-            if (!is_array($request_result)) {
-                throw new WalletWithdrawalException(
-                    'Withdrawal result is missing.'
+                    normalizeWalletWithdrawalAdminNote(
+                        $_POST['admin_note'] ?? '',
+                        true
+                    )
                 );
             }
 
-            $customer_id = (int) $request_result[
-                'wallet_withdrawal_user_id'
-            ];
-            $request_number =
-                '#' . str_pad(
-                    (string) $withdrawal_id,
-                    4,
-                    '0',
-                    STR_PAD_LEFT
-                );
+            $requestNumber = '#' . str_pad(
+                (string) $withdrawalId,
+                4,
+                '0',
+                STR_PAD_LEFT
+            );
             $amount = moneyFormatSen(
                 moneyDecimalToSen(
-                    (string) $request_result[
-                        'wallet_withdrawal_amount'
-                    ]
+                    (string) $requestResult['wallet_withdrawal_amount']
                 )
             );
 
@@ -156,92 +69,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($action === 'approve') {
                     sendNotification(
                         $pdo,
-                        $customer_id,
+                        (int) $requestResult['wallet_withdrawal_user_id'],
                         'Bank Withdrawal Approved',
-                        "Your bank withdrawal request $request_number for RM $amount has been approved by MangaVault and submitted to your destination bank for verification. Processing may take up to 14 business days. Your approval PDF is available in My Wallet.",
-                        'system'
-                    );
-                } elseif ($action === 'reject') {
-                    $reason = trim(
-                        (string) (
-                            $request_result[
-                                'wallet_withdrawal_admin_note'
-                            ] ?? ''
-                        )
-                    );
-
-                    sendNotification(
-                        $pdo,
-                        $customer_id,
-                        'Bank Withdrawal Rejected',
-                        "Your bank withdrawal request $request_number for RM $amount was rejected. Reserved funds were released back to your wallet. Reason: $reason",
-                        'system'
-                    );
-                } elseif ($action === 'fail') {
-                    $reason = trim(
-                        (string) (
-                            $request_result[
-                                'wallet_withdrawal_failure_reason'
-                            ] ?? ''
-                        )
-                    );
-
-                    sendNotification(
-                        $pdo,
-                        $customer_id,
-                        'Bank Transfer Failed',
-                        "The bank transfer for withdrawal request $request_number for RM $amount could not be completed. The reserved funds were released back to your MangaVault Wallet. Reason: $reason",
+                        "Your bank withdrawal request $requestNumber for RM $amount was approved by MangaVault and submitted to your destination bank. Bank verification and settlement are performed independently; the amount stays reserved until final settlement.",
                         'system'
                     );
                 } else {
+                    $reason = trim((string) (
+                        $requestResult['wallet_withdrawal_admin_note'] ?? ''
+                    ));
                     sendNotification(
                         $pdo,
-                        $customer_id,
-                        'Bank Transfer Completed',
-                        "Your bank withdrawal request $request_number for RM $amount has been completed. Transfer reference: " .
-                            $request_result[
-                                'wallet_withdrawal_transfer_reference'
-                            ] .
-                            '. Your official transfer confirmation PDF is available in My Wallet.',
+                        (int) $requestResult['wallet_withdrawal_user_id'],
+                        'Bank Withdrawal Rejected',
+                        "Your bank withdrawal request $requestNumber for RM $amount was rejected by MangaVault. Reserved funds were released back to your wallet. Reason: $reason",
                         'system'
                     );
                 }
-            } catch (Throwable $e) {
+            } catch (Throwable $notificationError) {
                 app_error_log(
                     'Wallet withdrawal notification failed: ' .
-                    $e->getMessage()
+                    $notificationError->getMessage()
                 );
             }
 
             header(
-                'Location: wallet_withdrawals.php?' .
-                http_build_query([
+                'Location: wallet_withdrawals.php?' . http_build_query([
+                    'status' => $action === 'approve' ? 'approved' : 'rejected',
                     'result' => $action,
-                    'id' => (int) $withdrawal_id,
+                    'id' => (int) $withdrawalId,
                 ])
             );
             exit;
         } catch (WalletWithdrawalException $e) {
             $error = $e->getMessage();
         } catch (Throwable $e) {
-            if (is_array($stored_receipt)) {
-                deleteWalletWithdrawalReceipt(
-                    $stored_receipt['file_name'] ?? null
-                );
-            }
-
             app_error_log(
-                'Admin bank withdrawal processing failed: ' .
-                $e->getMessage()
+                'Admin bank withdrawal processing failed: ' . $e->getMessage()
             );
-
-            $error =
-                'Unable to process the bank withdrawal request.';
+            $error = 'Unable to process the bank withdrawal request.';
         }
     }
 }
 
-$allowed_filters = [
+$allowedFilters = [
     'all',
     'pending',
     'approved',
@@ -249,23 +120,13 @@ $allowed_filters = [
     'failed',
     'completed',
 ];
-$status_filter = $_GET['status'] ?? 'pending';
-
-if (
-    !is_string($status_filter) ||
-    !in_array(
-        $status_filter,
-        $allowed_filters,
-        true
-    )
-) {
-    $status_filter = 'pending';
+$statusFilter = $_GET['status'] ?? 'pending';
+if (!is_string($statusFilter) || !in_array($statusFilter, $allowedFilters, true)) {
+    $statusFilter = 'pending';
 }
 
-$count_rows = $pdo->query("
-    SELECT
-        wallet_withdrawal_status,
-        COUNT(*) AS total
+$countRows = $pdo->query("
+    SELECT wallet_withdrawal_status, COUNT(*) AS total
     FROM wallet_withdrawal_requests
     GROUP BY wallet_withdrawal_status
 ")->fetchAll(PDO::FETCH_ASSOC);
@@ -277,53 +138,42 @@ $counts = [
     'failed' => 0,
     'completed' => 0,
 ];
-
-foreach ($count_rows as $row) {
-    $status = (string) $row[
-        'wallet_withdrawal_status'
-    ];
-
-    if (isset($counts[$status])) {
-        $counts[$status] =
-            (int) $row['total'];
+foreach ($countRows as $row) {
+    $key = (string) $row['wallet_withdrawal_status'];
+    if (array_key_exists($key, $counts)) {
+        $counts[$key] = (int) $row['total'];
     }
 }
 
 $sql = "
     SELECT
         wr.*,
-        u.user_name,
-        u.user_first_name,
-        u.user_last_name,
-        u.user_gmail,
-        reviewer.user_first_name
-            AS reviewer_first_name,
-        reviewer.user_last_name
-            AS reviewer_last_name,
-        uploader.user_first_name
-            AS receipt_uploader_first_name,
-        uploader.user_last_name
-            AS receipt_uploader_last_name
+        customer.user_name,
+        customer.user_first_name,
+        customer.user_last_name,
+        customer.user_gmail,
+        reviewer.user_first_name AS reviewer_first_name,
+        reviewer.user_last_name AS reviewer_last_name,
+        decision_operator.bank_gateway_operator_display_name AS bank_decision_operator,
+        starter.bank_gateway_operator_display_name AS bank_settlement_starter,
+        settler.bank_gateway_operator_display_name AS bank_settlement_operator
     FROM wallet_withdrawal_requests wr
-    INNER JOIN users u
-        ON u.user_id =
-            wr.wallet_withdrawal_user_id
+    INNER JOIN users customer
+        ON customer.user_id = wr.wallet_withdrawal_user_id
     LEFT JOIN users reviewer
-        ON reviewer.user_id =
-            wr.wallet_withdrawal_reviewed_by
-    LEFT JOIN users uploader
-        ON uploader.user_id =
-            wr.wallet_withdrawal_receipt_uploaded_by
+        ON reviewer.user_id = wr.wallet_withdrawal_reviewed_by
+    LEFT JOIN bank_gateway_operators decision_operator
+        ON decision_operator.bank_gateway_operator_id = wr.wallet_withdrawal_bank_decided_by
+    LEFT JOIN bank_gateway_operators starter
+        ON starter.bank_gateway_operator_id = wr.wallet_withdrawal_bank_settlement_started_by
+    LEFT JOIN bank_gateway_operators settler
+        ON settler.bank_gateway_operator_id = wr.wallet_withdrawal_bank_settled_by
 ";
 $params = [];
-
-if ($status_filter !== 'all') {
-    $sql .= "
-        WHERE wr.wallet_withdrawal_status = ?
-    ";
-    $params[] = $status_filter;
+if ($statusFilter !== 'all') {
+    $sql .= ' WHERE wr.wallet_withdrawal_status = ? ';
+    $params[] = $statusFilter;
 }
-
 $sql .= "
     ORDER BY
         CASE wr.wallet_withdrawal_status
@@ -335,1324 +185,384 @@ $sql .= "
         END,
         wr.wallet_withdrawal_id DESC
 ";
-
 $statement = $pdo->prepare($sql);
 $statement->execute($params);
-$requests = $statement->fetchAll(
-    PDO::FETCH_ASSOC
-);
+$requests = $statement->fetchAll(PDO::FETCH_ASSOC);
 
-$result = $_GET['result'] ?? null;
-$result_id = filter_input(
+$result = isset($_GET['result']) && is_string($_GET['result'])
+    ? $_GET['result']
+    : '';
+$resultId = filter_input(
     INPUT_GET,
     'id',
-    FILTER_VALIDATE_INT
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1]]
 );
+
+function adminWithdrawalBankStage(array $request): array
+{
+    $status = (string) ($request['wallet_withdrawal_status'] ?? '');
+    $bank = (string) ($request['wallet_withdrawal_bank_status'] ?? 'not_submitted');
+    $settlement = (string) (
+        $request['wallet_withdrawal_bank_settlement_status'] ?? 'not_required'
+    );
+
+    if ($status === 'pending') {
+        return ['Merchant Review', 'bg-amber-100 text-amber-800', 'Awaiting MangaVault decision'];
+    }
+    if ($status === 'approved' && $bank === 'pending') {
+        return ['Bank Verification', 'bg-yellow-100 text-yellow-800', 'Destination bank review pending'];
+    }
+    if ($status === 'approved' && $bank === 'approved' && $settlement === 'ready') {
+        return ['Settlement Ready', 'bg-blue-100 text-blue-800', 'Bank accepted; waiting to start settlement'];
+    }
+    if ($status === 'approved' && $bank === 'approved' && $settlement === 'processing') {
+        return ['Settlement Processing', 'bg-cyan-100 text-cyan-800', 'Bank settlement is in progress'];
+    }
+    if ($status === 'approved' && $bank === 'rejected') {
+        return ['Reconciliation Exception', 'bg-purple-100 text-purple-800', 'Historical rejected record requires bank reconciliation'];
+    }
+    if ($status === 'completed') {
+        return ['Settled', 'bg-green-100 text-green-800', 'Bank settled and wallet debit posted'];
+    }
+    if ($status === 'failed' && $bank === 'rejected') {
+        return ['Bank Rejected', 'bg-red-100 text-red-800', 'Bank rejected and reserved funds released'];
+    }
+    if ($status === 'failed') {
+        return ['Settlement Failed', 'bg-orange-100 text-orange-800', 'Settlement failed and funds released'];
+    }
+    if ($status === 'rejected') {
+        return ['Merchant Rejected', 'bg-red-100 text-red-800', 'Admin rejected before bank submission'];
+    }
+    return ['Record', 'bg-gray-100 text-gray-700', 'Withdrawal lifecycle record'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wallet Withdrawals - MangaVault Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="min-h-screen bg-slate-100 text-slate-800">
 
-    <?php include '../includes/admin_navbar.php'; ?>
+<?php include '../includes/admin_navbar.php'; ?>
 
-    <main class="max-w-7xl mx-auto px-6 py-8">
-        <div
-            class="flex items-start justify-between gap-4 flex-wrap mb-6"
-        >
-            <div>
-                <div class="flex items-center gap-3 flex-wrap">
-                    <h1 class="text-2xl font-black text-gray-900">
-                        Wallet Bank Withdrawals
-                    </h1>
-                    <span
-                        class="bg-red-50 text-red-600 border border-red-100 text-xs font-bold px-3 py-1 rounded-full"
-                    >
-                        Senior Admin Only
-                    </span>
-                </div>
-                <p class="text-sm text-gray-400 mt-2 max-w-3xl">
-                    Review refund-to-bank requests. Approval automatically makes an official approval PDF available and starts the 14-business-day processing window. Completion still requires bank evidence for the internal audit trail.
-                </p>
+<main class="mx-auto max-w-7xl px-5 py-8 md:px-7">
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+            <div class="flex flex-wrap items-center gap-3">
+                <h1 class="text-2xl font-black tracking-tight text-slate-950">Wallet Bank Withdrawals</h1>
+                <span class="rounded-full border border-red-100 bg-red-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-red-600">Senior Admin Only</span>
             </div>
-        </div>
-
-        <?php if ($error !== ''): ?>
-            <div
-                class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-5 text-sm"
-            >
-                <?= htmlspecialchars(
-                    $error,
-                    ENT_QUOTES,
-                    'UTF-8'
-                ) ?>
-            </div>
-        <?php endif; ?>
-
-        <?php if (
-            is_string($result) &&
-            in_array(
-                $result,
-                [
-                    'approve',
-                    'reject',
-                    'fail',
-                    'complete',
-                ],
-                true
-            ) &&
-            $result_id !== false &&
-            $result_id !== null
-        ): ?>
-            <div
-                class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl mb-5 text-sm"
-            >
-                Withdrawal #<?= str_pad(
-                    (string) $result_id,
-                    4,
-                    '0',
-                    STR_PAD_LEFT
-                ) ?> was <?= htmlspecialchars(
-                    $result === 'approve'
-                        ? 'approved'
-                        : (
-                            $result === 'reject'
-                                ? 'rejected'
-                                : (
-                                    $result === 'fail'
-                                        ? 'marked as transfer failed'
-                                        : 'completed'
-                                )
-                        ),
-                    ENT_QUOTES,
-                    'UTF-8'
-                ) ?> successfully.
-            </div>
-        <?php endif; ?>
-
-        <div
-            class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6"
-        >
-            <?php
-            $summary = [
-                'pending' => [
-                    'Pending Review',
-                    'bg-yellow-50 text-yellow-700 border-yellow-100',
-                ],
-                'approved' => [
-                    'Approved / Transfer',
-                    'bg-blue-50 text-blue-700 border-blue-100',
-                ],
-                'rejected' => [
-                    'Rejected',
-                    'bg-red-50 text-red-700 border-red-100',
-                ],
-                'failed' => [
-                    'Transfer Failed',
-                    'bg-orange-50 text-orange-700 border-orange-100',
-                ],
-                'completed' => [
-                    'Completed',
-                    'bg-green-50 text-green-700 border-green-100',
-                ],
-            ];
-            ?>
-            <?php foreach ($summary as $key => $card): ?>
-                <a
-                    href="?status=<?= urlencode($key) ?>"
-                    class="<?= $card[1] ?> border rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-md <?= $status_filter === $key
-                        ? 'ring-2 ring-offset-2 ring-gray-300 shadow-sm'
-                        : '' ?>"
-                >
-                    <p
-                        class="text-xs font-semibold uppercase tracking-wide opacity-70"
-                    >
-                        <?= htmlspecialchars(
-                            $card[0],
-                            ENT_QUOTES,
-                            'UTF-8'
-                        ) ?>
-                    </p>
-                    <p class="text-2xl font-black mt-1">
-                        <?= $counts[$key] ?>
-                    </p>
-                </a>
-            <?php endforeach; ?>
-        </div>
-
-        <div
-            class="bg-white rounded-2xl shadow-sm p-3 mb-6 overflow-x-auto"
-        >
-            <div
-                class="flex items-center gap-2 min-w-max"
-                aria-label="Withdrawal status filter"
-            >
-                <span
-                    class="px-3 text-xs font-black uppercase tracking-[0.16em] text-gray-400"
-                >
-                    Queue
-                </span>
-
-                <?php foreach ([
-                    'all' => ['All Requests', array_sum($counts)],
-                    'pending' => ['Pending', $counts['pending']],
-                    'approved' => ['Approved', $counts['approved']],
-                    'rejected' => ['Rejected', $counts['rejected']],
-                    'failed' => ['Failed', $counts['failed']],
-                    'completed' => ['Completed', $counts['completed']],
-                ] as $value => $filter): ?>
-                    <a
-                        href="?status=<?= urlencode($value) ?>"
-                        class="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors <?= $status_filter === $value
-                            ? 'bg-[#17243d] text-white shadow-sm'
-                            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800' ?>"
-                        aria-current="<?= $status_filter === $value
-                            ? 'page'
-                            : 'false' ?>"
-                    >
-                        <?= htmlspecialchars(
-                            $filter[0],
-                            ENT_QUOTES,
-                            'UTF-8'
-                        ) ?>
-                        <span
-                            class="rounded-full px-2 py-0.5 text-[10px] <?= $status_filter === $value
-                                ? 'bg-white/15 text-white'
-                                : 'bg-gray-100 text-gray-500' ?>"
-                        >
-                            <?= (int) $filter[1] ?>
-                        </span>
-                    </a>
-                <?php endforeach; ?>
-            </div>
-        </div>
-
-        <?php if ($requests === []): ?>
-            <div
-                class="bg-white rounded-2xl shadow-sm p-12 text-center"
-            >
-                <div class="text-5xl mb-4">🏦</div>
-                <p class="font-bold text-gray-700">
-                    No bank withdrawal requests found.
-                </p>
-            </div>
-        <?php else: ?>
-            <div class="space-y-5">
-                <?php foreach ($requests as $request): ?>
-                    <?php
-                    $status = (string) $request[
-                        'wallet_withdrawal_status'
-                    ];
-                    $status_classes = [
-                        'pending' =>
-                            'bg-yellow-100 text-yellow-700',
-                        'approved' =>
-                            'bg-blue-100 text-blue-700',
-                        'rejected' =>
-                            'bg-red-100 text-red-700',
-                        'failed' =>
-                            'bg-orange-100 text-orange-700',
-                        'completed' =>
-                            'bg-green-100 text-green-700',
-                    ];
-                    $customer_name = trim(
-                        (string) $request[
-                            'user_first_name'
-                        ] .
-                        ' ' .
-                        (string) $request[
-                            'user_last_name'
-                        ]
-                    );
-                    $amount_sen = moneyDecimalToSen(
-                        (string) $request[
-                            'wallet_withdrawal_amount'
-                        ]
-                    );
-                    $bank_status = (string) (
-                        $request[
-                            'wallet_withdrawal_bank_status'
-                        ] ?? 'not_submitted'
-                    );
-                    $processing_deadline =
-                        walletWithdrawalBusinessDayDeadlineLabel(
-                            (string) (
-                                $request[
-                                    'wallet_withdrawal_reviewed_at'
-                                ] ?? ''
-                            )
-                        );
-                    ?>
-                    <section
-                        class="bg-white rounded-2xl shadow-sm overflow-hidden"
-                        <?= $status === 'approved' &&
-                            $bank_status === 'pending'
-                                ? 'data-bank-poll-id="' .
-                                    (int) $request[
-                                        'wallet_withdrawal_id'
-                                    ] . '"'
-                                : '' ?>
-                    >
-                        <div
-                            class="px-6 py-5 border-b border-gray-100 flex items-start justify-between gap-4 flex-wrap"
-                        >
-                            <div>
-                                <div class="flex items-center gap-3 flex-wrap">
-                                    <h2 class="font-black text-gray-900">
-                                        Withdrawal #<?= str_pad(
-                                            (string) $request[
-                                                'wallet_withdrawal_id'
-                                            ],
-                                            4,
-                                            '0',
-                                            STR_PAD_LEFT
-                                        ) ?>
-                                    </h2>
-                                    <span
-                                        class="<?= $status_classes[$status] ?? 'bg-gray-100 text-gray-600' ?> text-xs font-bold px-3 py-1 rounded-full capitalize"
-                                    >
-                                        <?= htmlspecialchars(
-                                            $status,
-                                            ENT_QUOTES,
-                                            'UTF-8'
-                                        ) ?>
-                                    </span>
-                                </div>
-                                <p class="text-xs text-gray-400 mt-1">
-                                    Requested <?= htmlspecialchars(
-                                        walletWithdrawalMalaysiaDateTime(
-                                            (string) $request[
-                                                'wallet_withdrawal_created_at'
-                                            ],
-                                            'd M Y, h:i A',
-                                            'Not available'
-                                        ) . ' MYT',
-                                        ENT_QUOTES,
-                                        'UTF-8'
-                                    ) ?>
-                                </p>
-                            </div>
-
-                            <p class="text-2xl font-black text-red-600">
-                                RM <?= moneyFormatSen(
-                                    $amount_sen
-                                ) ?>
-                            </p>
-                        </div>
-
-                        <div
-                            class="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6"
-                        >
-                            <div class="lg:col-span-2 space-y-4">
-                                <div
-                                    class="grid grid-cols-1 md:grid-cols-2 gap-4"
-                                >
-                                    <div class="bg-gray-50 rounded-xl p-4">
-                                        <p class="text-xs text-gray-400">
-                                            Customer
-                                        </p>
-                                        <p class="font-bold text-gray-700 mt-1">
-                                            <?= htmlspecialchars(
-                                                $customer_name,
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                        <p class="text-xs text-gray-400 mt-1">
-                                            <?= htmlspecialchars(
-                                                (string) $request[
-                                                    'user_gmail'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                    </div>
-
-                                    <div class="bg-gray-50 rounded-xl p-4">
-                                        <p class="text-xs text-gray-400">
-                                            Bank Destination
-                                        </p>
-                                        <p class="font-bold text-gray-700 mt-1">
-                                            <?= htmlspecialchars(
-                                                (string) $request[
-                                                    'wallet_withdrawal_bank_name'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                        <p class="text-xs text-gray-500 mt-1">
-                                            <?= htmlspecialchars(
-                                                (string) $request[
-                                                    'wallet_withdrawal_account_holder'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?> · ••••<?= htmlspecialchars(
-                                                (string) $request[
-                                                    'wallet_withdrawal_account_number_last4'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div
-                                    class="flex items-center gap-3 flex-wrap"
-                                >
-                                    <?php if (
-                                        in_array(
-                                            $status,
-                                            [
-                                                'pending',
-                                                'approved',
-                                            ],
-                                            true
-                                        )
-                                    ): ?>
-                                        <a
-                                            href="wallet_withdrawal_bank.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>"
-                                            class="inline-flex items-center bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-4 py-2 rounded-xl text-sm"
-                                        >
-                                            🔐 Reveal Protected Bank Details
-                                        </a>
-                                    <?php endif; ?>
-
-                                    <?php if (
-                                        $bank_status === 'approved'
-                                    ): ?>
-                                        <a
-                                            href="wallet_withdrawal_bank_confirmation.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>&amp;download=1"
-                                            class="inline-flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
-                                        >
-                                            <span aria-hidden="true">✅</span>
-                                            Download Bank Approval Proof
-                                        </a>
-                                    <?php endif; ?>
-
-                                    <?php if (
-                                        in_array(
-                                            $status,
-                                            [
-                                                'approved',
-                                                'completed',
-                                            ],
-                                            true
-                                        )
-                                    ): ?>
-                                        <a
-                                            href="wallet_withdrawal_receipt.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>&amp;download=1"
-                                            class="inline-flex items-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold px-4 py-2 rounded-xl text-sm"
-                                        >
-                                            <span aria-hidden="true">📄</span>
-                                            <?= $status === 'completed'
-                                                ? 'Download Transfer Confirmation'
-                                                : 'Download Approval PDF' ?>
-                                        </a>
-                                    <?php endif; ?>
-
-                                    <?php if (
-                                        $status === 'completed' &&
-                                        !empty(
-                                            $request[
-                                                'wallet_withdrawal_receipt_file'
-                                            ]
-                                        )
-                                    ): ?>
-                                        <a
-                                            href="wallet_withdrawal_evidence.php?id=<?= (int) $request['wallet_withdrawal_id'] ?>"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            class="inline-flex items-center bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 font-semibold px-4 py-2 rounded-xl text-sm"
-                                        >
-                                            View Bank Evidence
-                                        </a>
-                                    <?php endif; ?>
-                                </div>
-
-                                <?php if (
-                                    in_array(
-                                        $status,
-                                        [
-                                            'approved',
-                                            'completed',
-                                        ],
-                                        true
-                                    )
-                                ): ?>
-                                    <div
-                                        class="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 p-4"
-                                    >
-                                        <div
-                                            class="flex items-start justify-between gap-4 flex-wrap"
-                                        >
-                                            <div>
-                                                <p
-                                                    class="text-sm font-black text-blue-900"
-                                                >
-                                                    14-business-day service window
-                                                </p>
-                                                <p
-                                                    class="mt-1 text-xs leading-relaxed text-blue-700"
-                                                >
-                                                    Starts after approval. Weekends are excluded; bank and public-holiday schedules may affect the exact arrival date.
-                                                </p>
-                                            </div>
-
-                                            <div
-                                                class="rounded-xl bg-white px-4 py-3 text-right shadow-sm ring-1 ring-blue-100"
-                                            >
-                                                <p
-                                                    class="text-[10px] font-black uppercase tracking-wider text-blue-400"
-                                                >
-                                                    <?= $status === 'completed'
-                                                        ? 'Completed'
-                                                        : 'Estimated by' ?>
-                                                </p>
-                                                <p
-                                                    class="mt-1 text-sm font-black text-blue-900"
-                                                >
-                                                    <?= htmlspecialchars(
-                                                        $status === 'completed'
-                                                            ? walletWithdrawalMalaysiaDateTime(
-                                                                (string) $request[
-                                                                    'wallet_withdrawal_completed_at'
-                                                                ],
-                                                                'd M Y',
-                                                                'Not available'
-                                                            )
-                                                            : (
-                                                                $processing_deadline !== ''
-                                                                    ? $processing_deadline
-                                                                    : 'Calculating'
-                                                            ),
-                                                        ENT_QUOTES,
-                                                        'UTF-8'
-                                                    ) ?>
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                <?php endif; ?>
-
-                                <?php if (!empty(
-                                    $request[
-                                        'wallet_withdrawal_transfer_reference'
-                                    ]
-                                )): ?>
-                                    <div
-                                        class="border border-gray-200 rounded-xl p-4"
-                                    >
-                                        <p class="text-xs text-gray-400">
-                                            Bank Transfer Reference
-                                        </p>
-                                        <p class="font-mono font-bold text-gray-700 mt-1">
-                                            <?= htmlspecialchars(
-                                                (string) $request[
-                                                    'wallet_withdrawal_transfer_reference'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>
-                                        </p>
-                                    </div>
-                                <?php endif; ?>
-
-                                <?php if (!empty(
-                                    $request[
-                                        'wallet_withdrawal_admin_note'
-                                    ]
-                                )): ?>
-                                    <div
-                                        class="border border-gray-200 rounded-xl p-4"
-                                    >
-                                        <p class="text-xs text-gray-400">
-                                            Admin Note
-                                        </p>
-                                        <p class="text-sm text-gray-700 mt-1 whitespace-pre-wrap"><?= htmlspecialchars(
-                                            (string) $request[
-                                                'wallet_withdrawal_admin_note'
-                                            ],
-                                            ENT_QUOTES,
-                                            'UTF-8'
-                                        ) ?></p>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-
-                            <div>
-                                <?php if ($status === 'pending'): ?>
-                                    <div
-                                        class="bg-green-50 border border-green-100 rounded-xl p-4 mb-4"
-                                    >
-                                        <p class="font-bold text-green-800 text-sm">
-                                            Approve Request
-                                        </p>
-                                        <p class="text-xs text-green-700 mt-1 leading-relaxed">
-                                            Approval does not deduct wallet funds. The amount remains reserved until the bank transfer is completed.
-                                        </p>
-                                        <form
-                                            method="POST"
-                                            class="mt-4 space-y-3"
-                                            data-confirm-title="Approve Withdrawal"
-                                            data-confirm-message="Approve this request and make the official approval PDF available to the customer? Funds remain reserved until transfer completion."
-                                            data-confirm-button="Approve Request"
-                                            data-confirm-tone="green"
-                                            onsubmit="return openWithdrawalActionModal(event, this)"
-                                        >
-                                            <?php csrf_field(); ?>
-                                            <input
-                                                type="hidden"
-                                                name="withdrawal_id"
-                                                value="<?= (int) $request['wallet_withdrawal_id'] ?>"
-                                            >
-                                            <input
-                                                type="hidden"
-                                                name="action"
-                                                value="approve"
-                                            >
-                                            <textarea
-                                                name="admin_note"
-                                                maxlength="1000"
-                                                rows="3"
-                                                placeholder="Optional approval note..."
-                                                class="w-full px-3 py-2 border border-green-200 rounded-lg text-sm resize-none"
-                                            ></textarea>
-                                            <button
-                                                type="submit"
-                                                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-lg text-sm"
-                                            >
-                                                Approve Withdrawal
-                                            </button>
-                                        </form>
-                                    </div>
-
-                                    <div
-                                        class="bg-red-50 border border-red-100 rounded-xl p-4"
-                                    >
-                                        <p class="font-bold text-red-800 text-sm">
-                                            Reject Request
-                                        </p>
-                                        <p class="text-xs text-red-700 mt-1 leading-relaxed">
-                                            Rejection immediately releases the reserved wallet amount. A reason is required.
-                                        </p>
-                                        <form
-                                            method="POST"
-                                            class="mt-4 space-y-3"
-                                            data-confirm-title="Reject Withdrawal"
-                                            data-confirm-message="Reject this request and release the reserved funds back to the customer wallet?"
-                                            data-confirm-button="Reject & Release"
-                                            data-confirm-tone="red"
-                                            onsubmit="return openWithdrawalActionModal(event, this)"
-                                        >
-                                            <?php csrf_field(); ?>
-                                            <input
-                                                type="hidden"
-                                                name="withdrawal_id"
-                                                value="<?= (int) $request['wallet_withdrawal_id'] ?>"
-                                            >
-                                            <input
-                                                type="hidden"
-                                                name="action"
-                                                value="reject"
-                                            >
-                                            <textarea
-                                                name="admin_note"
-                                                maxlength="1000"
-                                                rows="3"
-                                                required
-                                                placeholder="Rejection reason..."
-                                                class="w-full px-3 py-2 border border-red-200 rounded-lg text-sm resize-none"
-                                            ></textarea>
-                                            <button
-                                                type="submit"
-                                                class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-lg text-sm"
-                                            >
-                                                Reject & Release Funds
-                                            </button>
-                                        </form>
-                                    </div>
-
-                                <?php elseif ($status === 'approved'): ?>
-                                    <?php if ($bank_status === 'pending'): ?>
-                                        <div
-                                            class="rounded-xl border border-amber-200 bg-amber-50 p-5"
-                                        >
-                                            <div class="flex items-start gap-3">
-                                                <span
-                                                    class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100 text-xl"
-                                                    aria-hidden="true"
-                                                >
-                                                    🏦
-                                                </span>
-                                                <div>
-                                                    <p
-                                                        class="text-sm font-black text-amber-900"
-                                                    >
-                                                        Waiting for Bank Verification
-                                                    </p>
-                                                    <p
-                                                        class="mt-1 text-xs leading-relaxed text-amber-700"
-                                                    >
-                                                        <?= htmlspecialchars(
-                                                            (string) $request[
-                                                                'wallet_withdrawal_bank_name'
-                                                            ],
-                                                            ENT_QUOTES,
-                                                            'UTF-8'
-                                                        ) ?> must independently approve this request before the transfer form is unlocked.
-                                                    </p>
-                                                </div>
-                                            </div>
-
-                                            <div
-                                                class="mt-4 rounded-xl border border-amber-200 bg-white/80 p-3 text-xs text-amber-800"
-                                            >
-                                                <p>
-                                                    <strong>Gateway submission:</strong>
-                                                    <span class="font-mono">
-                                                        <?= htmlspecialchars(
-                                                            (string) (
-                                                                $request[
-                                                                    'wallet_withdrawal_bank_submission_id'
-                                                                ] ?? 'Pending assignment'
-                                                            ),
-                                                            ENT_QUOTES,
-                                                            'UTF-8'
-                                                        ) ?>
-                                                    </span>
-                                                </p>
-                                                <p class="mt-1">
-                                                    <strong>Submitted:</strong>
-                                                    <?= htmlspecialchars(
-                                                        walletWithdrawalMalaysiaDateTime(
-                                                            (string) (
-                                                                $request[
-                                                                    'wallet_withdrawal_bank_submitted_at'
-                                                                ] ?? ''
-                                                            ),
-                                                            'd M Y, h:i A',
-                                                            'Not available'
-                                                        ) . ' MYT',
-                                                        ENT_QUOTES,
-                                                        'UTF-8'
-                                                    ) ?>
-                                                </p>
-                                            </div>
-
-                                            <p
-                                                class="mt-3 text-[11px] font-semibold text-amber-700"
-                                            >
-                                                This card checks automatically for a bank decision.
-                                            </p>
-                                        </div>
-
-                                    <?php elseif (
-                                        $bank_status === 'rejected'
-                                    ): ?>
-                                        <div
-                                            class="rounded-xl border border-red-200 bg-red-50 p-5"
-                                        >
-                                            <p
-                                                class="text-sm font-black text-red-800"
-                                            >
-                                                Bank Verification Rejected
-                                            </p>
-                                            <p
-                                                class="mt-1 text-xs leading-relaxed text-red-700"
-                                            >
-                                                The transfer form remains locked. Review the bank decision and use the failure action below to release the customer's reserved funds.
-                                            </p>
-                                            <p class="mt-3 text-xs text-red-700">
-                                                <strong>Decision reference:</strong>
-                                                <?= htmlspecialchars(
-                                                    (string) (
-                                                        $request[
-                                                            'wallet_withdrawal_bank_decision_reference'
-                                                        ] ?? 'Not available'
-                                                    ),
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ) ?>
-                                            </p>
-                                            <p class="mt-1 text-xs text-red-700">
-                                                <strong>Decision time:</strong>
-                                                <?= htmlspecialchars(
-                                                    walletWithdrawalMalaysiaDateTime(
-                                                        (string) (
-                                                            $request[
-                                                                'wallet_withdrawal_bank_decided_at'
-                                                            ] ?? ''
-                                                        ),
-                                                        'd M Y, h:i A',
-                                                        'Not available'
-                                                    ) . ' MYT',
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ) ?>
-                                            </p>
-                                            <?php if (!empty(
-                                                $request[
-                                                    'wallet_withdrawal_bank_decision_note'
-                                                ]
-                                            )): ?>
-                                                <p class="mt-2 text-xs text-red-700">
-                                                    <strong>Bank note:</strong>
-                                                    <?= htmlspecialchars(
-                                                        (string) $request[
-                                                            'wallet_withdrawal_bank_decision_note'
-                                                        ],
-                                                        ENT_QUOTES,
-                                                        'UTF-8'
-                                                    ) ?>
-                                                </p>
-                                            <?php endif; ?>
-                                        </div>
-
-                                    <?php elseif (
-                                        $bank_status === 'approved'
-                                    ): ?>
-                                    <div
-                                        class="bg-blue-50 border border-blue-100 rounded-xl p-4"
-                                    >
-                                        <p class="font-bold text-blue-800 text-sm">
-                                            Complete Bank Transfer
-                                        </p>
-                                        <p class="text-xs text-blue-700 mt-1 leading-relaxed">
-                                            Perform the transfer through the bank first. Then enter the bank reference and upload the transfer receipt. Completion permanently debits the reserved wallet amount.
-                                        </p>
-
-                                        <div
-                                            class="mt-3 rounded-xl border border-blue-200 bg-white/75 p-3"
-                                        >
-                                            <p
-                                                class="text-xs font-bold text-blue-900"
-                                            >
-                                                Bank verification approved
-                                            </p>
-                                            <p
-                                                class="mt-1 text-[11px] leading-relaxed text-blue-600"
-                                            >
-                                                Bank reference <?= htmlspecialchars(
-                                                    (string) $request[
-                                                        'wallet_withdrawal_bank_decision_reference'
-                                                    ],
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ) ?> · <?= htmlspecialchars(
-                                                    walletWithdrawalMalaysiaDateTime(
-                                                        (string) $request[
-                                                            'wallet_withdrawal_bank_decided_at'
-                                                        ],
-                                                        'd M Y, h:i A',
-                                                        'Not available'
-                                                    ) . ' MYT',
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ) ?>. The Admin can now manually record the completed transfer.
-                                            </p>
-                                        </div>
-
-                                        <form
-                                            method="POST"
-                                            enctype="multipart/form-data"
-                                            class="mt-4 space-y-3"
-                                            data-confirm-title="Complete Bank Transfer"
-                                            data-confirm-message="Confirm the external transfer is completed, permanently debit the reserved wallet amount, and create the final transfer confirmation PDF?"
-                                            data-confirm-button="Complete Transfer"
-                                            data-confirm-tone="blue"
-                                            onsubmit="return openWithdrawalActionModal(event, this)"
-                                        >
-                                            <?php csrf_field(); ?>
-                                            <input
-                                                type="hidden"
-                                                name="withdrawal_id"
-                                                value="<?= (int) $request['wallet_withdrawal_id'] ?>"
-                                            >
-                                            <input
-                                                type="hidden"
-                                                name="action"
-                                                value="complete"
-                                            >
-
-                                            <input
-                                                type="text"
-                                                name="transfer_reference"
-                                                maxlength="100"
-                                                required
-                                                autocomplete="off"
-                                                placeholder="Bank transfer reference"
-                                                class="w-full px-3 py-2.5 border border-blue-200 rounded-lg text-sm"
-                                            >
-
-                                            <div>
-                                                <label
-                                                    class="block text-xs font-semibold text-blue-800 mb-1.5"
-                                                >
-                                                    Transfer Receipt
-                                                </label>
-                                                <input
-                                                    type="file"
-                                                    name="transfer_receipt"
-                                                    accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
-                                                    required
-                                                    class="block w-full text-xs text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-blue-100 file:text-blue-700 file:font-semibold"
-                                                >
-                                                <p class="text-[11px] text-blue-600 mt-1">
-                                                    JPG, PNG, WEBP or PDF · Maximum 5MB
-                                                </p>
-                                            </div>
-
-                                            <input
-                                                type="password"
-                                                name="current_password"
-                                                maxlength="72"
-                                                autocomplete="current-password"
-                                                required
-                                                placeholder="Current admin password"
-                                                class="w-full px-3 py-2.5 border border-blue-200 rounded-lg text-sm"
-                                            >
-
-                                            <button
-                                                type="submit"
-                                                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg text-sm"
-                                            >
-                                                Complete Transfer
-                                            </button>
-                                        </form>
-                                    </div>
-
-                                    <?php else: ?>
-                                        <div
-                                            class="rounded-xl border border-gray-200 bg-gray-50 p-5"
-                                        >
-                                            <p
-                                                class="text-sm font-black text-gray-700"
-                                            >
-                                                Bank Submission Required
-                                            </p>
-                                            <p
-                                                class="mt-1 text-xs leading-relaxed text-gray-500"
-                                            >
-                                                Run the bank gateway database migration to prepare this legacy approved request.
-                                            </p>
-                                        </div>
-                                    <?php endif; ?>
-
-                                    <div
-                                        class="bg-orange-50 border border-orange-100 rounded-xl p-4 mt-4"
-                                    >
-                                        <p
-                                            class="font-bold text-orange-800 text-sm"
-                                        >
-                                            Bank Transfer Failed
-                                        </p>
-
-                                        <p
-                                            class="text-xs text-orange-700 mt-1 leading-relaxed"
-                                        >
-                                            Use this only when the external
-                                            bank transfer was not completed.
-                                            The reserved wallet funds will be
-                                            released back to the customer.
-                                        </p>
-
-                                        <form
-                                            method="POST"
-                                            class="mt-4 space-y-3"
-                                            data-confirm-title="Mark Transfer Failed"
-                                            data-confirm-message="Confirm the bank transfer was not completed and release the reserved funds back to the customer wallet?"
-                                            data-confirm-button="Mark Failed & Release"
-                                            data-confirm-tone="orange"
-                                            onsubmit="return openWithdrawalActionModal(event, this)"
-                                        >
-                                            <?php csrf_field(); ?>
-
-                                            <input
-                                                type="hidden"
-                                                name="withdrawal_id"
-                                                value="<?= (int) $request['wallet_withdrawal_id'] ?>"
-                                            >
-
-                                            <input
-                                                type="hidden"
-                                                name="action"
-                                                value="fail"
-                                            >
-
-                                            <textarea
-                                                name="failure_reason"
-                                                maxlength="1000"
-                                                rows="3"
-                                                required
-                                                placeholder="Bank rejection, invalid account, transfer service unavailable, etc."
-                                                class="w-full px-3 py-2 border border-orange-200 rounded-lg text-sm resize-none"
-                                            ></textarea>
-
-                                            <input
-                                                type="password"
-                                                name="current_password"
-                                                maxlength="72"
-                                                autocomplete="current-password"
-                                                required
-                                                placeholder="Current admin password"
-                                                class="w-full px-3 py-2.5 border border-orange-200 rounded-lg text-sm"
-                                            >
-
-                                            <button
-                                                type="submit"
-                                                class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2.5 rounded-lg text-sm"
-                                            >
-                                                Mark Transfer Failed & Release Funds
-                                            </button>
-                                        </form>
-                                    </div>
-
-                                <?php elseif ($status === 'completed'): ?>
-                                    <div
-                                        class="bg-green-50 border border-green-100 rounded-xl p-5"
-                                    >
-                                        <p class="font-bold text-green-800 text-sm">
-                                            Transfer Completed
-                                        </p>
-                                        <p class="text-xs text-green-700 mt-1 leading-relaxed">
-                                            The reserved amount has been permanently debited and the transfer receipt is locked to this withdrawal record.
-                                        </p>
-                                    </div>
-
-                                <?php elseif ($status === 'failed'): ?>
-                                    <div
-                                        class="bg-orange-50 border border-orange-200 rounded-xl p-5"
-                                    >
-                                        <p
-                                            class="font-bold text-orange-800 text-sm"
-                                        >
-                                            Bank Transfer Failed
-                                        </p>
-
-                                        <p
-                                            class="text-xs text-orange-700 mt-1 leading-relaxed"
-                                        >
-                                            The external bank transfer was
-                                            not completed. Reserved funds were
-                                            released back to the customer's
-                                            MangaVault Wallet.
-                                        </p>
-
-                                        <?php if (
-                                            !empty(
-                                                $request[
-                                                    'wallet_withdrawal_failure_reason'
-                                                ]
-                                            )
-                                        ): ?>
-                                            <p
-                                                class="text-xs text-orange-700 mt-3"
-                                            >
-                                                Reason:
-                                                <?= htmlspecialchars(
-                                                    (string) $request[
-                                                        'wallet_withdrawal_failure_reason'
-                                                    ],
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ) ?>
-                                            </p>
-                                        <?php endif; ?>
-                                    </div>
-
-                                <?php else: ?>
-                                    <div
-                                        class="bg-gray-50 border border-gray-200 rounded-xl p-5"
-                                    >
-                                        <p class="font-bold text-gray-700 text-sm">
-                                            Request Rejected
-                                        </p>
-                                        <p class="text-xs text-gray-500 mt-1 leading-relaxed">
-                                            Reserved funds were released back to the wallet. The original refund may be requested again only if its 7-day withdrawal deadline has not expired.
-                                        </p>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </section>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-    </main>
-
-    <div
-        id="withdrawalActionModal"
-        class="hidden fixed inset-0 z-[120] items-center justify-center bg-slate-950/65 px-4 py-8 backdrop-blur-sm"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="withdrawalActionTitle"
-    >
-        <div
-            class="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl"
-        >
-            <div
-                id="withdrawalActionHeader"
-                class="bg-[#17243d] px-6 py-5 text-white"
-            >
-                <div class="flex items-center gap-4">
-                    <div
-                        class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-white/15 text-2xl"
-                        aria-hidden="true"
-                    >
-                        🏦
-                    </div>
-                    <div>
-                        <p
-                            class="text-[10px] font-black uppercase tracking-[0.18em] text-white/55"
-                        >
-                            Admin confirmation
-                        </p>
-                        <h2
-                            id="withdrawalActionTitle"
-                            class="mt-1 text-xl font-black"
-                        >
-                            Confirm Action
-                        </h2>
-                    </div>
-                </div>
-            </div>
-
-            <div class="p-6">
-                <div
-                    class="rounded-2xl border border-gray-200 bg-gray-50 p-4"
-                >
-                    <div
-                        class="flex items-center justify-between gap-4 border-b border-gray-200 pb-3"
-                    >
-                        <span class="text-sm text-gray-500">
-                            Withdrawal
-                        </span>
-                        <strong
-                            id="withdrawalActionNumber"
-                            class="text-gray-900"
-                        >
-                            #0000
-                        </strong>
-                    </div>
-                    <div
-                        class="flex items-center justify-between gap-4 pt-3"
-                    >
-                        <span class="text-sm text-gray-500">
-                            Amount
-                        </span>
-                        <strong
-                            id="withdrawalActionAmount"
-                            class="text-lg text-red-600"
-                        >
-                            RM 0.00
-                        </strong>
-                    </div>
-                </div>
-
-                <p
-                    id="withdrawalActionMessage"
-                    class="mt-5 text-sm leading-6 text-gray-600"
-                ></p>
-
-                <div class="mt-6 grid grid-cols-2 gap-3">
-                    <button
-                        type="button"
-                        onclick="closeWithdrawalActionModal()"
-                        class="rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold text-gray-600 transition-colors hover:bg-gray-50"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        type="button"
-                        id="withdrawalActionConfirm"
-                        onclick="confirmWithdrawalAction()"
-                        class="rounded-xl bg-[#17243d] px-4 py-3 text-sm font-bold text-white transition-opacity hover:opacity-90"
-                    >
-                        Confirm
-                    </button>
-                </div>
-            </div>
+            <p class="mt-2 max-w-4xl text-sm leading-6 text-slate-500">
+                MangaVault Admin authorizes or rejects the customer request. After approval, the destination institution independently verifies and settles the instruction. Admin can monitor the lifecycle but cannot manually mark a bank transfer completed or failed, preserving segregation of duties.
+            </p>
         </div>
     </div>
 
-    <script>
-        let pendingWithdrawalActionForm = null;
+    <?php if ($error !== ''): ?>
+        <div class="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            <?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?>
+        </div>
+    <?php elseif ($result !== '' && $resultId !== false && $resultId !== null): ?>
+        <div class="mb-5 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
+            Withdrawal #<?= str_pad((string) $resultId, 4, '0', STR_PAD_LEFT) ?> was <?= $result === 'approve' ? 'approved and submitted to the destination bank' : 'rejected and its wallet reserve released' ?> successfully.
+        </div>
+    <?php endif; ?>
 
-        function openWithdrawalActionModal(
-            event,
-            form
-        ) {
-            event.preventDefault();
+    <section class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5">
+        <?php
+        $summary = [
+            'pending' => ['Pending', 'Merchant decision', 'border-amber-200 bg-amber-50 text-amber-800'],
+            'approved' => ['In Bank Flow', 'Verification / settlement', 'border-blue-200 bg-blue-50 text-blue-800'],
+            'failed' => ['Failed', 'Funds released', 'border-orange-200 bg-orange-50 text-orange-800'],
+            'completed' => ['Settled', 'Wallet debit posted', 'border-green-200 bg-green-50 text-green-800'],
+            'rejected' => ['Rejected', 'Before bank submission', 'border-red-200 bg-red-50 text-red-800'],
+        ];
+        ?>
+        <?php foreach ($summary as $key => $card): ?>
+            <a
+                href="?status=<?= urlencode($key) ?>"
+                class="rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md <?= $card[2] ?> <?= $statusFilter === $key ? 'ring-2 ring-slate-300 ring-offset-2' : '' ?>"
+            >
+                <div class="text-[10px] font-black uppercase tracking-wider opacity-70"><?= htmlspecialchars($card[0], ENT_QUOTES, 'UTF-8') ?></div>
+                <div class="mt-1 text-2xl font-black"><?= (int) $counts[$key] ?></div>
+                <div class="mt-1 text-[10px] opacity-70"><?= htmlspecialchars($card[1], ENT_QUOTES, 'UTF-8') ?></div>
+            </a>
+        <?php endforeach; ?>
+    </section>
 
-            pendingWithdrawalActionForm = form;
+    <div class="mb-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div class="flex min-w-max items-center gap-2">
+            <span class="px-3 text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Queue</span>
+            <?php foreach ([
+                'all' => 'All Requests',
+                'pending' => 'Pending',
+                'approved' => 'In Bank Flow',
+                'failed' => 'Failed',
+                'completed' => 'Settled',
+                'rejected' => 'Rejected',
+            ] as $key => $label): ?>
+                <a
+                    href="?status=<?= urlencode($key) ?>"
+                    class="rounded-xl px-4 py-2.5 text-sm font-bold <?= $statusFilter === $key ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800' ?>"
+                ><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></a>
+            <?php endforeach; ?>
+        </div>
+    </div>
 
-            const modal = document.getElementById(
-                'withdrawalActionModal'
-            );
-            const withdrawalInput =
-                form.querySelector(
-                    '[name="withdrawal_id"]'
+    <?php if ($requests === []): ?>
+        <section class="rounded-3xl border border-slate-200 bg-white px-6 py-16 text-center shadow-sm">
+            <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-xl font-black text-slate-400">WD</div>
+            <p class="mt-4 font-black text-slate-700">No withdrawal requests in this queue</p>
+        </section>
+    <?php else: ?>
+        <div class="space-y-5">
+            <?php foreach ($requests as $request): ?>
+                <?php
+                $withdrawalId = (int) $request['wallet_withdrawal_id'];
+                $status = (string) $request['wallet_withdrawal_status'];
+                $bankStatus = (string) (
+                    $request['wallet_withdrawal_bank_status'] ?? 'not_submitted'
                 );
-            const section = form.closest('section');
-            const amountElement = section
-                ? section.querySelector(
-                    '.text-2xl.font-black.text-red-600'
-                )
-                : null;
+                $settlementStatus = (string) (
+                    $request['wallet_withdrawal_bank_settlement_status'] ?? 'not_required'
+                );
+                [$stageLabel, $stageClass, $stageCopy] = adminWithdrawalBankStage($request);
+                $customerName = trim(
+                    (string) $request['user_first_name'] . ' ' .
+                    (string) $request['user_last_name']
+                );
+                $amountSen = moneyDecimalToSen(
+                    (string) $request['wallet_withdrawal_amount']
+                );
+                $shouldPoll = $status === 'approved';
+                ?>
+                <section
+                    class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+                    <?= $shouldPoll ? 'data-bank-poll-id="' . $withdrawalId . '" data-bank-poll-signature="' . htmlspecialchars($status . '|' . $bankStatus . '|' . $settlementStatus, ENT_QUOTES, 'UTF-8') . '"' : '' ?>
+                >
+                    <div class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 bg-slate-50/70 px-6 py-5">
+                        <div>
+                            <div class="flex flex-wrap items-center gap-3">
+                                <h2 class="text-lg font-black text-slate-900">Withdrawal #<?= str_pad((string) $withdrawalId, 4, '0', STR_PAD_LEFT) ?></h2>
+                                <span class="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-wider <?= $stageClass ?>"><?= htmlspecialchars($stageLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                            </div>
+                            <p class="mt-1 text-xs text-slate-400">
+                                Requested <?= htmlspecialchars(walletWithdrawalMalaysiaDateTime((string) $request['wallet_withdrawal_created_at'], 'd M Y, h:i A', 'Not available') . ' MYT', ENT_QUOTES, 'UTF-8') ?>
+                            </p>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-2xl font-black text-red-600">RM <?= moneyFormatSen($amountSen) ?></div>
+                            <div class="mt-1 text-[10px] font-semibold text-slate-400"><?= htmlspecialchars($stageCopy, ENT_QUOTES, 'UTF-8') ?></div>
+                        </div>
+                    </div>
 
-            document.getElementById(
-                'withdrawalActionTitle'
-            ).textContent =
-                form.dataset.confirmTitle ||
-                'Confirm Action';
+                    <div class="grid grid-cols-1 gap-6 p-6 lg:grid-cols-[1fr_360px]">
+                        <div class="space-y-4">
+                            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                                <div class="rounded-2xl bg-slate-50 p-4">
+                                    <div class="text-[10px] font-black uppercase tracking-wider text-slate-400">Customer</div>
+                                    <div class="mt-1 font-black text-slate-800"><?= htmlspecialchars($customerName, ENT_QUOTES, 'UTF-8') ?></div>
+                                    <div class="mt-1 text-xs text-slate-400"><?= htmlspecialchars((string) $request['user_gmail'], ENT_QUOTES, 'UTF-8') ?></div>
+                                </div>
+                                <div class="rounded-2xl bg-slate-50 p-4">
+                                    <div class="text-[10px] font-black uppercase tracking-wider text-slate-400">Destination</div>
+                                    <div class="mt-1 font-black text-slate-800"><?= htmlspecialchars((string) $request['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?></div>
+                                    <div class="mt-1 text-xs text-slate-500"><?= htmlspecialchars((string) $request['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?> · ••••<?= htmlspecialchars((string) $request['wallet_withdrawal_account_number_last4'], ENT_QUOTES, 'UTF-8') ?></div>
+                                </div>
+                                <div class="rounded-2xl bg-slate-50 p-4">
+                                    <div class="text-[10px] font-black uppercase tracking-wider text-slate-400">Bank Lifecycle</div>
+                                    <div class="mt-1 font-black text-slate-800"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $bankStatus)), ENT_QUOTES, 'UTF-8') ?></div>
+                                    <div class="mt-1 text-xs text-slate-500">Settlement: <?= htmlspecialchars(ucfirst(str_replace('_', ' ', $settlementStatus)), ENT_QUOTES, 'UTF-8') ?></div>
+                                </div>
+                            </div>
 
-            document.getElementById(
-                'withdrawalActionMessage'
-            ).textContent =
-                form.dataset.confirmMessage ||
-                'Please confirm this withdrawal action.';
+                            <?php if (!empty($request['wallet_withdrawal_bank_submission_id'])): ?>
+                                <div class="rounded-2xl border border-slate-200 p-4">
+                                    <div class="flex flex-wrap items-start justify-between gap-4">
+                                        <div>
+                                            <div class="text-[10px] font-black uppercase tracking-wider text-slate-400">Bank Submission ID</div>
+                                            <div class="mt-1 break-all font-mono text-sm font-bold text-slate-700"><?= htmlspecialchars((string) $request['wallet_withdrawal_bank_submission_id'], ENT_QUOTES, 'UTF-8') ?></div>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-[10px] font-black uppercase tracking-wider text-slate-400">Submitted</div>
+                                            <div class="mt-1 text-sm font-bold text-slate-700"><?= htmlspecialchars(walletWithdrawalMalaysiaDateTime((string) ($request['wallet_withdrawal_bank_submitted_at'] ?? ''), 'd M Y, h:i A', 'Not available') . ' MYT', ENT_QUOTES, 'UTF-8') ?></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
 
-            document.getElementById(
-                'withdrawalActionNumber'
-            ).textContent =
-                '#' + String(
-                    withdrawalInput
-                        ? withdrawalInput.value
-                        : '0'
-                ).padStart(4, '0');
+                            <?php if ($bankStatus === 'approved'): ?>
+                                <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                                    <div class="text-sm font-black text-blue-900">Bank verification accepted</div>
+                                    <div class="mt-1 text-xs leading-5 text-blue-700">
+                                        Authorization reference: <span class="font-mono font-bold"><?= htmlspecialchars((string) ($request['wallet_withdrawal_bank_decision_reference'] ?? 'Not available'), ENT_QUOTES, 'UTF-8') ?></span>
+                                    </div>
+                                    <div class="mt-1 text-xs text-blue-700">
+                                        Decision: <?= htmlspecialchars(walletWithdrawalMalaysiaDateTime((string) ($request['wallet_withdrawal_bank_decided_at'] ?? ''), 'd M Y, h:i A', 'Not available') . ' MYT', ENT_QUOTES, 'UTF-8') ?>
+                                    </div>
+                                </div>
+                            <?php elseif ($bankStatus === 'rejected'): ?>
+                                <div class="rounded-2xl border border-red-200 bg-red-50 p-4">
+                                    <div class="text-sm font-black text-red-900">Bank verification rejected</div>
+                                    <div class="mt-1 text-xs leading-5 text-red-700">
+                                        <?= htmlspecialchars((string) ($request['wallet_withdrawal_bank_decision_note'] ?? 'No bank reason recorded.'), ENT_QUOTES, 'UTF-8') ?>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
 
-            document.getElementById(
-                'withdrawalActionAmount'
-            ).textContent = amountElement
-                ? amountElement.textContent.trim()
-                : 'Withdrawal amount';
+                            <?php if ($settlementStatus === 'processing'): ?>
+                                <div class="rounded-2xl border border-cyan-200 bg-cyan-50 p-4">
+                                    <div class="text-sm font-black text-cyan-900">Settlement is processing</div>
+                                    <div class="mt-1 text-xs text-cyan-700">
+                                        Started <?= htmlspecialchars(walletWithdrawalMalaysiaDateTime((string) ($request['wallet_withdrawal_bank_settlement_started_at'] ?? ''), 'd M Y, h:i A', 'Not available') . ' MYT', ENT_QUOTES, 'UTF-8') ?>. MangaVault cannot complete this transfer manually.
+                                    </div>
+                                </div>
+                            <?php endif; ?>
 
-            document.getElementById(
-                'withdrawalActionConfirm'
-            ).textContent =
-                form.dataset.confirmButton ||
-                'Confirm';
+                            <?php if ($status === 'completed'): ?>
+                                <div class="rounded-2xl border border-green-200 bg-green-50 p-4">
+                                    <div class="text-sm font-black text-green-900">Settlement completed and wallet debit posted</div>
+                                    <div class="mt-2 grid grid-cols-1 gap-2 text-xs text-green-800 md:grid-cols-2">
+                                        <div><strong>Settlement reference:</strong><br><span class="font-mono"><?= htmlspecialchars((string) ($request['wallet_withdrawal_transfer_reference'] ?? 'Not available'), ENT_QUOTES, 'UTF-8') ?></span></div>
+                                        <div><strong>Settled:</strong><br><?= htmlspecialchars(walletWithdrawalMalaysiaDateTime((string) ($request['wallet_withdrawal_bank_settled_at'] ?? $request['wallet_withdrawal_completed_at'] ?? ''), 'd M Y, h:i A', 'Not available') . ' MYT', ENT_QUOTES, 'UTF-8') ?></div>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
 
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-            document.body.classList.add(
-                'overflow-hidden'
-            );
-        }
+                            <?php if ($status === 'failed'): ?>
+                                <div class="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                                    <div class="text-sm font-black text-orange-900">Bank flow closed without settlement</div>
+                                    <div class="mt-1 text-xs leading-5 text-orange-700">
+                                        Reserved funds were released automatically. <?= htmlspecialchars((string) ($request['wallet_withdrawal_failure_reason'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
 
-        function closeWithdrawalActionModal() {
-            const modal = document.getElementById(
-                'withdrawalActionModal'
-            );
+                            <div class="flex flex-wrap gap-2">
+                                <?php if (in_array($status, ['pending', 'approved'], true)): ?>
+                                    <a href="wallet_withdrawal_bank.php?id=<?= $withdrawalId ?>" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">🔐 Reveal Protected Bank Details</a>
+                                <?php endif; ?>
 
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-            document.body.classList.remove(
-                'overflow-hidden'
-            );
-            pendingWithdrawalActionForm = null;
-        }
+                                <?php if ($bankStatus === 'approved'): ?>
+                                    <a href="wallet_withdrawal_bank_confirmation.php?id=<?= $withdrawalId ?>&amp;download=1" class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100">Download Bank Verification Proof</a>
+                                <?php endif; ?>
 
-        function confirmWithdrawalAction() {
-            if (!pendingWithdrawalActionForm) {
-                return;
-            }
+                                <?php if (in_array($status, ['approved', 'completed'], true)): ?>
+                                    <a href="wallet_withdrawal_receipt.php?id=<?= $withdrawalId ?>&amp;download=1" class="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 hover:bg-indigo-100"><?= $status === 'completed' ? 'Download Transfer Confirmation' : 'Download Approval PDF' ?></a>
+                                <?php endif; ?>
 
-            const form = pendingWithdrawalActionForm;
-            const button = document.getElementById(
-                'withdrawalActionConfirm'
-            );
+                                <?php if ($status === 'completed' && !empty($request['wallet_withdrawal_receipt_file'])): ?>
+                                    <a href="wallet_withdrawal_evidence.php?id=<?= $withdrawalId ?>" target="_blank" rel="noopener noreferrer" class="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm font-bold text-green-700 hover:bg-green-100">View Legacy Transfer Evidence</a>
+                                <?php endif; ?>
+                            </div>
+                        </div>
 
-            button.disabled = true;
-            button.textContent = 'Processing...';
-            form.submit();
-        }
+                        <aside>
+                            <?php if ($status === 'pending'): ?>
+                                <div class="rounded-2xl border border-green-200 bg-green-50 p-4">
+                                    <div class="text-sm font-black text-green-900">Approve & Submit to Bank</div>
+                                    <p class="mt-1 text-xs leading-5 text-green-700">Approval authorizes the withdrawal but does not send money. The destination bank must verify and settle independently.</p>
+                                    <form method="POST" class="mt-4 space-y-3" onsubmit="return confirm('Approve this withdrawal and submit it to the destination bank?')">
+                                        <?php csrf_field(); ?>
+                                        <input type="hidden" name="withdrawal_id" value="<?= $withdrawalId ?>">
+                                        <input type="hidden" name="action" value="approve">
+                                        <textarea name="admin_note" maxlength="1000" rows="3" placeholder="Optional approval note..." class="w-full resize-none rounded-xl border border-green-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-200"></textarea>
+                                        <button type="submit" class="w-full rounded-xl bg-green-600 py-2.5 text-sm font-black text-white hover:bg-green-700">Approve & Submit</button>
+                                    </form>
+                                </div>
 
-        document.getElementById(
-            'withdrawalActionModal'
-        ).addEventListener(
-            'click',
-            function (event) {
-                if (event.target === this) {
-                    closeWithdrawalActionModal();
-                }
-            }
-        );
+                                <div class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4">
+                                    <div class="text-sm font-black text-red-900">Reject Before Bank Submission</div>
+                                    <p class="mt-1 text-xs leading-5 text-red-700">This releases the wallet reserve immediately. A reason is required.</p>
+                                    <form method="POST" class="mt-4 space-y-3" onsubmit="return confirm('Reject this withdrawal and release the reserved funds?')">
+                                        <?php csrf_field(); ?>
+                                        <input type="hidden" name="withdrawal_id" value="<?= $withdrawalId ?>">
+                                        <input type="hidden" name="action" value="reject">
+                                        <textarea name="admin_note" maxlength="1000" rows="3" required placeholder="Rejection reason..." class="w-full resize-none rounded-xl border border-red-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-200"></textarea>
+                                        <button type="submit" class="w-full rounded-xl bg-red-600 py-2.5 text-sm font-black text-white hover:bg-red-700">Reject & Release</button>
+                                    </form>
+                                </div>
+                            <?php elseif ($status === 'approved'): ?>
+                                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-xs font-black text-white">BL</div>
+                                    <div class="mt-3 text-sm font-black text-slate-900">Bank-controlled stage</div>
+                                    <p class="mt-1 text-xs leading-5 text-slate-600">
+                                        Admin actions are locked after submission. Verification, settlement and failure handling must be posted by the destination bank operator. This prevents the same role from authorizing and settling its own payout.
+                                    </p>
+                                    <?php if ($bankStatus === 'rejected' && $status === 'approved'): ?>
+                                        <div class="mt-4 rounded-xl border border-purple-200 bg-purple-50 p-3 text-xs font-semibold leading-5 text-purple-700">
+                                            Historical mismatch detected. Open the bank Reconciliation queue and use “Reconcile & Release”. Do not manually change database values.
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                            <?php elseif ($status === 'completed'): ?>
+                                <div class="rounded-2xl border border-green-200 bg-green-50 p-5">
+                                    <div class="text-sm font-black text-green-900">Read-only settled record</div>
+                                    <p class="mt-1 text-xs leading-5 text-green-700">The destination bank confirmed settlement and the wallet debit was posted automatically. No Admin completion action is available.</p>
+                                </div>
+                            <?php elseif ($status === 'failed'): ?>
+                                <div class="rounded-2xl border border-orange-200 bg-orange-50 p-5">
+                                    <div class="text-sm font-black text-orange-900">Read-only failed record</div>
+                                    <p class="mt-1 text-xs leading-5 text-orange-700">The bank workflow ended without settlement and reserved wallet funds were released automatically.</p>
+                                </div>
+                            <?php else: ?>
+                                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                                    <div class="text-sm font-black text-slate-900">Read-only record</div>
+                                    <p class="mt-1 text-xs leading-5 text-slate-600">This withdrawal is final and no further action is required.</p>
+                                </div>
+                            <?php endif; ?>
+                        </aside>
+                    </div>
+                </section>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+</main>
 
-        document.addEventListener(
-            'keydown',
-            function (event) {
-                if (event.key === 'Escape') {
-                    closeWithdrawalActionModal();
-                }
-            }
-        );
+<script>
+    async function pollBankLifecycle() {
+        const cards = document.querySelectorAll('[data-bank-poll-id]');
 
-        async function pollBankVerificationCards() {
-            const cards = document.querySelectorAll(
-                '[data-bank-poll-id]'
-            );
+        await Promise.all(Array.from(cards).map(async (card) => {
+            const id = card.dataset.bankPollId;
+            const original = card.dataset.bankPollSignature;
 
-            await Promise.all(
-                Array.from(cards).map(async (card) => {
-                    const withdrawalId =
-                        card.dataset.bankPollId;
-
-                    try {
-                        const response = await fetch(
-                            'wallet_withdrawal_bank_status.php?' +
-                                new URLSearchParams({
-                                    id: withdrawalId,
-                                }),
-                            {
-                                credentials: 'same-origin',
-                                cache: 'no-store',
-                                headers: {
-                                    Accept: 'application/json',
-                                },
-                            }
-                        );
-
-                        if (!response.ok) {
-                            return;
-                        }
-
-                        const result = await response.json();
-
-                        if (
-                            result.ok &&
-                            result.bank_status !== 'pending'
-                        ) {
-                            window.location.reload();
-                        }
-                    } catch (error) {
-                        // A temporary polling failure must not interrupt Admin work.
+            try {
+                const response = await fetch(
+                    'wallet_withdrawal_bank_status.php?' + new URLSearchParams({ id }),
+                    {
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                        headers: { Accept: 'application/json' },
                     }
-                })
-            );
-        }
+                );
+                if (!response.ok) return;
+                const payload = await response.json();
+                if (!payload.ok) return;
 
-        if (
-            document.querySelector('[data-bank-poll-id]')
-        ) {
-            window.setInterval(
-                pollBankVerificationCards,
-                10000
-            );
-        }
-    </script>
+                const current = [
+                    payload.withdrawal_status,
+                    payload.bank_status,
+                    payload.settlement_status,
+                ].join('|');
+
+                if (current !== original || payload.is_final) {
+                    window.location.reload();
+                }
+            } catch (error) {
+                // Temporary polling failures do not interrupt Admin work.
+            }
+        }));
+    }
+
+    if (document.querySelector('[data-bank-poll-id]')) {
+        window.setInterval(pollBankLifecycle, 8000);
+    }
+</script>
 
 </body>
 </html>
