@@ -5,6 +5,7 @@ require_senior_admin();
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/wallet_withdrawal_helper.php';
+require_once __DIR__ . '/../includes/wallet_withdrawal_lifecycle_helper.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -54,21 +55,35 @@ try {
         'settlement_reference' => (string) (
             $request['wallet_withdrawal_transfer_reference'] ?? ''
         ),
-        'bank_decided_at_myt' => walletWithdrawalMalaysiaDateTime(
-            (string) ($request['wallet_withdrawal_bank_decided_at'] ?? ''),
+        'bank_decided_at_myt' => walletWithdrawalLifecycleEventMyt(
+            $request,
+            'wallet_withdrawal_bank_decided_at',
             'd M Y, h:i A',
             ''
         ),
-        'settlement_started_at_myt' => walletWithdrawalMalaysiaDateTime(
-            (string) ($request['wallet_withdrawal_bank_settlement_started_at'] ?? ''),
+        'settlement_started_at_myt' => walletWithdrawalLifecycleEventMyt(
+            $request,
+            'wallet_withdrawal_bank_settlement_started_at',
             'd M Y, h:i A',
             ''
         ),
-        'settled_at_myt' => walletWithdrawalMalaysiaDateTime(
-            (string) ($request['wallet_withdrawal_bank_settled_at'] ?? ''),
+        'settled_at_myt' => walletWithdrawalLifecycleEventMyt(
+            $request,
+            'wallet_withdrawal_bank_settled_at',
             'd M Y, h:i A',
             ''
         ),
+        'bank_decision_pdf_url' => in_array(
+            $bankStatus,
+            ['approved', 'rejected'],
+            true
+        )
+            ? 'wallet_withdrawal_bank_confirmation.php?' . http_build_query([
+                'id' => (int) $withdrawalId,
+                'download' => 1,
+            ])
+            : '',
+        'retry_expires_at_myt' => walletWithdrawalRetryDeadlineLabel($request),
         'is_final' => in_array(
             $withdrawalStatus,
             ['completed', 'failed', 'rejected'],

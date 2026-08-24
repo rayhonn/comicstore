@@ -1,514 +1,202 @@
 <?php
 
 require_once __DIR__ . '/money_helper.php';
-require_once __DIR__ . '/bank_gateway_helper.php';
+require_once __DIR__ . '/wallet_withdrawal_lifecycle_helper.php';
 
 function loadBankConfirmationRecord(
     PDO $pdo,
     int $withdrawalId,
-    ?string $bankCode = null
+    ?string $bankCode = null,
+    ?int $customerId = null
 ): array {
+    assertWalletWithdrawalLifecycleSchema($pdo);
+
     if ($withdrawalId < 1) {
-        throw new BankGatewayException(
-            'Invalid bank confirmation request.'
-        );
+        throw new RuntimeException('Invalid bank decision document.');
     }
 
     $sql = "
         SELECT
             wr.*,
-            customer.user_first_name
-                AS customer_first_name,
-            customer.user_last_name
-                AS customer_last_name,
-            reviewer.user_first_name
-                AS reviewer_first_name,
-            reviewer.user_last_name
-                AS reviewer_last_name,
-            operator.bank_gateway_operator_display_name,
-            operator.bank_gateway_operator_bank_code,
-            operator.bank_gateway_operator_bank_name
+            customer.user_first_name,
+            customer.user_last_name,
+            customer.user_gmail,
+            reviewer.user_first_name AS reviewer_first_name,
+            reviewer.user_last_name AS reviewer_last_name,
+            decision_operator.bank_gateway_operator_display_name AS bank_decision_operator,
+            decision_operator.bank_gateway_operator_bank_name AS decision_bank_name
         FROM wallet_withdrawal_requests wr
         INNER JOIN users customer
-            ON customer.user_id =
-                wr.wallet_withdrawal_user_id
+            ON customer.user_id = wr.wallet_withdrawal_user_id
         LEFT JOIN users reviewer
-            ON reviewer.user_id =
-                wr.wallet_withdrawal_reviewed_by
-        LEFT JOIN bank_gateway_operators operator
-            ON operator.bank_gateway_operator_id =
-                wr.wallet_withdrawal_bank_decided_by
+            ON reviewer.user_id = wr.wallet_withdrawal_reviewed_by
+        LEFT JOIN bank_gateway_operators decision_operator
+            ON decision_operator.bank_gateway_operator_id = wr.wallet_withdrawal_bank_decided_by
         WHERE wr.wallet_withdrawal_id = ?
-        AND wr.wallet_withdrawal_bank_status = 'approved'
+          AND wr.wallet_withdrawal_bank_status IN ('approved', 'rejected')
+          AND wr.wallet_withdrawal_bank_decided_at IS NOT NULL
     ";
     $params = [$withdrawalId];
 
     if ($bankCode !== null) {
-        $bank = normalizeWalletWithdrawalBankCode(
-            $bankCode
-        );
-        $sql .= '
-            AND wr.wallet_withdrawal_bank_code = ?
-        ';
+        $bank = normalizeWalletWithdrawalBankCode($bankCode);
+        $sql .= ' AND wr.wallet_withdrawal_bank_code = ?';
         $params[] = $bank['code'];
+    }
+    if ($customerId !== null) {
+        if ($customerId < 1) {
+            throw new RuntimeException('Invalid customer document scope.');
+        }
+        $sql .= ' AND wr.wallet_withdrawal_user_id = ?';
+        $params[] = $customerId;
     }
 
     $sql .= ' LIMIT 1';
-
     $statement = $pdo->prepare($sql);
     $statement->execute($params);
-    $record = $statement->fetch(
-        PDO::FETCH_ASSOC
-    );
+    $record = $statement->fetch(PDO::FETCH_ASSOC);
 
     if (!$record) {
-        throw new BankGatewayException(
-            'Bank confirmation proof is not available.'
-        );
+        throw new RuntimeException('Bank decision PDF is not available.');
     }
 
     return $record;
 }
 
-function bankConfirmationEscape(mixed $value): string
+function bankConfirmationDocumentNumber(array $record): string
 {
-    return htmlspecialchars(
-        (string) $value,
-        ENT_QUOTES,
-        'UTF-8'
-    );
+    $suffix = (string) ($record['wallet_withdrawal_bank_status'] ?? '') === 'rejected'
+        ? 'R'
+        : 'A';
+    return 'MV-BANK-' . str_pad(
+        (string) ($record['wallet_withdrawal_id'] ?? 0),
+        8,
+        '0',
+        STR_PAD_LEFT
+    ) . '-' . $suffix;
 }
 
-function bankConfirmationDocumentNumber(
-    array $record
-): string {
-    return 'MV-BG-' .
-        str_pad(
-            (string) (
-                $record[
-                    'wallet_withdrawal_id'
-                ] ?? 0
-            ),
-            6,
-            '0',
-            STR_PAD_LEFT
-        ) .
-        '-A';
+function bankConfirmationDocumentFilename(array $record): string
+{
+    $decision = (string) ($record['wallet_withdrawal_bank_status'] ?? '') === 'rejected'
+        ? 'rejected'
+        : 'accepted';
+    return 'bank-decision-' . $decision . '-withdrawal-' .
+        str_pad((string) ($record['wallet_withdrawal_id'] ?? 0), 4, '0', STR_PAD_LEFT) . '.pdf';
 }
 
-function buildBankConfirmationHtml(array $record): string
+function buildBankConfirmationDocumentHtml(array $record): string
 {
-    $documentNumber =
-        bankConfirmationDocumentNumber($record);
+    $isRejected = (string) $record['wallet_withdrawal_bank_status'] === 'rejected';
+    $decisionLabel = $isRejected ? 'REJECTED' : 'ACCEPTED FOR SETTLEMENT';
+    $decisionTitle = $isRejected
+        ? 'Institution Verification Rejected'
+        : 'Institution Verification Accepted';
+    $accent = $isRejected ? '#9f2f36' : '#236341';
+    $soft = $isRejected ? '#fff4f4' : '#f2f8f4';
     $customerName = trim(
-        (string) $record['customer_first_name'] .
-        ' ' .
-        (string) $record['customer_last_name']
+        (string) $record['user_first_name'] . ' ' .
+        (string) $record['user_last_name']
     );
-    $adminName = trim(
-        (string) $record['reviewer_first_name'] .
-        ' ' .
-        (string) $record['reviewer_last_name']
+    $reviewerName = trim(
+        (string) ($record['reviewer_first_name'] ?? '') . ' ' .
+        (string) ($record['reviewer_last_name'] ?? '')
     );
-    $operatorName = trim(
-        (string) (
-            $record[
-                'bank_gateway_operator_display_name'
-            ] ?? ''
-        )
+    $operatorName = trim((string) ($record['bank_decision_operator'] ?? 'Institution Operations Desk'));
+    $amount = moneyFormatSen(moneyDecimalToSen((string) $record['wallet_withdrawal_amount']));
+    $submitted = walletWithdrawalLifecycleEventMyt(
+        $record,
+        'wallet_withdrawal_bank_submitted_at'
     );
-    $bankName = (string) $record[
-        'wallet_withdrawal_bank_name'
-    ];
-    $amountSen = moneyDecimalToSen(
-        (string) $record[
-            'wallet_withdrawal_amount'
-        ]
+    $decided = walletWithdrawalLifecycleEventMyt(
+        $record,
+        'wallet_withdrawal_bank_decided_at'
     );
-    $verificationHash = strtoupper(
-        substr(
-            (string) $record[
-                'wallet_withdrawal_bank_verification_hash'
-            ],
-            0,
-            20
-        )
-    );
+    $retry = walletWithdrawalRetryDeadlineLabel($record);
+    $reason = trim((string) ($record['wallet_withdrawal_bank_decision_note'] ?? ''));
+    $settlement = (string) ($record['wallet_withdrawal_bank_settlement_status'] ?? 'not_required');
+    $walletStatus = (string) ($record['wallet_withdrawal_status'] ?? '');
+    $reference = trim((string) ($record['wallet_withdrawal_bank_decision_reference'] ?? ''));
+    $referenceDisplay = $reference !== ''
+        ? $reference
+        : 'Legacy decision record - reference not issued';
+    $hash = (string) ($record['wallet_withdrawal_bank_verification_hash'] ?? '');
+    $submissionId = (string) ($record['wallet_withdrawal_bank_submission_id'] ?? '');
+    $documentNumber = bankConfirmationDocumentNumber($record);
 
-    return '<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <style>
-        @page { margin: 36px 40px 44px; }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            color: #1e293b;
-            font-family: DejaVu Sans, sans-serif;
-            font-size: 11px;
-            line-height: 1.55;
-        }
-        .top {
-            background: #0f2742;
-            border-radius: 14px;
-            color: #ffffff;
-            padding: 22px 24px;
-        }
-        .brand {
-            color: #67e8f9;
-            font-size: 22px;
-            font-weight: 800;
-        }
-        .subtitle {
-            color: #cbd5e1;
-            font-size: 9px;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-        }
-        .meta {
-            float: right;
-            text-align: right;
-        }
-        .meta-title {
-            font-size: 15px;
-            font-weight: 800;
-        }
-        .meta-number {
-            color: #cbd5e1;
-            font-size: 9px;
-            margin-top: 3px;
-        }
-        .clear { clear: both; }
-        .approved {
-            background: #dcfce7;
-            border: 1px solid #86efac;
-            border-radius: 999px;
-            color: #166534;
-            display: inline-block;
-            font-size: 9px;
-            font-weight: 800;
-            letter-spacing: 0.8px;
-            margin: 20px 0 14px;
-            padding: 6px 11px;
-        }
-        .amount {
-            background: #ecfeff;
-            border: 1px solid #a5f3fc;
-            border-radius: 12px;
-            margin-bottom: 18px;
-            padding: 16px 18px;
-        }
-        .amount-label {
-            color: #0e7490;
-            font-size: 9px;
-            font-weight: 800;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-        }
-        .amount-value {
-            color: #164e63;
-            font-size: 27px;
-            font-weight: 800;
-        }
-        .section-title {
-            color: #0f172a;
-            font-size: 12px;
-            font-weight: 800;
-            margin: 18px 0 8px;
-        }
-        table {
-            border-collapse: collapse;
-            width: 100%;
-        }
-        td {
-            border-bottom: 1px solid #e2e8f0;
-            padding: 9px 10px;
-            vertical-align: top;
-        }
-        .label {
-            background: #f8fafc;
-            color: #64748b;
-            width: 36%;
-        }
-        .value {
-            color: #0f172a;
-            font-weight: 700;
-        }
-        .mono { font-family: DejaVu Sans Mono, monospace; }
-        .notice {
-            background: #fff7ed;
-            border: 1px solid #fed7aa;
-            border-radius: 10px;
-            color: #9a3412;
-            margin-top: 18px;
-            padding: 12px 14px;
-        }
-        .signoff {
-            margin-top: 18px;
-        }
-        .copy {
-            padding-right: 20px;
-            width: 68%;
-        }
-        .stamp-cell {
-            text-align: center;
-            width: 32%;
-        }
-        .stamp {
-            border: 4px double #0891b2;
-            border-radius: 50%;
-            color: #0e7490;
-            display: inline-block;
-            font-size: 8px;
-            font-weight: 800;
-            height: 105px;
-            padding-top: 25px;
-            text-align: center;
-            transform: rotate(-6deg);
-            width: 105px;
-        }
-        .stamp-main {
-            font-size: 13px;
-            letter-spacing: 0.7px;
-        }
-        .footer {
-            bottom: -24px;
-            color: #94a3b8;
-            font-size: 8px;
-            left: 0;
-            position: fixed;
-            right: 0;
-            text-align: center;
-        }
-    </style>
-</head>
-<body>
-    <div class="top">
-        <div class="meta">
-            <div class="meta-title">Institution Decision Record</div>
-            <div class="meta-number">Document ' .
-                bankConfirmationEscape($documentNumber) .
-            '</div>
-        </div>
-        <div class="brand">BankLink Settlement Services</div>
-        <div class="subtitle">Settlement Instruction Verification</div>
-        <div class="clear"></div>
-    </div>
-
-    <span class="approved">INSTITUTION INSTRUCTION ACCEPTED</span>
-
-    <div class="amount">
-        <div style="float:right;text-align:right;color:#0e7490;">
-            Purpose<br><strong>Refund Withdrawal Instruction</strong>
-        </div>
-        <div class="amount-label">Verified Amount</div>
-        <div class="amount-value">RM ' .
-            bankConfirmationEscape(
-                moneyFormatSen($amountSen)
-            ) .
-        '</div>
-        <div class="clear"></div>
-    </div>
-
-    <div class="section-title">Verification record</div>
-    <table>
-        <tr>
-            <td class="label">Withdrawal request</td>
-            <td class="value">#' .
-                str_pad(
-                    (string) $record[
-                        'wallet_withdrawal_id'
-                    ],
-                    4,
-                    '0',
-                    STR_PAD_LEFT
-                ) .
-            '</td>
-        </tr>
-        <tr>
-            <td class="label">Gateway submission</td>
-            <td class="value mono">' .
-                bankConfirmationEscape(
-                    $record[
-                        'wallet_withdrawal_bank_submission_id'
-                    ]
-                ) .
-            '</td>
-        </tr>
-        <tr>
-            <td class="label">Customer</td>
-            <td class="value">' .
-                bankConfirmationEscape($customerName) .
-            '</td>
-        </tr>
-        <tr>
-            <td class="label">Destination</td>
-            <td class="value">' .
-                bankConfirmationEscape($bankName) .
-                ' · account ending ' .
-                bankConfirmationEscape(
-                    $record[
-                        'wallet_withdrawal_account_number_last4'
-                    ]
-                ) .
-            '</td>
-        </tr>
-        <tr>
-            <td class="label">MangaVault admin approval</td>
-            <td class="value">' .
-                bankConfirmationEscape(
-                    $adminName !== ''
-                        ? $adminName
-                        : 'MangaVault Administrator'
-                ) .
-                ' · ' .
-                bankConfirmationEscape(
-                    walletWithdrawalMalaysiaDateTime(
-                        (string) $record[
-                            'wallet_withdrawal_reviewed_at'
-                        ],
-                        'd M Y, h:i A'
-                    ) . ' MYT'
-                ) .
-            '</td>
-        </tr>
-        <tr>
-            <td class="label">Bank decision reference</td>
-            <td class="value mono">' .
-                bankConfirmationEscape(
-                    $record[
-                        'wallet_withdrawal_bank_decision_reference'
-                    ]
-                ) .
-            '</td>
-        </tr>
-        <tr>
-            <td class="label">Bank verified at</td>
-            <td class="value">' .
-                bankConfirmationEscape(
-                    walletWithdrawalMalaysiaDateTime(
-                        (string) $record[
-                            'wallet_withdrawal_bank_decided_at'
-                        ],
-                        'd M Y, h:i A'
-                    ) . ' MYT'
-                ) .
-            '</td>
-        </tr>
-        <tr>
-            <td class="label">Verification ID</td>
-            <td class="value mono">' .
-                bankConfirmationEscape(
-                    $verificationHash
-                ) .
-            '</td>
-        </tr>
-    </table>
-
-    <div class="notice">
-        This record confirms that the destination institution workflow accepted
-        the transfer instruction. It does not confirm that funds have been
-        transferred or credited. Merchant operations must still perform the
-        transfer and attach the external bank receipt.
-    </div>
-
-    <table class="signoff">
-        <tr>
-            <td class="copy" style="border:0;">
-                <div class="section-title" style="margin-top:0;">
-                    Bank operator authorization
-                </div>
-                <p><strong>Institution:</strong> ' .
-                    bankConfirmationEscape($bankName) .
-                '</p>
-                <p><strong>Verified by:</strong> ' .
-                    bankConfirmationEscape(
-                        $operatorName !== ''
-                            ? $operatorName
-                            : $bankName . ' Operator'
-                    ) .
-                '</p>
-                <p><strong>Decision note:</strong> ' .
-                    bankConfirmationEscape(
-                        trim((string) $record[
-                            'wallet_withdrawal_bank_decision_note'
-                        ]) !== ''
-                            ? $record[
-                                'wallet_withdrawal_bank_decision_note'
-                            ]
-                            : 'Account and instruction verified.'
-                    ) .
-                '</p>
-            </td>
-            <td class="stamp-cell" style="border:0;">
-                <div class="stamp">
-                    ' . bankConfirmationEscape(
-                        strtoupper($record[
-                            'wallet_withdrawal_bank_code'
-                        ])
-                    ) . '<br>
-                    <span class="stamp-main">VERIFIED</span><br>
-                    MYT RECORD
-                </div>
-            </td>
-        </tr>
-    </table>
-
-    <div class="footer">
-        BankLink Settlement Services · Academic demo · ' .
-        bankConfirmationEscape($documentNumber) .
-        ' · Generated ' .
-        bankConfirmationEscape(
-            (new DateTimeImmutable(
-                'now',
-                new DateTimeZone(
-                    'Asia/Kuala_Lumpur'
-                )
-            ))->format('d M Y, h:i A') .
-            ' MYT'
-        ) .
-    '</div>
-</body>
-</html>';
-}
-
-function streamBankConfirmationDocument(
-    array $record,
-    bool $download
-): never {
-    if (!class_exists(\Dompdf\Dompdf::class)) {
-        throw new BankGatewayException(
-            'Bank confirmation PDF generation is unavailable.'
-        );
+    if ($isRejected) {
+        $outcomeCopy = $walletStatus === 'failed'
+            ? 'The destination institution rejected the beneficiary verification. The transfer instruction was not released to settlement, and MangaVault automatically released the reserved wallet amount back to the customer wallet.'
+            : 'The destination institution rejected the beneficiary verification. This historical record is awaiting reconciliation so the MangaVault withdrawal state and reserved wallet amount can be synchronized.';
+    } else {
+        $outcomeCopy = 'The destination institution accepted the beneficiary verification and released the instruction to settlement processing. This document proves the bank verification decision only; it is not proof that the final transfer settled.';
     }
 
-    $dompdf = new \Dompdf\Dompdf([
-        'isRemoteEnabled' => false,
-        'isHtml5ParserEnabled' => true,
-    ]);
-    $dompdf->loadHtml(
-        buildBankConfirmationHtml($record),
-        'UTF-8'
-    );
+    $retryRow = $isRejected && $retry !== ''
+        ? '<tr><th>Correction retry deadline</th><td>' . htmlspecialchars($retry, ENT_QUOTES, 'UTF-8') . ' MYT (UTC+8)</td></tr>'
+        : '';
+    $reasonBlock = $reason !== ''
+        ? '<div class="note"><strong>' . ($isRejected ? 'Decision reason' : 'Decision note') . '</strong><div>' . nl2br(htmlspecialchars($reason, ENT_QUOTES, 'UTF-8')) . '</div></div>'
+        : '';
+
+    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+        @page{margin:28px 34px} body{font-family:DejaVu Sans,Arial,sans-serif;color:#1e293b;font-size:10px;line-height:1.45;margin:0}
+        .top{border-bottom:3px solid #142d47;padding-bottom:16px;margin-bottom:18px}.brand{font-size:21px;font-weight:bold;color:#142d47}.sub{font-size:9px;color:#64748b;margin-top:3px;letter-spacing:.7px}
+        .docmeta{float:right;text-align:right;margin-top:-34px;font-size:9px;color:#64748b}.decision{border:1px solid ' . $accent . ';background:' . $soft . ';padding:14px 16px;margin:14px 0 18px}.decision h1{font-size:17px;margin:0;color:' . $accent . '}.decision .status{margin-top:5px;font-weight:bold;color:' . $accent . ';letter-spacing:.5px}
+        h2{font-size:11px;color:#142d47;margin:17px 0 7px;border-bottom:1px solid #d8dee6;padding-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+        table{width:100%;border-collapse:collapse}th,td{border:1px solid #d8dee6;padding:7px 8px;vertical-align:top}th{width:31%;background:#f4f6f8;text-align:left;color:#536273;font-weight:bold}.mono{font-family:DejaVu Sans Mono,monospace;font-size:8.5px;word-break:break-all}.note{margin-top:12px;border-left:3px solid ' . $accent . ';background:' . $soft . ';padding:10px 12px}.note strong{display:block;margin-bottom:4px;color:' . $accent . '}.notice{margin-top:16px;padding:11px 12px;background:#f8fafc;border:1px solid #d8dee6;color:#475569}.footer{margin-top:20px;padding-top:9px;border-top:1px solid #d8dee6;color:#7b8794;font-size:8px}.clear{clear:both}
+    </style></head><body>
+      <div class="top"><div class="brand">BankLink Settlement Services</div><div class="sub">INSTITUTION OPERATIONS PORTAL · ACADEMIC SIMULATION</div><div class="docmeta"><strong>Document</strong> ' . htmlspecialchars($documentNumber, ENT_QUOTES, 'UTF-8') . '<br>Generated ' . htmlspecialchars((new DateTimeImmutable('now', new DateTimeZone('Asia/Kuala_Lumpur')))->format('d M Y, h:i A'), ENT_QUOTES, 'UTF-8') . ' MYT</div><div class="clear"></div></div>
+      <div class="decision"><h1>' . htmlspecialchars($decisionTitle, ENT_QUOTES, 'UTF-8') . '</h1><div class="status">INSTITUTION DECISION: ' . htmlspecialchars($decisionLabel, ENT_QUOTES, 'UTF-8') . '</div></div>
+      <p>' . htmlspecialchars($outcomeCopy, ENT_QUOTES, 'UTF-8') . '</p>
+      <h2>Instruction</h2><table>
+        <tr><th>Withdrawal</th><td>#' . str_pad((string) $record['wallet_withdrawal_id'], 4, '0', STR_PAD_LEFT) . '</td></tr>
+        <tr><th>Amount</th><td>RM ' . htmlspecialchars($amount, ENT_QUOTES, 'UTF-8') . '</td></tr>
+        <tr><th>Customer</th><td>' . htmlspecialchars($customerName, ENT_QUOTES, 'UTF-8') . ' · ' . htmlspecialchars((string) $record['user_gmail'], ENT_QUOTES, 'UTF-8') . '</td></tr>
+        <tr><th>Destination institution</th><td>' . htmlspecialchars((string) $record['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') . ' (' . htmlspecialchars((string) $record['wallet_withdrawal_bank_code'], ENT_QUOTES, 'UTF-8') . ')</td></tr>
+        <tr><th>Beneficiary</th><td>' . htmlspecialchars((string) $record['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') . ' · account ending ' . htmlspecialchars((string) $record['wallet_withdrawal_account_number_last4'], ENT_QUOTES, 'UTF-8') . '</td></tr>
+        <tr><th>Merchant reviewer</th><td>' . htmlspecialchars($reviewerName !== '' ? $reviewerName : 'MangaVault Administration', ENT_QUOTES, 'UTF-8') . '</td></tr>
+      </table>
+      <h2>Institution Decision Evidence</h2><table>
+        <tr><th>Submission ID</th><td class="mono">' . htmlspecialchars($submissionId, ENT_QUOTES, 'UTF-8') . '</td></tr>
+        <tr><th>Submitted to bank</th><td>' . htmlspecialchars($submitted, ENT_QUOTES, 'UTF-8') . ' MYT (UTC+8)</td></tr>
+        <tr><th>Decision reference</th><td class="mono">' . htmlspecialchars($referenceDisplay, ENT_QUOTES, 'UTF-8') . '</td></tr>
+        <tr><th>Decision time</th><td>' . htmlspecialchars($decided, ENT_QUOTES, 'UTF-8') . ' MYT (UTC+8)</td></tr>
+        <tr><th>Decision operator</th><td>' . htmlspecialchars($operatorName, ENT_QUOTES, 'UTF-8') . '</td></tr>
+        <tr><th>Settlement stage</th><td>' . htmlspecialchars(ucwords(str_replace('_', ' ', $settlement)), ENT_QUOTES, 'UTF-8') . '</td></tr>
+        <tr><th>MangaVault withdrawal status</th><td>' . htmlspecialchars(ucfirst($walletStatus), ENT_QUOTES, 'UTF-8') . '</td></tr>
+        ' . $retryRow . '
+        <tr><th>Verification integrity hash</th><td class="mono">' . htmlspecialchars($hash !== '' ? $hash : 'Not available', ENT_QUOTES, 'UTF-8') . '</td></tr>
+      </table>' . $reasonBlock . '
+      <div class="notice"><strong>Evidence notice.</strong> This academic simulation document records the independent institution decision. For an accepted instruction, final transfer success requires a separate settlement result. For a rejected instruction, no settlement is performed and MangaVault releases the reserved wallet amount.</div>
+      <div class="footer">BankLink Settlement Services · MangaVault Final Year Project · Academic Demo · Times shown in Malaysia Time (MYT / UTC+8)</div>
+    </body></html>';
+}
+
+function renderBankConfirmationDocumentPdf(array $record): string
+{
+    $options = new \Dompdf\Options();
+    $options->set('isRemoteEnabled', false);
+    $options->set('defaultFont', 'DejaVu Sans');
+    $dompdf = new \Dompdf\Dompdf($options);
+    $dompdf->loadHtml(buildBankConfirmationDocumentHtml($record), 'UTF-8');
     $dompdf->setPaper('A4', 'portrait');
     $dompdf->render();
+    return $dompdf->output();
+}
 
-    header(
-        'Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0'
-    );
+function streamBankConfirmationDocument(array $record, bool $download = false): never
+{
+    $pdf = renderBankConfirmationDocumentPdf($record);
+    header('Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
     header('X-Content-Type-Options: nosniff');
-    header('Referrer-Policy: no-referrer');
-
-    $dompdf->stream(
-        bankConfirmationDocumentNumber(
-            $record
-        ) . '.pdf',
-        [
-            'Attachment' => $download,
-        ]
+    header('Content-Type: application/pdf');
+    header('Content-Length: ' . strlen($pdf));
+    header(
+        'Content-Disposition: ' . ($download ? 'attachment' : 'inline') .
+        '; filename="' . bankConfirmationDocumentFilename($record) . '"'
     );
-
+    echo $pdf;
     exit;
 }

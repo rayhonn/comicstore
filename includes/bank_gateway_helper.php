@@ -85,14 +85,15 @@ function assertBankGatewayEnterpriseSchema(PDO $pdo): void
               'wallet_withdrawal_bank_settled_by',
               'wallet_withdrawal_bank_settled_at',
               'wallet_withdrawal_bank_settlement_note',
-              'wallet_withdrawal_bank_settlement_hash'
+              'wallet_withdrawal_bank_settlement_hash',
+              'wallet_withdrawal_retry_expires_at_myt'
           )
     ");
     $statement->execute();
 
-    if ((int) $statement->fetchColumn() !== 7) {
+    if ((int) $statement->fetchColumn() !== 8) {
         throw new BankGatewayException(
-            'Enterprise settlement schema is not installed. Run database/20260825_bank_enterprise_settlement.sql first.'
+            'Final bank lifecycle schema is not installed. Run database/20260825_wallet_withdrawal_lifecycle_final.sql after the enterprise settlement migration.'
         );
     }
 }
@@ -565,9 +566,13 @@ function insertBankGatewayAuditLog(
             bank_gateway_log_operator_id,
             bank_gateway_log_withdrawal_id,
             bank_gateway_log_action,
-            bank_gateway_log_details
+            bank_gateway_log_details,
+            bank_gateway_log_created_at
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (
+            ?, ?, ?, ?,
+            CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00')
+        )
     ");
     $statement->execute([
         $operatorId,
@@ -751,6 +756,10 @@ function bankGatewayReleaseReservedFunds(
             wallet_withdrawal_failed_by = NULL,
             wallet_withdrawal_failed_at = UTC_TIMESTAMP(),
             wallet_withdrawal_failure_reason = ?,
+            wallet_withdrawal_retry_expires_at_myt = DATE_ADD(
+                CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
+                INTERVAL 3 DAY
+            ),
             wallet_withdrawal_release_tx_id = ?
         WHERE wallet_withdrawal_id = ?
           AND wallet_withdrawal_status = 'approved'

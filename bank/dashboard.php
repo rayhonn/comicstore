@@ -6,6 +6,8 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/money_helper.php';
 require_once __DIR__ . '/../includes/notifications.php';
 require_once __DIR__ . '/../includes/bank_gateway_helper.php';
+require_once __DIR__ . '/../includes/wallet_withdrawal_lifecycle_helper.php';
+require_once __DIR__ . '/../includes/wallet_withdrawal_mail_helper.php';
 
 requireBankOperator();
 
@@ -53,8 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $requestResult = null;
             $nextQueue = 'all';
-            $notificationTitle = '';
-            $notificationMessage = '';
+            $communicationEvent = '';
 
             if ($action === 'approve') {
                 if (($_POST['verification_ack'] ?? '') !== '1') {
@@ -74,9 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['current_password'] ?? null
                 );
                 $nextQueue = 'accepted';
-                $notificationTitle = 'Bank Verification Accepted';
-                $notificationMessage =
-                    'Your destination bank accepted withdrawal #%s for settlement. The funds remain reserved while settlement is processed.';
+                $communicationEvent = 'bank_accepted';
             } elseif ($action === 'reject') {
                 $requestResult = decideBankGatewayWithdrawal(
                     $pdo,
@@ -89,9 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['current_password'] ?? null
                 );
                 $nextQueue = 'rejected';
-                $notificationTitle = 'Bank Verification Rejected';
-                $notificationMessage =
-                    'Your destination bank rejected withdrawal #%s. The reserved amount was automatically released back to your MangaVault Wallet.';
+                $communicationEvent = 'bank_rejected';
             } elseif ($action === 'start_settlement') {
                 $requestResult = startBankGatewaySettlement(
                     $pdo,
@@ -102,9 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['settlement_note'] ?? ''
                 );
                 $nextQueue = 'processing';
-                $notificationTitle = 'Bank Settlement Processing';
-                $notificationMessage =
-                    'Settlement processing has started for withdrawal #%s. The reserved amount remains locked until settlement finishes.';
+                $communicationEvent = 'settlement_processing';
             } elseif ($action === 'settle') {
                 if (($_POST['settlement_ack'] ?? '') !== '1') {
                     throw new BankGatewayException(
@@ -121,11 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['settlement_note'] ?? ''
                 );
                 $nextQueue = 'settled';
-                $notificationTitle = 'Bank Transfer Settled';
-                $notificationMessage =
-                    'Withdrawal #%s has been settled successfully. Settlement reference: ' .
-                    (string) ($requestResult['wallet_withdrawal_transfer_reference'] ?? '') .
-                    '. The reserved amount has been permanently debited.';
+                $communicationEvent = 'settled';
             } elseif ($action === 'fail_settlement') {
                 $requestResult = failBankGatewaySettlement(
                     $pdo,
@@ -136,9 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['failure_reason'] ?? ''
                 );
                 $nextQueue = 'failed';
-                $notificationTitle = 'Bank Settlement Failed';
-                $notificationMessage =
-                    'Settlement failed for withdrawal #%s. The reserved amount was automatically released back to your MangaVault Wallet.';
+                $communicationEvent = 'settlement_failed';
             } else {
                 $requestResult = reconcileRejectedBankGatewayWithdrawal(
                     $pdo,
@@ -148,41 +137,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['current_password'] ?? null
                 );
                 $nextQueue = 'rejected';
-                $notificationTitle = 'Bank Rejection Reconciled';
-                $notificationMessage =
-                    'A historical rejected bank instruction for withdrawal #%s was reconciled. The reserved amount has been released back to your MangaVault Wallet.';
+                $communicationEvent = 'reconciled';
             }
 
             if (!is_array($requestResult)) {
                 throw new BankGatewayException('Institution operation result is missing.');
             }
 
-            try {
-                $requestNumber = str_pad(
-                    (string) $withdrawalId,
-                    4,
-                    '0',
-                    STR_PAD_LEFT
-                );
-                $amount = moneyFormatSen(
-                    moneyDecimalToSen(
-                        (string) $requestResult['wallet_withdrawal_amount']
-                    )
-                );
-                $message = sprintf($notificationMessage, $requestNumber) .
-                    ' Amount: RM ' . $amount . '.';
-
-                sendNotification(
+            if ($communicationEvent !== '') {
+                dispatchWalletWithdrawalLifecycleCommunication(
                     $pdo,
-                    (int) $requestResult['wallet_withdrawal_user_id'],
-                    $notificationTitle,
-                    $message,
-                    'system'
-                );
-            } catch (Throwable $notificationError) {
-                app_error_log(
-                    'Bank settlement notification failed: ' .
-                    $notificationError->getMessage()
+                    (int) $withdrawalId,
+                    $communicationEvent
                 );
             }
 
@@ -491,7 +457,7 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
                                         <strong>#<?= str_pad((string) $rowId, 4, '0', STR_PAD_LEFT) ?></strong>
                                         <span><?= htmlspecialchars(substr((string) $request['wallet_withdrawal_bank_submission_id'], 0, 8), ENT_QUOTES, 'UTF-8') ?></span>
                                     </td>
-                                    <td><?= htmlspecialchars(bankOpsMyt((string) ($request['wallet_withdrawal_bank_submitted_at'] ?? ''), 'd M H:i'), ENT_QUOTES, 'UTF-8') ?></td>
+                                    <td><?= htmlspecialchars(walletWithdrawalLifecycleEventMyt($request, 'wallet_withdrawal_bank_submitted_at', 'd M H:i'), ENT_QUOTES, 'UTF-8') ?></td>
                                     <td>
                                         <strong><?= htmlspecialchars($customerName, ENT_QUOTES, 'UTF-8') ?></strong>
                                         <span class="bo-cell-subtext"><?= htmlspecialchars((string) $request['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?></span>
@@ -607,7 +573,7 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
                                 <div><dt>Account holder</dt><dd><?= htmlspecialchars((string) $selected['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?></dd></div>
                                 <div><dt>Destination bank</dt><dd><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?></dd><small><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_code'], ENT_QUOTES, 'UTF-8') ?></small></div>
                                 <div><dt>Destination account</dt><dd>•••• <?= htmlspecialchars((string) $selected['wallet_withdrawal_account_number_last4'], ENT_QUOTES, 'UTF-8') ?></dd><button type="button" class="bo-link-button" onclick="openAccountModal(<?= $selectedWithdrawalId ?>, '<?= htmlspecialchars((string) $selected['wallet_withdrawal_account_holder'], ENT_QUOTES, 'UTF-8') ?>', '<?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_name'], ENT_QUOTES, 'UTF-8') ?>')">View protected data</button></div>
-                                <div><dt>Submitted</dt><dd><?= htmlspecialchars(bankOpsMyt((string) ($selected['wallet_withdrawal_bank_submitted_at'] ?? '')), ENT_QUOTES, 'UTF-8') ?> MYT</dd></div>
+                                <div><dt>Submitted</dt><dd><?= htmlspecialchars(walletWithdrawalLifecycleEventMyt($selected, 'wallet_withdrawal_bank_submitted_at'), ENT_QUOTES, 'UTF-8') ?> MYT</dd></div>
                                 <div><dt>Current phase</dt><dd><?= htmlspecialchars($selectedPhase, ENT_QUOTES, 'UTF-8') ?></dd></div>
                             </dl>
                         </section>
@@ -638,12 +604,18 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
                             <section class="bo-detail-section">
                                 <h3>Bank decision</h3>
                                 <dl class="bo-detail-grid">
-                                    <div><dt>Authorization reference</dt><dd class="bo-mono"><?= htmlspecialchars((string) $selected['wallet_withdrawal_bank_decision_reference'], ENT_QUOTES, 'UTF-8') ?></dd></div>
+                                    <div><dt>Authorization reference</dt><dd class="bo-mono"><?= htmlspecialchars(trim((string) ($selected['wallet_withdrawal_bank_decision_reference'] ?? '')) !== '' ? (string) $selected['wallet_withdrawal_bank_decision_reference'] : 'Legacy record - reference not issued', ENT_QUOTES, 'UTF-8') ?></dd></div>
                                     <div><dt>Decision time</dt><dd><?= htmlspecialchars(bankOpsMyt((string) $selected['wallet_withdrawal_bank_decided_at']), ENT_QUOTES, 'UTF-8') ?> MYT</dd></div>
                                 </dl>
                                 <?php if (!empty($selected['wallet_withdrawal_bank_decision_note'])): ?>
                                     <div class="bo-note"><strong>Decision note</strong><p><?= nl2br(htmlspecialchars((string) $selected['wallet_withdrawal_bank_decision_note'], ENT_QUOTES, 'UTF-8')) ?></p></div>
                                 <?php endif; ?>
+                                <div class="bo-action-row" style="margin-top:10px;">
+                                    <a
+                                        class="ops-btn ops-btn-dark"
+                                        href="confirmation.php?id=<?= $selectedWithdrawalId ?>&amp;download=1"
+                                    >Download decision PDF</a>
+                                </div>
                             </section>
                         <?php endif; ?>
 
@@ -680,9 +652,15 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
                             <?php elseif ($selectedStageKey === 'settled'): ?>
                                 <p class="bo-final-state">Final. Settlement and wallet debit are complete.</p>
                             <?php elseif ($selectedStageKey === 'rejected'): ?>
-                                <p class="bo-final-state">Final. Bank review rejected the instruction and reserved funds were released.</p>
+                                <p class="bo-final-state">Final. Bank review rejected the instruction and reserved funds were released automatically.</p>
+                                <?php if (walletWithdrawalRetryIsActive($selected)): ?>
+                                    <p class="bo-muted">Correction retry window: until <?= htmlspecialchars(walletWithdrawalRetryDeadlineLabel($selected), ENT_QUOTES, 'UTF-8') ?> MYT (UTC+8).</p>
+                                <?php endif; ?>
                             <?php elseif ($selectedStageKey === 'failed'): ?>
-                                <p class="bo-final-state">Final. Settlement failed and reserved funds were released.</p>
+                                <p class="bo-final-state">Final. Settlement failed and reserved funds were released automatically.</p>
+                                <?php if (walletWithdrawalRetryIsActive($selected)): ?>
+                                    <p class="bo-muted">Correction retry window: until <?= htmlspecialchars(walletWithdrawalRetryDeadlineLabel($selected), ENT_QUOTES, 'UTF-8') ?> MYT (UTC+8).</p>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </section>
 
@@ -692,11 +670,11 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
                                 <div class="bo-muted">No operator events recorded.</div>
                             <?php else: ?>
                                 <table class="bo-audit-table">
-                                    <thead><tr><th>Time</th><th>Operator</th><th>Event</th></tr></thead>
+                                    <thead><tr><th>Time (MYT)</th><th>Operator</th><th>Event</th></tr></thead>
                                     <tbody>
                                     <?php foreach ($auditTrail as $audit): ?>
                                         <tr>
-                                            <td><?= htmlspecialchars(bankOpsMyt((string) $audit['bank_gateway_log_created_at'], 'd M H:i:s'), ENT_QUOTES, 'UTF-8') ?></td>
+                                            <td><?= htmlspecialchars(walletWithdrawalMalaysiaWallClock((string) $audit['bank_gateway_log_created_at'], 'd M H:i:s', 'Not available'), ENT_QUOTES, 'UTF-8') ?></td>
                                             <td><?= htmlspecialchars((string) $audit['bank_gateway_operator_display_name'], ENT_QUOTES, 'UTF-8') ?></td>
                                             <td><strong><?= htmlspecialchars(ucwords(str_replace('_', ' ', (string) $audit['bank_gateway_log_action'])), ENT_QUOTES, 'UTF-8') ?></strong><span><?= htmlspecialchars((string) $audit['bank_gateway_log_details'], ENT_QUOTES, 'UTF-8') ?></span></td>
                                         </tr>
