@@ -317,6 +317,7 @@ function bankOpsQueueAgeLabel(mixed $minutes): string
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars($bankName, ENT_QUOTES, 'UTF-8') ?> Institution Operations</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <link
         rel="stylesheet"
         href="<?= htmlspecialchars(app_path('assets/css/bank_portal.css'), ENT_QUOTES, 'UTF-8') ?>"
