@@ -42,12 +42,12 @@ function redirectInvoicePage(
 }
 
 function requirePositiveRequestId(
-    int $input_type,
+    int $inputType,
     string $name,
-    string $error_message
+    string $errorMessage
 ): int {
     $value = filter_input(
-        $input_type,
+        $inputType,
         $name,
         FILTER_VALIDATE_INT,
         [
@@ -57,9 +57,12 @@ function requirePositiveRequestId(
         ]
     );
 
-    if ($value === false || $value === null) {
+    if (
+        $value === false ||
+        $value === null
+    ) {
         redirectInvoicePage(
-            $error_message,
+            $errorMessage,
             true
         );
     }
@@ -70,7 +73,7 @@ function requirePositiveRequestId(
 function requireInvoiceText(
     mixed $value,
     string $label,
-    int $max_length
+    int $maxLength
 ): string {
     if (!is_string($value)) {
         redirectInvoicePage(
@@ -89,12 +92,15 @@ function requireInvoiceText(
     }
 
     $length = function_exists('mb_strlen')
-        ? mb_strlen($normalized, 'UTF-8')
+        ? mb_strlen(
+            $normalized,
+            'UTF-8'
+        )
         : strlen($normalized);
 
-    if ($length > $max_length) {
+    if ($length > $maxLength) {
         redirectInvoicePage(
-            "$label cannot exceed $max_length characters.",
+            "$label cannot exceed $maxLength characters.",
             true
         );
     }
@@ -102,7 +108,52 @@ function requireInvoiceText(
     return $normalized;
 }
 
-// Mark mismatched invoice as paid — senior admin only
+// ------------------------------------------------------------
+// Mark a matched invoice as paid.
+// Credit note, when applied, reduces only the net cash payable.
+// It does NOT alter whether the supplier invoice matches its PO.
+// ------------------------------------------------------------
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['mark_paid'])
+) {
+    csrf_verify();
+
+    $invoiceId = requirePositiveRequestId(
+        INPUT_POST,
+        'invoice_id',
+        'Invalid invoice.'
+    );
+
+    $statement = $pdo->prepare("
+        UPDATE supplier_invoices
+        SET
+            invoice_status = 'paid',
+            invoice_paid_at = NOW()
+        WHERE invoice_id = ?
+        AND invoice_status = 'unpaid'
+        AND invoice_is_mismatch = 0
+    ");
+
+    $statement->execute([
+        $invoiceId,
+    ]);
+
+    $wasUpdated =
+        $statement->rowCount() === 1;
+
+    redirectInvoicePage(
+        $wasUpdated
+            ? 'Invoice marked as paid.'
+            : 'Invoice could not be processed.',
+        !$wasUpdated
+    );
+}
+
+// ------------------------------------------------------------
+// Senior-admin override for a true invoice/PO mismatch.
+// A credit note must never be used to turn a mismatch into a match.
+// ------------------------------------------------------------
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['mark_paid_confirm'])
@@ -119,87 +170,112 @@ if (
         );
     }
 
-    $invoice_id = requirePositiveRequestId(
+    $invoiceId = requirePositiveRequestId(
         INPUT_POST,
         'invoice_id',
         'Invalid invoice.'
     );
 
-    $override_reason = requireInvoiceText(
+    $overrideReason = requireInvoiceText(
         $_POST['override_reason'] ?? null,
         'Override reason',
         2000
     );
 
-    $stmt = $pdo->prepare(
-        "UPDATE supplier_invoices
-         SET invoice_status = 'paid',
-             invoice_paid_at = NOW(),
-             invoice_override_reason = ?,
-             invoice_override_by = ?
-         WHERE invoice_id = ?
-         AND invoice_status = 'unpaid'
-         AND invoice_is_mismatch = 1"
-    );
+    try {
+        $pdo->beginTransaction();
 
-    $stmt->execute([
-        $override_reason,
-        $_SESSION['user_id'],
-        $invoice_id,
-    ]);
+        $invoiceStatement = $pdo->prepare("
+            SELECT
+                invoice_credit_note_id
+            FROM supplier_invoices
+            WHERE invoice_id = ?
+            AND invoice_status = 'unpaid'
+            AND invoice_is_mismatch = 1
+            FOR UPDATE
+        ");
 
-    $was_updated = $stmt->rowCount() === 1;
+        $invoiceStatement->execute([
+            $invoiceId,
+        ]);
 
-    redirectInvoicePage(
-        $was_updated
-            ? 'Invoice marked as paid.'
-            : 'Invoice could not be processed.',
-        !$was_updated
-    );
+        $invoice =
+            $invoiceStatement->fetch(
+                PDO::FETCH_ASSOC
+            );
+
+        if (!$invoice) {
+            throw new RuntimeException(
+                'Invoice not found, no longer unpaid, or no longer mismatched.'
+            );
+        }
+
+        if (
+            !empty(
+                $invoice[
+                    'invoice_credit_note_id'
+                ]
+            )
+        ) {
+            throw new RuntimeException(
+                'Remove the applied credit note before overriding a mismatched invoice.'
+            );
+        }
+
+        $statement = $pdo->prepare("
+            UPDATE supplier_invoices
+            SET
+                invoice_status = 'paid',
+                invoice_paid_at = NOW(),
+                invoice_override_reason = ?,
+                invoice_override_by = ?
+            WHERE invoice_id = ?
+            AND invoice_status = 'unpaid'
+            AND invoice_is_mismatch = 1
+        ");
+
+        $statement->execute([
+            $overrideReason,
+            $_SESSION['user_id'],
+            $invoiceId,
+        ]);
+
+        if ($statement->rowCount() !== 1) {
+            throw new RuntimeException(
+                'Invoice could not be processed.'
+            );
+        }
+
+        $pdo->commit();
+
+        redirectInvoicePage(
+            'Invoice marked as paid with senior-admin override.'
+        );
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        redirectInvoicePage(
+            $e instanceof RuntimeException
+                ? $e->getMessage()
+                : 'Unable to process the invoice override.',
+            true
+        );
+    }
 }
 
-// Mark matched invoice as paid
-if (
-    $_SERVER['REQUEST_METHOD'] === 'POST' &&
-    isset($_POST['mark_paid'])
-) {
-    csrf_verify();
-
-    $invoice_id = requirePositiveRequestId(
-        INPUT_POST,
-        'invoice_id',
-        'Invalid invoice.'
-    );
-
-    $stmt = $pdo->prepare(
-        "UPDATE supplier_invoices
-         SET invoice_status = 'paid',
-             invoice_paid_at = NOW()
-         WHERE invoice_id = ?
-         AND invoice_status = 'unpaid'
-         AND invoice_is_mismatch = 0"
-    );
-
-    $stmt->execute([$invoice_id]);
-
-    $was_updated = $stmt->rowCount() === 1;
-
-    redirectInvoicePage(
-        $was_updated
-            ? 'Invoice marked as paid.'
-            : 'Invoice could not be processed.',
-        !$was_updated
-    );
-}
-
-// Reject invoice
+// ------------------------------------------------------------
+// Reject invoice.
+// If a later-period credit note had been applied, release it again.
+// ------------------------------------------------------------
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['reject_invoice'])
 ) {
     csrf_verify();
 
-    $invoice_id = requirePositiveRequestId(
+    $invoiceId = requirePositiveRequestId(
         INPUT_POST,
         'invoice_id',
         'Invalid invoice.'
@@ -214,19 +290,23 @@ if (
     try {
         $pdo->beginTransaction();
 
-        $invoice_stmt = $pdo->prepare(
-            "SELECT invoice_credit_note_id
-             FROM supplier_invoices
-             WHERE invoice_id = ?
-             AND invoice_status = 'unpaid'
-             FOR UPDATE"
-        );
+        $invoiceStatement = $pdo->prepare("
+            SELECT
+                invoice_credit_note_id
+            FROM supplier_invoices
+            WHERE invoice_id = ?
+            AND invoice_status = 'unpaid'
+            FOR UPDATE
+        ");
 
-        $invoice_stmt->execute([$invoice_id]);
+        $invoiceStatement->execute([
+            $invoiceId,
+        ]);
 
-        $invoice = $invoice_stmt->fetch(
-            PDO::FETCH_ASSOC
-        );
+        $invoice =
+            $invoiceStatement->fetch(
+                PDO::FETCH_ASSOC
+            );
 
         if (!$invoice) {
             throw new RuntimeException(
@@ -234,48 +314,56 @@ if (
             );
         }
 
-        $return_id =
-            $invoice['invoice_credit_note_id'] !== null
+        $returnId =
+            $invoice[
+                'invoice_credit_note_id'
+            ] !== null
                 ? (int) $invoice[
                     'invoice_credit_note_id'
                 ]
                 : null;
 
-        $invoice_update = $pdo->prepare(
-            "UPDATE supplier_invoices
-             SET invoice_status = 'rejected',
-                 invoice_reject_reason = ?,
-                 invoice_credit_note_id = NULL,
-                 invoice_credit_applied_amount = 0
-             WHERE invoice_id = ?
-             AND invoice_status = 'unpaid'"
-        );
+        $invoiceUpdate = $pdo->prepare("
+            UPDATE supplier_invoices
+            SET
+                invoice_status = 'rejected',
+                invoice_reject_reason = ?,
+                invoice_credit_note_id = NULL,
+                invoice_credit_applied_amount = 0
+            WHERE invoice_id = ?
+            AND invoice_status = 'unpaid'
+        ");
 
-        $invoice_update->execute([
+        $invoiceUpdate->execute([
             $reason,
-            $invoice_id,
+            $invoiceId,
         ]);
 
-        if ($invoice_update->rowCount() !== 1) {
+        if (
+            $invoiceUpdate->rowCount() !== 1
+        ) {
             throw new RuntimeException(
                 'Invoice could not be rejected.'
             );
         }
 
-        if ($return_id !== null) {
-            $credit_update = $pdo->prepare(
-                "UPDATE supplier_returns
-                 SET return_credit_note_used_invoice_id = NULL
-                 WHERE return_id = ?
-                 AND return_credit_note_used_invoice_id = ?"
-            );
+        if ($returnId !== null) {
+            $creditUpdate = $pdo->prepare("
+                UPDATE supplier_returns
+                SET
+                    return_credit_note_used_invoice_id = NULL
+                WHERE return_id = ?
+                AND return_credit_note_used_invoice_id = ?
+            ");
 
-            $credit_update->execute([
-                $return_id,
-                $invoice_id,
+            $creditUpdate->execute([
+                $returnId,
+                $invoiceId,
             ]);
 
-            if ($credit_update->rowCount() !== 1) {
+            if (
+                $creditUpdate->rowCount() !== 1
+            ) {
                 throw new RuntimeException(
                     'Unable to release the applied credit note.'
                 );
@@ -284,13 +372,11 @@ if (
 
         $pdo->commit();
 
-        $message = $return_id !== null
-            ? 'Invoice rejected. The applied credit note ' .
-                'was released and is available again.'
-            : 'Invoice rejected. The supplier has been ' .
-                'notified to resubmit.';
-
-        redirectInvoicePage($message);
+        redirectInvoicePage(
+            $returnId !== null
+                ? 'Invoice rejected. The applied credit note was released and is available again.'
+                : 'Invoice rejected. The supplier can resubmit a corrected invoice.'
+        );
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
@@ -305,20 +391,30 @@ if (
     }
 }
 
-// Apply credit note
+// ------------------------------------------------------------
+// Apply a prior credit note to a later matched invoice.
+//
+// Correct business rule:
+//   Invoice amount = PO total
+//   Invoice amount - credit note = Net payable
+//
+// A credit note cannot:
+//   1) fix an invoice/PO mismatch;
+//   2) be applied back to the same PO that generated it.
+// ------------------------------------------------------------
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['apply_credit_note'])
 ) {
     csrf_verify();
 
-    $invoice_id = requirePositiveRequestId(
+    $invoiceId = requirePositiveRequestId(
         INPUT_POST,
         'invoice_id',
         'Invalid invoice or credit note.'
     );
 
-    $return_id = requirePositiveRequestId(
+    $returnId = requirePositiveRequestId(
         INPUT_POST,
         'return_id',
         'Invalid invoice or credit note.'
@@ -327,29 +423,38 @@ if (
     try {
         $pdo->beginTransaction();
 
-        $inv_stmt = $pdo->prepare("
+        $invoiceStatement = $pdo->prepare("
             SELECT
                 si.invoice_amount,
                 si.invoice_supplier_id,
+                si.invoice_po_id,
                 si.invoice_credit_note_id,
+                si.invoice_is_mismatch,
                 po.po_total_amount
             FROM supplier_invoices si
             JOIN purchase_orders po
-                ON po.po_id = si.invoice_po_id
+                ON po.po_id =
+                    si.invoice_po_id
             WHERE si.invoice_id = ?
             AND si.invoice_status = 'unpaid'
             FOR UPDATE
         ");
 
-        $inv_stmt->execute([$invoice_id]);
-        $invoice = $inv_stmt->fetch(
-            PDO::FETCH_ASSOC
-        );
+        $invoiceStatement->execute([
+            $invoiceId,
+        ]);
+
+        $invoice =
+            $invoiceStatement->fetch(
+                PDO::FETCH_ASSOC
+            );
 
         if (
             !$invoice ||
             !empty(
-                $invoice['invoice_credit_note_id']
+                $invoice[
+                    'invoice_credit_note_id'
+                ]
             )
         ) {
             throw new RuntimeException(
@@ -357,56 +462,25 @@ if (
             );
         }
 
-        $credit_stmt = $pdo->prepare("
-            SELECT
-                sr.return_credit_note_number,
-                sr.return_credit_note_amount
-            FROM supplier_returns sr
-            JOIN purchase_orders po
-                ON po.po_id = sr.return_po_id
-            WHERE sr.return_id = ?
-            AND sr.return_status = 'resolved'
-            AND sr.return_resolution_type IN (
-                'credit_note',
-                'dispute_upheld'
-            )
-            AND sr.return_credit_note_number IS NOT NULL
-            AND sr.return_credit_note_amount > 0
-            AND sr.return_credit_note_used_invoice_id IS NULL
-            AND po.po_supplier_id = ?
-            FOR UPDATE
-        ");
-
-        $credit_stmt->execute([
-            $return_id,
-            $invoice['invoice_supplier_id'],
-        ]);
-
-        $credit_note = $credit_stmt->fetch(
-            PDO::FETCH_ASSOC
-        );
-
-        if (!$credit_note) {
+        if (
+            (int) $invoice[
+                'invoice_is_mismatch'
+            ] === 1
+        ) {
             throw new RuntimeException(
-                'This credit note is not available for this supplier.'
+                'Credit notes cannot be used to correct an invoice amount mismatch. ' .
+                'The supplier invoice must first match the purchase order total.'
             );
         }
 
-        $credit_amount_sen =
-            moneyDecimalToSen(
-                (string) $credit_note[
-                    'return_credit_note_amount'
-                ]
-            );
-
-        $invoice_amount_sen =
+        $invoiceAmountSen =
             moneyDecimalToSen(
                 (string) $invoice[
                     'invoice_amount'
                 ]
             );
 
-        $po_total_sen =
+        $poTotalSen =
             moneyDecimalToSen(
                 (string) $invoice[
                     'po_total_amount'
@@ -414,100 +488,142 @@ if (
             );
 
         if (
-            $credit_amount_sen < 1 ||
-            $invoice_amount_sen < 1
+            $invoiceAmountSen !==
+            $poTotalSen
         ) {
             throw new RuntimeException(
-                'The invoice or credit note amount is invalid.'
+                'This invoice no longer matches its purchase order and cannot use a credit note.'
+            );
+        }
+
+        $creditStatement = $pdo->prepare("
+            SELECT
+                sr.return_po_id,
+                sr.return_credit_note_number,
+                sr.return_credit_note_amount
+            FROM supplier_returns sr
+            JOIN purchase_orders source_po
+                ON source_po.po_id =
+                    sr.return_po_id
+            WHERE sr.return_id = ?
+            AND sr.return_status = 'resolved'
+            AND sr.return_resolution_type IN (
+                'credit_note',
+                'dispute_upheld'
+            )
+            AND sr.return_credit_note_number
+                IS NOT NULL
+            AND sr.return_credit_note_amount > 0
+            AND sr.return_credit_note_used_invoice_id
+                IS NULL
+            AND source_po.po_supplier_id = ?
+            FOR UPDATE
+        ");
+
+        $creditStatement->execute([
+            $returnId,
+            $invoice[
+                'invoice_supplier_id'
+            ],
+        ]);
+
+        $creditNote =
+            $creditStatement->fetch(
+                PDO::FETCH_ASSOC
+            );
+
+        if (!$creditNote) {
+            throw new RuntimeException(
+                'This credit note is not available for this supplier.'
             );
         }
 
         if (
-            $credit_amount_sen >
-            $invoice_amount_sen
+            (int) $creditNote[
+                'return_po_id'
+            ] ===
+            (int) $invoice[
+                'invoice_po_id'
+            ]
+        ) {
+            throw new RuntimeException(
+                'A credit note cannot be applied to the same purchase order that generated it. ' .
+                'It must be carried forward to another invoice.'
+            );
+        }
+
+        $creditAmountSen =
+            moneyDecimalToSen(
+                (string) $creditNote[
+                    'return_credit_note_amount'
+                ]
+            );
+
+        if (
+            $creditAmountSen < 1 ||
+            $creditAmountSen >
+                $invoiceAmountSen
         ) {
             throw new RuntimeException(
                 'Credit Note ' .
-                $credit_note[
+                $creditNote[
                     'return_credit_note_number'
                 ] .
-                ' exceeds this invoice amount.'
+                ' cannot be applied because its amount exceeds this invoice.'
             );
         }
 
-        if (
-            $invoice_amount_sen ===
-            $po_total_sen
-        ) {
-            throw new RuntimeException(
-                'This invoice already matches the correct PO payable amount of RM ' .
-                moneyFormatSen($po_total_sen) .
-                '. Pay the invoice total without applying a credit note.'
+        $netPayableSen =
+            $invoiceAmountSen -
+            $creditAmountSen;
+
+        $applied =
+            moneySenToDecimal(
+                $creditAmountSen
             );
-        }
 
-        $correct_payable_sen =
-            $invoice_amount_sen -
-            $credit_amount_sen;
-
-        if (
-            $correct_payable_sen !==
-            $po_total_sen
-        ) {
-            throw new RuntimeException(
-                'After applying Credit Note ' .
-                $credit_note[
-                    'return_credit_note_number'
-                ] .
-                ', the payable amount would be RM ' .
-                moneyFormatSen(
-                    $correct_payable_sen
-                ) .
-                ', which does not match the correct PO payable amount of RM ' .
-                moneyFormatSen($po_total_sen) .
-                '.'
-            );
-        }
-
-        $applied = moneySenToDecimal(
-            $credit_amount_sen
-        );
-
-        $invoice_update = $pdo->prepare("
+        $invoiceUpdate = $pdo->prepare("
             UPDATE supplier_invoices
-            SET invoice_credit_note_id = ?,
-                invoice_credit_applied_amount = ?,
-                invoice_is_mismatch = 0
+            SET
+                invoice_credit_note_id = ?,
+                invoice_credit_applied_amount = ?
             WHERE invoice_id = ?
             AND invoice_status = 'unpaid'
+            AND invoice_is_mismatch = 0
             AND invoice_credit_note_id IS NULL
         ");
 
-        $invoice_update->execute([
-            $return_id,
+        $invoiceUpdate->execute([
+            $returnId,
             $applied,
-            $invoice_id,
+            $invoiceId,
         ]);
 
-        if ($invoice_update->rowCount() !== 1) {
+        if (
+            $invoiceUpdate->rowCount() !== 1
+        ) {
             throw new RuntimeException(
                 'Unable to apply the credit note.'
             );
         }
 
-        $credit_update = $pdo->prepare("
+        $creditUpdate = $pdo->prepare("
             UPDATE supplier_returns
-            SET return_credit_note_used_invoice_id = ?
+            SET
+                return_credit_note_used_invoice_id = ?
             WHERE return_id = ?
-            AND return_credit_note_used_invoice_id IS NULL
+            AND return_credit_note_used_invoice_id
+                IS NULL
         ");
 
-        $credit_update->execute([
-            $invoice_id,
-            $return_id,
+        $creditUpdate->execute([
+            $invoiceId,
+            $returnId,
         ]);
 
-        if ($credit_update->rowCount() !== 1) {
+        if (
+            $creditUpdate->rowCount() !== 1
+        ) {
             throw new RuntimeException(
                 'The credit note has already been used.'
             );
@@ -516,9 +632,17 @@ if (
         $pdo->commit();
 
         redirectInvoicePage(
-            'Credit note applied. Correct payable amount: RM ' .
+            'Credit Note ' .
+                $creditNote[
+                    'return_credit_note_number'
+                ] .
+                ' applied. Invoice total remains RM ' .
                 moneyFormatSen(
-                    $correct_payable_sen
+                    $invoiceAmountSen
+                ) .
+                '; net payable is RM ' .
+                moneyFormatSen(
+                    $netPayableSen
                 ) .
                 '.'
         );
@@ -536,14 +660,18 @@ if (
     }
 }
 
-// Remove credit note
+// ------------------------------------------------------------
+// Remove applied credit note.
+// Match/mismatch is intentionally untouched because applying credit
+// never changes the supplier invoice amount.
+// ------------------------------------------------------------
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     isset($_POST['remove_credit_note'])
 ) {
     csrf_verify();
 
-    $invoice_id = requirePositiveRequestId(
+    $invoiceId = requirePositiveRequestId(
         INPUT_POST,
         'invoice_id',
         'Invalid invoice.'
@@ -552,23 +680,23 @@ if (
     try {
         $pdo->beginTransaction();
 
-        $inv_stmt = $pdo->prepare("
+        $invoiceStatement = $pdo->prepare("
             SELECT
-                si.invoice_credit_note_id,
-                si.invoice_amount,
-                po.po_total_amount
-            FROM supplier_invoices si
-            JOIN purchase_orders po
-                ON po.po_id = si.invoice_po_id
-            WHERE si.invoice_id = ?
-            AND si.invoice_status = 'unpaid'
+                invoice_credit_note_id
+            FROM supplier_invoices
+            WHERE invoice_id = ?
+            AND invoice_status = 'unpaid'
             FOR UPDATE
         ");
 
-        $inv_stmt->execute([$invoice_id]);
-        $invoice = $inv_stmt->fetch(
-            PDO::FETCH_ASSOC
-        );
+        $invoiceStatement->execute([
+            $invoiceId,
+        ]);
+
+        $invoice =
+            $invoiceStatement->fetch(
+                PDO::FETCH_ASSOC
+            );
 
         if (
             !$invoice ||
@@ -583,79 +711,58 @@ if (
             );
         }
 
-        $return_id = (int) $invoice[
+        $returnId = (int) $invoice[
             'invoice_credit_note_id'
         ];
 
-        $invoice_amount_sen =
-            moneyDecimalToSen(
-                (string) $invoice[
-                    'invoice_amount'
-                ]
-            );
-
-        $po_total_sen =
-            moneyDecimalToSen(
-                (string) $invoice[
-                    'po_total_amount'
-                ]
-            );
-
-        $restored_mismatch =
-            $invoice_amount_sen ===
-            $po_total_sen
-                ? 0
-                : 1;
-
-        $invoice_update = $pdo->prepare("
+        $invoiceUpdate = $pdo->prepare("
             UPDATE supplier_invoices
-            SET invoice_credit_note_id = NULL,
-                invoice_credit_applied_amount = 0,
-                invoice_is_mismatch = ?
+            SET
+                invoice_credit_note_id = NULL,
+                invoice_credit_applied_amount = 0
             WHERE invoice_id = ?
             AND invoice_status = 'unpaid'
             AND invoice_credit_note_id = ?
         ");
 
-        $invoice_update->execute([
-            $restored_mismatch,
-            $invoice_id,
-            $return_id,
+        $invoiceUpdate->execute([
+            $invoiceId,
+            $returnId,
         ]);
 
-        if ($invoice_update->rowCount() !== 1) {
+        if (
+            $invoiceUpdate->rowCount() !== 1
+        ) {
             throw new RuntimeException(
                 'Unable to remove the credit note.'
             );
         }
 
-        $credit_update = $pdo->prepare("
+        $creditUpdate = $pdo->prepare("
             UPDATE supplier_returns
-            SET return_credit_note_used_invoice_id = NULL
+            SET
+                return_credit_note_used_invoice_id = NULL
             WHERE return_id = ?
             AND return_credit_note_used_invoice_id = ?
         ");
 
-        $credit_update->execute([
-            $return_id,
-            $invoice_id,
+        $creditUpdate->execute([
+            $returnId,
+            $invoiceId,
         ]);
 
-        if ($credit_update->rowCount() !== 1) {
+        if (
+            $creditUpdate->rowCount() !== 1
+        ) {
             throw new RuntimeException(
                 'Unable to release the credit note.'
             );
         }
 
-        $removal_message =
-            $restored_mismatch === 1
-                ? 'Credit note removed. The invoice total no longer matches the correct PO payable amount and requires review.'
-                : 'Credit note removed. The invoice total matches the correct PO payable amount.';
-
         $pdo->commit();
 
         redirectInvoicePage(
-            $removal_message
+            'Credit note removed. The original invoice total is payable again.'
         );
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -671,10 +778,18 @@ if (
     }
 }
 
-// Handle download receipt
-if (isset($_GET['download_receipt'])) {
-    require_once '../vendor/autoload.php';
-    $invoice_id = filter_input(
+// ------------------------------------------------------------
+// Download payment receipt.
+// ------------------------------------------------------------
+if (
+    isset(
+        $_GET['download_receipt']
+    )
+) {
+    require_once __DIR__ .
+        '/../vendor/autoload.php';
+
+    $invoiceId = filter_input(
         INPUT_GET,
         'download_receipt',
         FILTER_VALIDATE_INT,
@@ -685,148 +800,360 @@ if (isset($_GET['download_receipt'])) {
         ]
     );
 
-    if ($invoice_id === false || $invoice_id === null) {
-        header('Location: supplier_invoices.php');
+    if (
+        $invoiceId === false ||
+        $invoiceId === null
+    ) {
+        header(
+            'Location: supplier_invoices.php'
+        );
         exit;
     }
 
-    $inv = $pdo->prepare("
-        SELECT si.*, s.supplier_name, s.supplier_contact_person, s.supplier_address, s.supplier_email, po.po_number, sr.return_credit_note_number
+    $invoiceStatement = $pdo->prepare("
+        SELECT
+            si.*,
+            s.supplier_name,
+            s.supplier_contact_person,
+            s.supplier_address,
+            s.supplier_email,
+            po.po_number,
+            sr.return_credit_note_number
         FROM supplier_invoices si
-        JOIN suppliers s ON s.supplier_id = si.invoice_supplier_id
-        LEFT JOIN purchase_orders po ON po.po_id = si.invoice_po_id
-        LEFT JOIN supplier_returns sr ON sr.return_id = si.invoice_credit_note_id
-        WHERE si.invoice_id = ? AND si.invoice_status = 'paid'
+        JOIN suppliers s
+            ON s.supplier_id =
+                si.invoice_supplier_id
+        LEFT JOIN purchase_orders po
+            ON po.po_id =
+                si.invoice_po_id
+        LEFT JOIN supplier_returns sr
+            ON sr.return_id =
+                si.invoice_credit_note_id
+        WHERE si.invoice_id = ?
+        AND si.invoice_status = 'paid'
     ");
-    $inv->execute([$invoice_id]);
-    $inv = $inv->fetch(PDO::FETCH_ASSOC);
 
-    if (!$inv) { header('Location: supplier_invoices.php'); exit; }
+    $invoiceStatement->execute([
+        $invoiceId,
+    ]);
 
-    $receipt_invoice_sen =
+    $invoice =
+        $invoiceStatement->fetch(
+            PDO::FETCH_ASSOC
+        );
+
+    if (!$invoice) {
+        header(
+            'Location: supplier_invoices.php'
+        );
+        exit;
+    }
+
+    $invoiceAmountSen =
         moneyDecimalToSen(
-            (string) $inv[
+            (string) $invoice[
                 'invoice_amount'
             ]
         );
 
-    $receipt_credit_sen =
+    $creditAmountSen =
         moneyDecimalToSen(
             (string) (
-                $inv[
+                $invoice[
                     'invoice_credit_applied_amount'
                 ] ?? '0.00'
             )
         );
 
-    $receipt_total_sen = max(
+    $totalPaidSen = max(
         0,
-        $receipt_invoice_sen -
-            $receipt_credit_sen
+        $invoiceAmountSen -
+            $creditAmountSen
     );
 
-    $receipt_number = 'RCT-' . str_pad($invoice_id, 5, '0', STR_PAD_LEFT);
+    $receiptNumber =
+        'RCT-' .
+        str_pad(
+            (string) $invoiceId,
+            5,
+            '0',
+            STR_PAD_LEFT
+        );
+
+    $creditRow = '';
+
+    if ($creditAmountSen > 0) {
+        $creditRow = "
+            <tr style='border-bottom:1px solid #e5e7eb;'>
+                <td style='padding:12px 14px; font-size:13px; color:#047857;'>
+                    Less: Credit Note " .
+                    htmlspecialchars(
+                        (string) (
+                            $invoice[
+                                'return_credit_note_number'
+                            ] ?? '—'
+                        ),
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) .
+                "</td>
+                <td style='padding:12px 14px; font-size:13px; text-align:right; color:#047857;'>
+                    - RM " .
+                    moneyFormatSen(
+                        $creditAmountSen
+                    ) .
+                "</td>
+            </tr>
+        ";
+    }
 
     $html = "
     <!DOCTYPE html>
     <html>
-    <head><meta charset='UTF-8'></head>
-    <body style='font-family: Arial, sans-serif; margin:0; padding:30px; color:#111827;'>
-        
-        <div style='background:#1e2d4a; padding:24px; border-radius:8px; margin-bottom:30px;'>
-            <h1 style='color:#ffffff; font-size:22px; margin:0; font-weight:900;'>MANGA<span style='color:#ef4444;'>VAULT</span></h1>
-            <p style='color:rgba(255,255,255,0.7); font-size:12px; margin:4px 0 0;'>Official Payment Receipt</p>
+    <head>
+        <meta charset='UTF-8'>
+    </head>
+    <body style='font-family:Arial,sans-serif;margin:0;padding:30px;color:#111827;'>
+        <div style='background:#1e2d4a;padding:24px;border-radius:8px;margin-bottom:30px;'>
+            <h1 style='color:#ffffff;font-size:22px;margin:0;font-weight:900;'>
+                MANGA<span style='color:#ef4444;'>VAULT</span>
+            </h1>
+            <p style='color:rgba(255,255,255,0.7);font-size:12px;margin:4px 0 0;'>
+                Official Payment Receipt
+            </p>
         </div>
 
-        <h2 style='font-size:18px; color:#111827; margin:0 0 4px;'>Payment Receipt</h2>
-        <p style='font-size:12px; color:#6b7280; margin:0 0 24px;'>Receipt No: <strong>$receipt_number</strong></p>
+        <h2 style='font-size:18px;color:#111827;margin:0 0 4px;'>
+            Payment Receipt
+        </h2>
 
-        <table style='width:100%; margin-bottom:24px; font-size:13px;'>
+        <p style='font-size:12px;color:#6b7280;margin:0 0 24px;'>
+            Receipt No:
+            <strong>" .
+                htmlspecialchars(
+                    $receiptNumber,
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) .
+            "</strong>
+        </p>
+
+        <table style='width:100%;margin-bottom:24px;font-size:13px;'>
             <tr>
-                <td style='padding:4px 0; color:#6b7280; width:40%;'>Receipt Date</td>
-                <td style='padding:4px 0; font-weight:600;'>" . date('d F Y', strtotime($inv['invoice_paid_at'])) . "</td>
+                <td style='padding:4px 0;color:#6b7280;width:40%;'>
+                    Receipt Date
+                </td>
+                <td style='padding:4px 0;font-weight:600;'>" .
+                    date(
+                        'd F Y',
+                        strtotime(
+                            (string) $invoice[
+                                'invoice_paid_at'
+                            ]
+                        )
+                    ) .
+                "</td>
             </tr>
             <tr>
-                <td style='padding:4px 0; color:#6b7280;'>Invoice Number</td>
-                <td style='padding:4px 0; font-weight:600;'>" . htmlspecialchars($inv['invoice_number']) . "</td>
+                <td style='padding:4px 0;color:#6b7280;'>
+                    Invoice Number
+                </td>
+                <td style='padding:4px 0;font-weight:600;'>" .
+                    htmlspecialchars(
+                        (string) $invoice[
+                            'invoice_number'
+                        ],
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) .
+                "</td>
             </tr>
             <tr>
-                <td style='padding:4px 0; color:#6b7280;'>Purchase Order</td>
-                <td style='padding:4px 0; font-weight:600;'>" . htmlspecialchars($inv['po_number'] ?? '—') . "</td>
+                <td style='padding:4px 0;color:#6b7280;'>
+                    Purchase Order
+                </td>
+                <td style='padding:4px 0;font-weight:600;'>" .
+                    htmlspecialchars(
+                        (string) (
+                            $invoice[
+                                'po_number'
+                            ] ?? '—'
+                        ),
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) .
+                "</td>
             </tr>
         </table>
 
-        <div style='background:#f9fafb; border-radius:8px; padding:16px; margin-bottom:24px;'>
-            <p style='font-size:11px; color:#9ca3af; margin:0 0 6px; text-transform:uppercase; font-weight:700;'>Paid To</p>
-            <p style='font-size:14px; font-weight:700; margin:0 0 2px;'>" . htmlspecialchars($inv['supplier_name']) . "</p>
-            <p style='font-size:12px; color:#6b7280; margin:0;'>" . htmlspecialchars($inv['supplier_contact_person'] ?? '') . "</p>
-            <p style='font-size:12px; color:#6b7280; margin:0;'>" . htmlspecialchars($inv['supplier_address'] ?? '') . "</p>
-            <p style='font-size:12px; color:#6b7280; margin:0;'>" . htmlspecialchars($inv['supplier_email'] ?? '') . "</p>
+        <div style='background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:24px;'>
+            <p style='font-size:11px;color:#9ca3af;margin:0 0 6px;text-transform:uppercase;font-weight:700;'>
+                Paid To
+            </p>
+            <p style='font-size:14px;font-weight:700;margin:0 0 2px;'>" .
+                htmlspecialchars(
+                    (string) $invoice[
+                        'supplier_name'
+                    ],
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) .
+            "</p>
+            <p style='font-size:12px;color:#6b7280;margin:0;'>" .
+                htmlspecialchars(
+                    (string) (
+                        $invoice[
+                            'supplier_contact_person'
+                        ] ?? ''
+                    ),
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) .
+            "</p>
+            <p style='font-size:12px;color:#6b7280;margin:0;'>" .
+                htmlspecialchars(
+                    (string) (
+                        $invoice[
+                            'supplier_address'
+                        ] ?? ''
+                    ),
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) .
+            "</p>
+            <p style='font-size:12px;color:#6b7280;margin:0;'>" .
+                htmlspecialchars(
+                    (string) (
+                        $invoice[
+                            'supplier_email'
+                        ] ?? ''
+                    ),
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) .
+            "</p>
         </div>
 
-        <table style='width:100%; border-collapse:collapse; margin-bottom:24px;'>
-            <tr style='background:#1e2d4a; color:white;'>
-                <td style='padding:10px 14px; font-size:12px; font-weight:700;'>Description</td>
-                <td style='padding:10px 14px; font-size:12px; font-weight:700; text-align:right;'>Amount</td>
+        <table style='width:100%;border-collapse:collapse;margin-bottom:24px;'>
+            <tr style='background:#1e2d4a;color:white;'>
+                <td style='padding:10px 14px;font-size:12px;font-weight:700;'>
+                    Description
+                </td>
+                <td style='padding:10px 14px;font-size:12px;font-weight:700;text-align:right;'>
+                    Amount
+                </td>
             </tr>
+
             <tr style='border-bottom:1px solid #e5e7eb;'>
-                <td style='padding:12px 14px; font-size:13px;'>Invoice " . htmlspecialchars($inv['invoice_number']) . "</td>
-                <td style='padding:12px 14px; font-size:13px; text-align:right;'>RM " . moneyFormatSen($receipt_invoice_sen) . "</td>
-            </tr>" . ($receipt_credit_sen > 0 ? "
-            <tr style='border-bottom:1px solid #e5e7eb;'>
-                <td style='padding:12px 14px; font-size:13px; color:#C0392B;'>Less: Credit Note " . htmlspecialchars($inv['return_credit_note_number']) . "</td>
-                <td style='padding:12px 14px; font-size:13px; text-align:right; color:#C0392B;'>- RM " . moneyFormatSen($receipt_credit_sen) . "</td>
-            </tr>" : "") . "
-            <tr style='background:#fef2f2;'>
-                <td style='padding:12px 14px; font-size:14px; font-weight:900;'>Total Paid</td>
-                <td style='padding:12px 14px; font-size:14px; font-weight:900; text-align:right; color:#C0392B;'>RM " . moneyFormatSen($receipt_total_sen) . "</td>
+                <td style='padding:12px 14px;font-size:13px;'>
+                    Invoice " .
+                    htmlspecialchars(
+                        (string) $invoice[
+                            'invoice_number'
+                        ],
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) .
+                "</td>
+                <td style='padding:12px 14px;font-size:13px;text-align:right;'>
+                    RM " .
+                    moneyFormatSen(
+                        $invoiceAmountSen
+                    ) .
+                "</td>
+            </tr>
+
+            $creditRow
+
+            <tr style='background:#f0fdf4;'>
+                <td style='padding:12px 14px;font-size:14px;font-weight:900;'>
+                    Total Paid
+                </td>
+                <td style='padding:12px 14px;font-size:14px;font-weight:900;text-align:right;color:#047857;'>
+                    RM " .
+                    moneyFormatSen(
+                        $totalPaidSen
+                    ) .
+                "</td>
             </tr>
         </table>
 
-        <div style='border-top:2px solid #f3f4f6; padding-top:16px; margin-top:40px;'>
-            <p style='font-size:11px; color:#9ca3af; margin:0;'>This is a computer-generated receipt and serves as official proof of payment from MangaVault to the above supplier.</p>
-            <p style='font-size:11px; color:#9ca3af; margin:4px 0 0;'>MangaVault Sdn Bhd · Generated on " . date('d F Y, h:i A') . "</p>
+        <div style='border-top:2px solid #f3f4f6;padding-top:16px;margin-top:40px;'>
+            <p style='font-size:11px;color:#9ca3af;margin:0;'>
+                This is a computer-generated receipt and serves as official proof of payment from MangaVault to the above supplier.
+            </p>
+            <p style='font-size:11px;color:#9ca3af;margin:4px 0 0;'>
+                MangaVault Sdn Bhd · Generated on " .
+                date(
+                    'd F Y, h:i A'
+                ) .
+            "</p>
         </div>
-
     </body>
-    </html>";
+    </html>
+    ";
 
-    $dompdf = new \Dompdf\Dompdf();
+    $dompdf =
+        new \Dompdf\Dompdf();
+
     $dompdf->loadHtml($html);
-    $dompdf->setPaper('A4', 'portrait');
+    $dompdf->setPaper(
+        'A4',
+        'portrait'
+    );
     $dompdf->render();
-    $dompdf->stream("Receipt_{$receipt_number}.pdf", ['Attachment' => true]);
+    $dompdf->stream(
+        "Receipt_{$receiptNumber}.pdf",
+        [
+            'Attachment' => true,
+        ]
+    );
+
     exit;
 }
 
+// ------------------------------------------------------------
+// Data for page.
+// ------------------------------------------------------------
 $invoices = $pdo->query("
-    SELECT si.*, s.supplier_name, po.po_number, po.po_total_amount
+    SELECT
+        si.*,
+        s.supplier_name,
+        po.po_number,
+        po.po_total_amount,
+        sr.return_credit_note_number
     FROM supplier_invoices si
-    JOIN suppliers s ON s.supplier_id = si.invoice_supplier_id
-    LEFT JOIN purchase_orders po ON po.po_id = si.invoice_po_id
-    ORDER BY si.invoice_created_at DESC
+    JOIN suppliers s
+        ON s.supplier_id =
+            si.invoice_supplier_id
+    LEFT JOIN purchase_orders po
+        ON po.po_id =
+            si.invoice_po_id
+    LEFT JOIN supplier_returns sr
+        ON sr.return_id =
+            si.invoice_credit_note_id
+    ORDER BY
+        CASE si.invoice_status
+            WHEN 'unpaid' THEN 0
+            WHEN 'rejected' THEN 1
+            ELSE 2
+        END,
+        si.invoice_created_at DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get completed POs for the dropdown (that don't have invoices yet)
-$available_pos = $pdo->query("
-    SELECT po.po_id, po.po_number, po.po_total_amount, s.supplier_name
-    FROM purchase_orders po
-    JOIN suppliers s ON s.supplier_id = po.po_supplier_id
-    WHERE po.po_status IN ('confirmed', 'completed')
-    AND po.po_id NOT IN (SELECT invoice_po_id FROM supplier_invoices WHERE invoice_po_id IS NOT NULL)
-    ORDER BY po.po_created_at DESC
-")->fetchAll(PDO::FETCH_ASSOC);
-
-$available_credits = $pdo->query("
+$availableCredits = $pdo->query("
     SELECT
         sr.return_id,
         sr.return_number,
+        sr.return_po_id,
         sr.return_credit_note_number,
         sr.return_credit_note_amount,
-        po.po_supplier_id
+        source_po.po_supplier_id,
+        source_po.po_number AS source_po_number
     FROM supplier_returns sr
-    JOIN purchase_orders po
-        ON po.po_id = sr.return_po_id
+    JOIN purchase_orders source_po
+        ON source_po.po_id =
+            sr.return_po_id
     WHERE sr.return_status = 'resolved'
     AND sr.return_resolution_type IN (
         'credit_note',
@@ -835,43 +1162,182 @@ $available_credits = $pdo->query("
     AND sr.return_credit_note_number IS NOT NULL
     AND sr.return_credit_note_amount > 0
     AND sr.return_credit_note_used_invoice_id IS NULL
-    ORDER BY sr.return_resolved_at ASC,
-             sr.return_id ASC
+    ORDER BY
+        sr.return_resolved_at ASC,
+        sr.return_id ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$credits_by_supplier = [];
-foreach ($available_credits as $c) {
-    $credits_by_supplier[$c['po_supplier_id']][] = $c;
+$creditsBySupplier = [];
+
+foreach (
+    $availableCredits as $credit
+) {
+    $supplierId =
+        (int) $credit[
+            'po_supplier_id'
+        ];
+
+    $creditsBySupplier[
+        $supplierId
+    ][] = $credit;
+}
+
+$mismatchCount = count(
+    array_filter(
+        $invoices,
+        static fn (
+            array $invoice
+        ): bool =>
+            (int) $invoice[
+                'invoice_is_mismatch'
+            ] === 1 &&
+            $invoice[
+                'invoice_status'
+            ] === 'unpaid'
+    )
+);
+
+$unpaidCount = count(
+    array_filter(
+        $invoices,
+        static fn (
+            array $invoice
+        ): bool =>
+            $invoice[
+                'invoice_status'
+            ] === 'unpaid'
+    )
+);
+
+$availableCreditTotalSen = 0;
+
+foreach (
+    $availableCredits as $credit
+) {
+    $availableCreditTotalSen +=
+        moneyDecimalToSen(
+            (string) $credit[
+                'return_credit_note_amount'
+            ]
+        );
 }
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Supplier Invoices - MangaVault Admin</title>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <title>
+        Supplier Invoices - MangaVault Admin
+    </title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="bg-[#f5f6fa] min-h-screen">
 
     <?php include '../includes/admin_navbar.php'; ?>
 
-    <div class="max-w-[1500px] mx-auto px-3 py-8">
+    <main
+        class="mx-auto max-w-[1600px] px-4 py-7 md:px-7"
+    >
+        <div
+            class="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"
+        >
+            <div>
+                <p
+                    class="text-[11px] font-black uppercase tracking-[0.18em] text-gray-400"
+                >
+                    Procurement / Accounts Payable
+                </p>
 
-        <div class="mb-8">
-            <h1 class="text-2xl font-black text-gray-800">🧾 Supplier Invoices</h1>
-            <p class="text-gray-500 text-sm mt-1">Review invoices submitted by suppliers and process payments</p>
+                <h1
+                    class="mt-1 text-2xl font-black text-gray-900"
+                >
+                    Supplier Invoices
+                </h1>
+
+                <p
+                    class="mt-1 text-sm text-gray-500"
+                >
+                    Validate supplier invoices, manage carried-forward credit notes and process payments.
+                </p>
+            </div>
+
+            <div
+                class="grid grid-cols-3 gap-3"
+            >
+                <div
+                    class="rounded-xl border border-gray-200 bg-white px-4 py-3"
+                >
+                    <p
+                        class="text-[10px] font-bold uppercase tracking-wide text-gray-400"
+                    >
+                        Unpaid
+                    </p>
+                    <p
+                        class="mt-1 text-xl font-black text-gray-900"
+                    >
+                        <?= number_format(
+                            $unpaidCount
+                        ) ?>
+                    </p>
+                </div>
+
+                <div
+                    class="rounded-xl border border-red-200 bg-red-50 px-4 py-3"
+                >
+                    <p
+                        class="text-[10px] font-bold uppercase tracking-wide text-red-400"
+                    >
+                        Mismatch
+                    </p>
+                    <p
+                        class="mt-1 text-xl font-black text-red-700"
+                    >
+                        <?= number_format(
+                            $mismatchCount
+                        ) ?>
+                    </p>
+                </div>
+
+                <div
+                    class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3"
+                >
+                    <p
+                        class="text-[10px] font-bold uppercase tracking-wide text-emerald-500"
+                    >
+                        Unused Credit
+                    </p>
+                    <p
+                        class="mt-1 text-sm font-black text-emerald-700"
+                    >
+                        RM
+                        <?= moneyFormatSen(
+                            $availableCreditTotalSen
+                        ) ?>
+                    </p>
+                </div>
+            </div>
         </div>
 
         <?php if ($success): ?>
-        <div class="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl mb-6">
-            ✅ <?= htmlspecialchars($success) ?>
+        <div
+            class="mb-5 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700"
+        >
+            ✅
+            <?= htmlspecialchars(
+                $success,
+                ENT_QUOTES,
+                'UTF-8'
+            ) ?>
         </div>
         <?php endif; ?>
 
         <?php if ($error): ?>
         <div
-            class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-6"
+            class="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
         >
             ❌
             <?= htmlspecialchars(
@@ -882,243 +1348,196 @@ foreach ($available_credits as $c) {
         </div>
         <?php endif; ?>
 
-        <?php
-        $mismatch_count = count(array_filter($invoices, fn($i) => $i['invoice_is_mismatch'] && $i['invoice_status'] === 'unpaid'));
-        if ($mismatch_count > 0): ?>
-        <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-6">
-            ⚠️ <?= $mismatch_count ?> invoice(s) have amount mismatches with their PO.
-            <?php if (($_SESSION['admin_level'] ?? '') === 'senior_admin'): ?>
-            Please review before marking as paid.
+        <?php if (
+            $mismatchCount > 0
+        ): ?>
+        <div
+            class="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+            <strong>
+                <?= number_format(
+                    $mismatchCount
+                ) ?>
+                invoice(s) have a true PO amount mismatch.
+            </strong>
+            Credit notes cannot be used to correct these invoices.
+            <?php if (
+                ($_SESSION[
+                    'admin_level'
+                ] ?? '') ===
+                'senior_admin'
+            ): ?>
+            You may reject them or use the documented senior-admin override.
             <?php else: ?>
-            These require senior admin approval before payment can be processed.
+            Senior-admin approval is required for any mismatch override.
             <?php endif; ?>
         </div>
         <?php endif; ?>
 
-        <div class="bg-white rounded-2xl shadow-sm overflow-hidden isolate">
-            <?php if (count($invoices) === 0): ?>
-            <div class="text-center py-16">
-                <div class="text-5xl mb-4">🧾</div>
-                <p class="text-gray-400">No invoices recorded yet.</p>
+        <section
+            class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
+        >
+            <?php if (
+                count($invoices) === 0
+            ): ?>
+            <div class="py-16 text-center">
+                <div
+                    class="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gray-100 text-xl text-gray-400"
+                >
+                    ▩
+                </div>
+
+                <p
+                    class="mt-4 text-sm font-semibold text-gray-500"
+                >
+                    No invoices recorded yet.
+                </p>
             </div>
             <?php else: ?>
-            <table
-                class="w-full table-fixed border-separate"
-                style="border-spacing: 0;"
-            >
-                <colgroup>
-                    <col class="w-[14%]">
-                    <col class="w-[20%]">
-                    <col class="w-[8%]">
-                    <col class="w-[11%]">
-                    <col class="w-[10%]">
-                    <col class="w-[11%]">
-                    <col class="w-[8%]">
-                    <col class="w-[18%]">
-                </colgroup>
-                <thead>
-                    <tr class="bg-gray-50 border-b border-gray-100">
-                        <th
-                            class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase rounded-tl-2xl"
+            <div class="overflow-x-auto">
+                <table
+                    class="min-w-[1260px] w-full"
+                >
+                    <thead>
+                        <tr
+                            class="border-b border-gray-200 bg-gray-50"
                         >
-                            Invoice #
-                        </th>
-
-                        <th
-                            class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase"
-                        >
-                            Supplier
-                        </th>
-
-                        <th
-                            class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase"
-                        >
-                            PO
-                        </th>
-
-                        <th
-                            class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase"
-                        >
-                            Amount
-                        </th>
-
-                        <th
-                            class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase"
-                        >
-                            Match
-                        </th>
-
-                        <th
-                            class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase"
-                        >
-                            Due Date
-                        </th>
+                            <th
+                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
+                            >
+                                Invoice
+                            </th>
 
                             <th
-                                class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase"
+                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
+                            >
+                                Supplier / PO
+                            </th>
+
+                            <th
+                                class="px-4 py-3 text-right text-[10px] font-black uppercase tracking-wide text-gray-400"
+                            >
+                                Invoice Amount
+                            </th>
+
+                            <th
+                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
+                            >
+                                Credit Note
+                            </th>
+
+                            <th
+                                class="px-4 py-3 text-right text-[10px] font-black uppercase tracking-wide text-gray-400"
+                            >
+                                Net Payable
+                            </th>
+
+                            <th
+                                class="px-4 py-3 text-center text-[10px] font-black uppercase tracking-wide text-gray-400"
+                            >
+                                Match
+                            </th>
+
+                            <th
+                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
+                            >
+                                Due
+                            </th>
+
+                            <th
+                                class="px-4 py-3 text-center text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Status
                             </th>
 
                             <th
-                                class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase rounded-tr-2xl"
+                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Action
                             </th>
                         </tr>
                     </thead>
-                <tbody>
-                    <?php foreach ($invoices as $inv):
-                        $invoice_amount_sen =
-                            moneyDecimalToSen(
-                                (string) $inv[
-                                    'invoice_amount'
-                                ]
+
+                    <tbody>
+                        <?php foreach (
+                            $invoices as $invoice
+                        ):
+                            $invoiceAmountSen =
+                                moneyDecimalToSen(
+                                    (string) $invoice[
+                                        'invoice_amount'
+                                    ]
+                                );
+
+                            $creditAppliedSen =
+                                moneyDecimalToSen(
+                                    (string) (
+                                        $invoice[
+                                            'invoice_credit_applied_amount'
+                                        ] ?? '0.00'
+                                    )
+                                );
+
+                            $netPayableSen = max(
+                                0,
+                                $invoiceAmountSen -
+                                    $creditAppliedSen
                             );
 
-                        $invoice_credit_sen =
-                            moneyDecimalToSen(
-                                (string) (
-                                    $inv[
-                                        'invoice_credit_applied_amount'
-                                    ] ?? '0.00'
-                                )
-                            );
+                            $poTotalSen =
+                                moneyDecimalToSen(
+                                    (string) (
+                                        $invoice[
+                                            'po_total_amount'
+                                        ] ?? '0.00'
+                                    )
+                                );
 
-                        $invoice_net_sen = max(
-                            0,
-                            $invoice_amount_sen -
-                                $invoice_credit_sen
-                        );
+                            $isOverdue =
+                                $invoice[
+                                    'invoice_status'
+                                ] === 'unpaid' &&
+                                !empty(
+                                    $invoice[
+                                        'invoice_due_date'
+                                    ]
+                                ) &&
+                                strtotime(
+                                    (string) $invoice[
+                                        'invoice_due_date'
+                                    ]
+                                ) < time();
 
-                        $po_total_sen =
-                            moneyDecimalToSen(
-                                (string) (
-                                    $inv[
-                                        'po_total_amount'
-                                    ] ?? '0.00'
-                                )
-                            );
-
-                        $is_overdue =
-                            $inv['invoice_status'] ===
-                                'unpaid' &&
-                            $inv['invoice_due_date'] &&
-                            strtotime(
-                                $inv['invoice_due_date']
-                            ) < time();
-                    ?>
-                    <tr class="border-b border-gray-50 hover:bg-gray-50 transition-colors" style="overflow: hidden;">
-                        <td class="px-3 py-4 whitespace-nowrap">
-                            <p class="font-semibold text-sm text-gray-800 whitespace-nowrap"><?= htmlspecialchars($inv['invoice_number']) ?></p>
-                            <?php if ($inv['invoice_status'] === 'rejected' && $inv['invoice_reject_reason']): ?>
-                            <p class="text-xs text-red-400 mt-1 break-words" style="max-width: 130px; white-space: normal;">
-                                ⚠️ <?= htmlspecialchars($inv['invoice_reject_reason']) ?>
-                            </p>
-                            <?php endif; ?>
-                            <?php if ($inv['invoice_status'] === 'paid' && $inv['invoice_override_reason']): ?>
-                            <button onclick="alert('Override Reason:\n\n<?= htmlspecialchars(addslashes($inv['invoice_override_reason'])) ?>')"
-                                    class="text-xs text-orange-500 hover:underline mt-1 flex items-center gap-1">
-                                🔓 Paid with override — view reason
-                            </button>
-                            <?php endif; ?>
-                        </td>
-                        <td class="px-3 py-4 text-sm text-gray-600 break-words">
-                            <?= htmlspecialchars($inv['supplier_name']) ?>
-                        </td>
-                        <td class="px-3 py-4 text-sm text-gray-600 whitespace-nowrap"><?= htmlspecialchars($inv['po_number'] ?? '—') ?></td>
-                        <td class="px-3 py-4 text-right text-sm whitespace-nowrap">
-                            <p class="font-bold text-gray-800">
-                                RM
-                                <?= moneyFormatSen(
-                                    $invoice_amount_sen
-                                ) ?>
-                            </p>
-                            <?php if ($invoice_credit_sen > 0): ?>
-                            <p class="text-xs text-green-600">
-                                − RM
-                                <?= moneyFormatSen(
-                                    $invoice_credit_sen
-                                ) ?>
-                                credit
-                            </p>
-                            <p class="text-xs text-gray-400">
-                                Net: RM
-                                <?= moneyFormatSen(
-                                    $invoice_net_sen
-                                ) ?>
-                            </p>
-                            <?php if ($inv['invoice_status'] === 'unpaid'): ?>
-                            <form method="POST" class="inline">
-                                <?php csrf_field(); ?>
-
-                                <input
-                                    type="hidden"
-                                    name="remove_credit_note"
-                                    value="1"
-                                >
-
-                                <input
-                                    type="hidden"
-                                    name="invoice_id"
-                                    value="<?= (int) $inv['invoice_id'] ?>"
-                                >
-                                <button type="submit" class="text-xs text-red-400 hover:underline mt-0.5">✕ Undo</button>
-                            </form>
-                            <?php endif; ?>
-                            <?php endif; ?>
-                        </td>
-                        <td class="px-3 py-4 text-center whitespace-nowrap">
-                            <?php if ($inv['invoice_is_mismatch']): ?>
-                            <span class="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full font-semibold inline-block" title="PO Total: RM <?= moneyFormatSen(
-                                $po_total_sen
-                            ) ?>">
-                                ⚠️ Mismatch
-                            </span>
-                            <?php else: ?>
-                            <span class="text-green-600 text-xs whitespace-nowrap">✓ Matched</span>
-                            <?php endif; ?>
-                        </td>
-                        <td class="px-3 py-4 text-sm whitespace-nowrap <?= $is_overdue ? 'text-red-500 font-semibold' : 'text-gray-500' ?>">
-                            <?= $inv['invoice_due_date'] ? date('d M Y', strtotime($inv['invoice_due_date'])) : '—' ?>
-                            <?= $is_overdue ? ' ⚠️' : '' ?>
-                        </td>
-                        <td class="px-3 py-4 text-center whitespace-nowrap">
-                            <?php
-                            $status_badges = [
-                                'unpaid'   => 'bg-yellow-100 text-yellow-700',
-                                'paid'     => 'bg-green-100 text-green-700',
-                                'rejected' => 'bg-red-100 text-red-700',
-                            ];
-                            ?>
-                            <span class="<?= $status_badges[$inv['invoice_status']] ?> text-xs px-3 py-1 rounded-full font-semibold capitalize">
-                                <?= $inv['invoice_status'] ?>
-                            </span>
-                        </td>
-                        <td class="px-3 py-4 text-center align-middle">
-                            <?php
-                            $eligible_credits = [];
+                            $eligibleCredits = [];
 
                             if (
-                                !$inv[
-                                    'invoice_credit_note_id'
-                                ] &&
+                                $invoice[
+                                    'invoice_status'
+                                ] === 'unpaid' &&
+                                (int) $invoice[
+                                    'invoice_is_mismatch'
+                                ] === 0 &&
+                                empty(
+                                    $invoice[
+                                        'invoice_credit_note_id'
+                                    ]
+                                ) &&
                                 !empty(
-                                    $credits_by_supplier[
-                                        $inv[
+                                    $creditsBySupplier[
+                                        (int) $invoice[
                                             'invoice_supplier_id'
                                         ]
                                     ]
                                 )
                             ) {
                                 foreach (
-                                    $credits_by_supplier[
-                                        $inv[
+                                    $creditsBySupplier[
+                                        (int) $invoice[
                                             'invoice_supplier_id'
                                         ]
                                     ] as $credit
                                 ) {
-                                    $credit_amount_sen =
+                                    $creditAmountSen =
                                         moneyDecimalToSen(
                                             (string) $credit[
                                                 'return_credit_note_amount'
@@ -1126,51 +1545,254 @@ foreach ($available_credits as $c) {
                                         );
 
                                     if (
-                                        $credit_amount_sen > 0 &&
-                                        $credit_amount_sen <=
-                                            $invoice_amount_sen &&
-                                        $invoice_amount_sen -
-                                            $credit_amount_sen ===
-                                            $po_total_sen
+                                        $creditAmountSen > 0 &&
+                                        $creditAmountSen <=
+                                            $invoiceAmountSen &&
+                                        (int) $credit[
+                                            'return_po_id'
+                                        ] !==
+                                            (int) $invoice[
+                                                'invoice_po_id'
+                                            ]
                                     ) {
-                                        $eligible_credits[] = [
+                                        $eligibleCredits[] = [
                                             'credit' =>
                                                 $credit,
                                             'amount_sen' =>
-                                                $credit_amount_sen,
+                                                $creditAmountSen,
                                         ];
                                     }
                                 }
                             }
 
-                            $matched_payment_label =
-                                $invoice_credit_sen > 0
-                                    ? 'Pay Correct Amount'
-                                    : 'Pay Invoice Total';
-                            ?>
+                            $statusClass =
+                                match (
+                                    $invoice[
+                                        'invoice_status'
+                                    ]
+                                ) {
+                                    'paid' =>
+                                        'border-emerald-200 bg-emerald-50 text-emerald-700',
+                                    'rejected' =>
+                                        'border-red-200 bg-red-50 text-red-700',
+                                    default =>
+                                        'border-amber-200 bg-amber-50 text-amber-700',
+                                };
+                        ?>
+                        <tr
+                            class="border-b border-gray-100 align-top hover:bg-gray-50/60"
+                        >
+                            <td class="px-4 py-4">
+                                <p
+                                    class="whitespace-nowrap text-sm font-black text-gray-900"
+                                >
+                                    <?= htmlspecialchars(
+                                        (string) $invoice[
+                                            'invoice_number'
+                                        ],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </p>
 
-                            <?php if (
-                                $inv['invoice_status'] ===
-                                'unpaid'
-                            ): ?>
-                            <div
-                                class="flex flex-col items-center gap-2"
-                            >
-                                <?php foreach (
-                                    $eligible_credits as
-                                    $credit_option
+                                <?php if (
+                                    $invoice[
+                                        'invoice_status'
+                                    ] === 'rejected' &&
+                                    !empty(
+                                        $invoice[
+                                            'invoice_reject_reason'
+                                        ]
+                                    )
                                 ): ?>
-                                    <?php
-                                    $credit =
-                                        $credit_option[
-                                            'credit'
-                                        ];
-                                    ?>
+                                <p
+                                    class="mt-1 max-w-[180px] text-xs leading-5 text-red-500"
+                                >
+                                    <?= htmlspecialchars(
+                                        (string) $invoice[
+                                            'invoice_reject_reason'
+                                        ],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </p>
+                                <?php endif; ?>
 
+                                <?php if (
+                                    $invoice[
+                                        'invoice_status'
+                                    ] === 'paid' &&
+                                    !empty(
+                                        $invoice[
+                                            'invoice_override_reason'
+                                        ]
+                                    )
+                                ): ?>
+                                <button
+                                    type="button"
+                                    onclick='showOverrideReason(
+                                        <?= json_encode(
+                                            (string) $invoice[
+                                                'invoice_override_reason'
+                                            ],
+                                            JSON_HEX_TAG |
+                                            JSON_HEX_AMP |
+                                            JSON_HEX_APOS |
+                                            JSON_HEX_QUOT
+                                        ) ?>
+                                    )'
+                                    class="mt-1 text-left text-xs font-semibold text-orange-600 hover:underline"
+                                >
+                                    Paid with override — view reason
+                                </button>
+                                <?php endif; ?>
+                            </td>
+
+                            <td class="px-4 py-4">
+                                <p
+                                    class="max-w-[200px] text-sm font-semibold text-gray-700"
+                                >
+                                    <?= htmlspecialchars(
+                                        (string) $invoice[
+                                            'supplier_name'
+                                        ],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </p>
+
+                                <p
+                                    class="mt-1 whitespace-nowrap text-xs text-gray-400"
+                                >
+                                    <?= htmlspecialchars(
+                                        (string) (
+                                            $invoice[
+                                                'po_number'
+                                            ] ?? '—'
+                                        ),
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                    · PO RM
+                                    <?= moneyFormatSen(
+                                        $poTotalSen
+                                    ) ?>
+                                </p>
+                            </td>
+
+                            <td
+                                class="px-4 py-4 text-right"
+                            >
+                                <p
+                                    class="whitespace-nowrap text-sm font-black text-gray-900"
+                                >
+                                    RM
+                                    <?= moneyFormatSen(
+                                        $invoiceAmountSen
+                                    ) ?>
+                                </p>
+                            </td>
+
+                            <td class="px-4 py-4">
+                                <?php if (
+                                    $creditAppliedSen > 0
+                                ): ?>
+                                <div
+                                    class="min-w-[170px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2"
+                                >
+                                    <p
+                                        class="font-mono text-xs font-black text-emerald-700"
+                                    >
+                                        <?= htmlspecialchars(
+                                            (string) (
+                                                $invoice[
+                                                    'return_credit_note_number'
+                                                ] ?? 'Credit Note'
+                                            ),
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </p>
+
+                                    <p
+                                        class="mt-1 text-xs font-semibold text-emerald-700"
+                                    >
+                                        - RM
+                                        <?= moneyFormatSen(
+                                            $creditAppliedSen
+                                        ) ?>
+                                    </p>
+
+                                    <?php if (
+                                        $invoice[
+                                            'invoice_status'
+                                        ] === 'unpaid'
+                                    ): ?>
                                     <form
                                         method="POST"
-                                        class="w-full"
-                                        onsubmit="return confirm('Apply this credit note and change the payable amount to RM <?= moneyFormatSen($po_total_sen) ?>?')"
+                                        class="mt-1"
+                                        onsubmit="return confirm('Remove this credit note and restore the full invoice payable amount?');"
+                                    >
+                                        <?php csrf_field(); ?>
+
+                                        <input
+                                            type="hidden"
+                                            name="remove_credit_note"
+                                            value="1"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="invoice_id"
+                                            value="<?= (int) $invoice[
+                                                'invoice_id'
+                                            ] ?>"
+                                        >
+
+                                        <button
+                                            type="submit"
+                                            class="text-[11px] font-bold text-red-500 hover:underline"
+                                        >
+                                            Remove credit
+                                        </button>
+                                    </form>
+                                    <?php endif; ?>
+                                </div>
+                                <?php elseif (
+                                    $eligibleCredits
+                                ): ?>
+                                <div
+                                    class="min-w-[190px] space-y-2"
+                                >
+                                    <?php foreach (
+                                        $eligibleCredits as $option
+                                    ):
+                                        $credit =
+                                            $option[
+                                                'credit'
+                                            ];
+
+                                        $afterCreditSen =
+                                            $invoiceAmountSen -
+                                            $option[
+                                                'amount_sen'
+                                            ];
+                                    ?>
+                                    <form
+                                        method="POST"
+                                        onsubmit="return confirm(
+                                            'Apply <?= htmlspecialchars(
+                                                (string) $credit[
+                                                    'return_credit_note_number'
+                                                ],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>? Invoice total stays RM <?= moneyFormatSen(
+                                                $invoiceAmountSen
+                                            ) ?> and net payable becomes RM <?= moneyFormatSen(
+                                                $afterCreditSen
+                                            ) ?>.'
+                                        );"
                                     >
                                         <?php csrf_field(); ?>
 
@@ -1183,26 +1805,26 @@ foreach ($available_credits as $c) {
                                         <input
                                             type="hidden"
                                             name="invoice_id"
-                                            value="<?= (int) $inv['invoice_id'] ?>"
+                                            value="<?= (int) $invoice[
+                                                'invoice_id'
+                                            ] ?>"
                                         >
 
                                         <input
                                             type="hidden"
                                             name="return_id"
-                                            value="<?= (int) $credit['return_id'] ?>"
+                                            value="<?= (int) $credit[
+                                                'return_id'
+                                            ] ?>"
                                         >
 
                                         <button
                                             type="submit"
-                                            class="w-full rounded-lg bg-yellow-50 px-3 py-2 text-center text-xs font-semibold leading-tight text-yellow-700 transition-colors hover:bg-yellow-100"
+                                            class="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-left transition hover:bg-emerald-50"
                                         >
-                                            <span>
-                                                Apply Credit Note
-                                            </span>
-
-                                            <br>
-
-                                            <span class="font-mono">
+                                            <span
+                                                class="block font-mono text-[11px] font-black text-emerald-700"
+                                            >
                                                 <?= htmlspecialchars(
                                                     (string) $credit[
                                                         'return_credit_note_number'
@@ -1212,25 +1834,193 @@ foreach ($available_credits as $c) {
                                                 ) ?>
                                             </span>
 
-                                            <br>
-
-                                            <span>
-                                                Pay Correct Amount:
-                                                RM
+                                            <span
+                                                class="mt-1 block text-[11px] text-gray-500"
+                                            >
+                                                Credit RM
                                                 <?= moneyFormatSen(
-                                                    $po_total_sen
+                                                    $option[
+                                                        'amount_sen'
+                                                    ]
+                                                ) ?>
+                                                · from
+                                                <?= htmlspecialchars(
+                                                    (string) $credit[
+                                                        'source_po_number'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                            </span>
+
+                                            <span
+                                                class="mt-1 block text-xs font-black text-emerald-700"
+                                            >
+                                                Apply → Pay RM
+                                                <?= moneyFormatSen(
+                                                    $afterCreditSen
                                                 ) ?>
                                             </span>
                                         </button>
                                     </form>
-                                <?php endforeach; ?>
+                                    <?php endforeach; ?>
+                                </div>
+                                <?php else: ?>
+                                <span
+                                    class="text-xs text-gray-400"
+                                >
+                                    —
+                                </span>
+                                <?php endif; ?>
+                            </td>
+
+                            <td
+                                class="px-4 py-4 text-right"
+                            >
+                                <p
+                                    class="whitespace-nowrap text-sm font-black <?= $creditAppliedSen > 0 ? 'text-emerald-700' : 'text-gray-900' ?>"
+                                >
+                                    RM
+                                    <?= moneyFormatSen(
+                                        $netPayableSen
+                                    ) ?>
+                                </p>
 
                                 <?php if (
-                                    $inv[
-                                        'invoice_is_mismatch'
-                                    ]
+                                    $creditAppliedSen > 0
                                 ): ?>
+                                <p
+                                    class="mt-1 text-[11px] text-gray-400"
+                                >
+                                    Invoice RM
+                                    <?= moneyFormatSen(
+                                        $invoiceAmountSen
+                                    ) ?>
+                                    less credit
+                                </p>
+                                <?php endif; ?>
+                            </td>
+
+                            <td
+                                class="px-4 py-4 text-center"
+                            >
+                                <?php if (
+                                    (int) $invoice[
+                                        'invoice_is_mismatch'
+                                    ] === 1
+                                ): ?>
+                                <span
+                                    class="inline-flex whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-black text-red-600"
+                                    title="PO Total: RM <?= moneyFormatSen(
+                                        $poTotalSen
+                                    ) ?>"
+                                >
+                                    Mismatch
+                                </span>
+                                <?php else: ?>
+                                <span
+                                    class="inline-flex whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700"
+                                >
+                                    Matched
+                                </span>
+                                <?php endif; ?>
+                            </td>
+
+                            <td
+                                class="px-4 py-4 text-sm whitespace-nowrap <?= $isOverdue ? 'font-bold text-red-500' : 'text-gray-500' ?>"
+                            >
+                                <?= !empty(
+                                    $invoice[
+                                        'invoice_due_date'
+                                    ]
+                                )
+                                    ? date(
+                                        'd M Y',
+                                        strtotime(
+                                            (string) $invoice[
+                                                'invoice_due_date'
+                                            ]
+                                        )
+                                    )
+                                    : '—' ?>
+
+                                <?php if (
+                                    $isOverdue
+                                ): ?>
+                                <span
+                                    class="ml-1 text-xs"
+                                >
+                                    Overdue
+                                </span>
+                                <?php endif; ?>
+                            </td>
+
+                            <td
+                                class="px-4 py-4 text-center"
+                            >
+                                <span
+                                    class="<?= $statusClass ?> inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black capitalize"
+                                >
+                                    <?= htmlspecialchars(
+                                        (string) $invoice[
+                                            'invoice_status'
+                                        ],
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) ?>
+                                </span>
+                            </td>
+
+                            <td class="px-4 py-4">
+                                <?php if (
+                                    $invoice[
+                                        'invoice_status'
+                                    ] === 'unpaid'
+                                ): ?>
+                                <div
+                                    class="min-w-[200px] space-y-2"
+                                >
                                     <?php if (
+                                        (int) $invoice[
+                                            'invoice_is_mismatch'
+                                        ] === 0
+                                    ): ?>
+                                    <form
+                                        method="POST"
+                                        onsubmit="return confirm('Confirm supplier payment of RM <?= moneyFormatSen(
+                                            $netPayableSen
+                                        ) ?>?');"
+                                    >
+                                        <?php csrf_field(); ?>
+
+                                        <input
+                                            type="hidden"
+                                            name="mark_paid"
+                                            value="1"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="invoice_id"
+                                            value="<?= (int) $invoice[
+                                                'invoice_id'
+                                            ] ?>"
+                                        >
+
+                                        <button
+                                            type="submit"
+                                            class="w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white transition hover:bg-emerald-700"
+                                        >
+                                            <?= $creditAppliedSen > 0
+                                                ? 'Pay Net Amount'
+                                                : 'Pay Invoice Total' ?>
+                                            · RM
+                                            <?= moneyFormatSen(
+                                                $netPayableSen
+                                            ) ?>
+                                        </button>
+                                    </form>
+                                    <?php elseif (
                                         (
                                             $_SESSION[
                                                 'admin_level'
@@ -1240,9 +2030,11 @@ foreach ($available_credits as $c) {
                                     <button
                                         type="button"
                                         onclick='openOverrideModal(
-                                            <?= (int) $inv['invoice_id'] ?>,
+                                            <?= (int) $invoice[
+                                                'invoice_id'
+                                            ] ?>,
                                             <?= json_encode(
-                                                $inv[
+                                                (string) $invoice[
                                                     'invoice_number'
                                                 ],
                                                 JSON_HEX_TAG |
@@ -1250,194 +2042,197 @@ foreach ($available_credits as $c) {
                                                 JSON_HEX_APOS |
                                                 JSON_HEX_QUOT
                                             ) ?>,
-                                            <?= $invoice_amount_sen ?>,
-                                            <?= $po_total_sen ?>
+                                            <?= $invoiceAmountSen ?>,
+                                            <?= $poTotalSen ?>
                                         )'
-                                        class="w-full rounded-lg bg-orange-50 px-3 py-2 text-center text-xs font-semibold leading-tight text-orange-700 transition-colors hover:bg-orange-100"
+                                        class="w-full rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-black text-orange-700 transition hover:bg-orange-100"
                                     >
-                                        <span>
-                                            Pay Invoice Total
-                                        </span>
-
-                                        <br>
-
-                                        <span>
-                                            RM
-                                            <?= moneyFormatSen(
-                                                $invoice_amount_sen
-                                            ) ?>
-                                            — Override
-                                        </span>
+                                        Pay Invoice Total
+                                        · RM
+                                        <?= moneyFormatSen(
+                                            $invoiceAmountSen
+                                        ) ?>
+                                        · Override
                                     </button>
                                     <?php else: ?>
-                                    <span
-                                        class="inline-block w-full rounded-lg bg-gray-100 px-3 py-2 text-center text-xs font-semibold leading-tight text-gray-400"
-                                        title="Only senior admin can approve mismatched payments"
+                                    <div
+                                        class="rounded-lg bg-gray-100 px-3 py-2 text-center text-xs font-semibold text-gray-400"
                                     >
-                                        🔒 Invoice Total:
-                                        RM
-                                        <?= moneyFormatSen(
-                                            $invoice_amount_sen
-                                        ) ?>
-
-                                        <br>
-
-                                        Requires Senior Approval
-                                    </span>
+                                        Senior-admin override required
+                                    </div>
                                     <?php endif; ?>
-                                <?php else: ?>
-                                <form
-                                    method="POST"
-                                    class="w-full"
-                                    onsubmit="return confirm('Confirm payment of RM <?= moneyFormatSen($invoice_net_sen) ?>?')"
-                                >
-                                    <?php csrf_field(); ?>
-
-                                    <input
-                                        type="hidden"
-                                        name="mark_paid"
-                                        value="1"
-                                    >
-
-                                    <input
-                                        type="hidden"
-                                        name="invoice_id"
-                                        value="<?= (int) $inv['invoice_id'] ?>"
-                                    >
 
                                     <button
-                                        type="submit"
-                                        class="w-full rounded-lg bg-green-50 px-3 py-2 text-center text-xs font-semibold leading-tight text-green-700 transition-colors hover:bg-green-100"
-                                    >
-                                        <span>
-                                            ✓
-                                            <?= $matched_payment_label ?>
-                                        </span>
-
-                                        <br>
-
-                                        <span>
-                                            RM
-                                            <?= moneyFormatSen(
-                                                $invoice_net_sen
+                                        type="button"
+                                        onclick='openRejectModal(
+                                            <?= (int) $invoice[
+                                                'invoice_id'
+                                            ] ?>,
+                                            <?= json_encode(
+                                                (string) $invoice[
+                                                    'invoice_number'
+                                                ],
+                                                JSON_HEX_TAG |
+                                                JSON_HEX_AMP |
+                                                JSON_HEX_APOS |
+                                                JSON_HEX_QUOT
                                             ) ?>
-                                        </span>
+                                        )'
+                                        class="w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-black text-red-600 transition hover:bg-red-50"
+                                    >
+                                        Reject Invoice
                                     </button>
-                                </form>
-                                <?php endif; ?>
-
-                                <button
-                                    type="button"
-                                    onclick='openRejectModal(
-                                        <?= (int) $inv['invoice_id'] ?>,
-                                        <?= json_encode(
-                                            $inv[
-                                                'invoice_number'
-                                            ],
-                                            JSON_HEX_TAG |
-                                            JSON_HEX_AMP |
-                                            JSON_HEX_APOS |
-                                            JSON_HEX_QUOT
-                                        ) ?>
-                                    )'
-                                    class="w-full rounded-lg bg-red-50 px-3 py-1.5 text-center text-xs font-semibold text-red-600 transition-colors hover:bg-red-100"
+                                </div>
+                                <?php elseif (
+                                    $invoice[
+                                        'invoice_status'
+                                    ] === 'paid'
+                                ): ?>
+                                <a
+                                    href="?download_receipt=<?= (int) $invoice[
+                                        'invoice_id'
+                                    ] ?>"
+                                    class="inline-flex whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-100"
                                 >
-                                    ✕ Reject
-                                </button>
-                            </div>
-                            <?php elseif (
-                                $inv['invoice_status'] ===
-                                'paid'
-                            ): ?>
-                            <a
-                                href="?download_receipt=<?= (int) $inv['invoice_id'] ?>"
-                                class="inline-flex items-center justify-center gap-1 whitespace-nowrap text-xs font-semibold text-blue-600 hover:underline"
-                            >
-                                📄 Download Receipt
-                            </a>
-                            <?php else: ?>
-                            <span class="text-xs text-gray-400">
-                                Rejected — Closed
-                            </span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                                    Download Receipt
+                                </a>
+                                <?php else: ?>
+                                <span
+                                    class="text-xs text-gray-400"
+                                >
+                                    Closed
+                                </span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
             <?php endif; ?>
-        </div>
-    </div>
+        </section>
 
-    <!-- Mismatch Override Modal -->
-    <div id="overrideModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-6">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border-4 border-red-500">
-            <div class="flex items-center gap-3 mb-4">
-                <div class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center text-xl flex-shrink-0">⚠️</div>
+        <section
+            class="mt-6 rounded-2xl border border-gray-200 bg-white p-5"
+        >
+            <div
+                class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
+            >
                 <div>
-                    <h3 class="font-black text-gray-800 text-lg">Amount Mismatch Warning</h3>
-                    <p class="text-xs text-red-500">This requires your explicit confirmation</p>
+                    <h2
+                        class="text-sm font-black text-gray-900"
+                    >
+                        Credit Note Policy
+                    </h2>
+
+                    <p
+                        class="mt-1 max-w-4xl text-xs leading-5 text-gray-500"
+                    >
+                        A supplier invoice is validated against its own purchase order at the original invoice amount. A credit note is a separate supplier credit created from an earlier resolved return and may be carried forward to a later matched invoice from the same supplier. Applying credit changes the net cash payable only; it never changes invoice/PO match status.
+                    </p>
+                </div>
+
+                <div
+                    class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800"
+                >
+                    Example:
+                    Invoice RM50.00
+                    − Credit RM30.00
+                    =
+                    <strong>Pay RM20.00</strong>
                 </div>
             </div>
+        </section>
+    </main>
 
-            <div class="bg-red-50 rounded-xl p-4 mb-4 space-y-1">
-                <div class="flex justify-between text-sm">
-                    <span class="text-gray-500">Invoice <span id="overrideInvoiceLabel" class="font-semibold"></span> Amount</span>
-                    <span class="font-bold text-red-600" id="overrideInvoiceAmount"></span>
+    <!-- Reject Invoice Modal -->
+    <div
+        id="rejectModal"
+        class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 px-5"
+    >
+        <div
+            class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+        >
+            <div
+                class="flex items-start justify-between gap-4"
+            >
+                <div>
+                    <h3
+                        class="text-lg font-black text-gray-900"
+                    >
+                        Reject Invoice
+                    </h3>
+
+                    <p
+                        class="mt-1 text-xs text-gray-500"
+                    >
+                        Invoice
+                        <span
+                            id="rejectInvoiceLabel"
+                            class="font-black text-gray-700"
+                        ></span>
+                    </p>
                 </div>
-                <div class="flex justify-between text-sm">
-                    <span class="text-gray-500">PO Total Amount</span>
-                    <span class="font-bold text-gray-700" id="overridePoAmount"></span>
-                </div>
-            </div>
 
-            <p class="text-sm text-gray-600 mb-4">You are about to pay an amount that <strong>does not match</strong> the original Purchase Order. This action will be logged with your account for audit purposes. Please confirm this is intentional and provide a reason.</p>
-
-            <form method="POST">
-                <?php csrf_field(); ?>
-                <input type="hidden" name="mark_paid_confirm" value="1">
-                <input type="hidden" name="invoice_id" id="overrideInvoiceId">
-                <textarea name="override_reason" rows="3" maxlength="2000" required placeholder="Required: Explain why you are proceeding despite the mismatch (e.g. 'Confirmed with supplier via phone — correct amount is RM1,000 due to partial delivery')"
-                        class="w-full px-4 py-2.5 border-2 border-red-200 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none mb-4"></textarea>
-                <div class="flex gap-3">
-                    <button type="button" onclick="closeOverrideModal()"
-                            class="flex-1 border-2 border-gray-100 hover:bg-gray-50 text-gray-600 font-semibold py-2.5 rounded-xl text-sm transition-colors">
-                        Cancel
-                    </button>
-                    <button type="submit"
-                            class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
-                        I Confirm — Proceed with Payment
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Reject Modal -->
-    <div id="rejectModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-6">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-            <div class="flex items-center justify-between mb-5">
-                <h3 class="font-black text-gray-800 text-lg">Reject Invoice</h3>
-                <button onclick="closeRejectModal()" class="text-gray-400 hover:text-gray-600">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
+                <button
+                    type="button"
+                    onclick="closeRejectModal()"
+                    class="text-gray-400 hover:text-gray-700"
+                >
+                    ✕
                 </button>
             </div>
-            <p class="text-sm text-gray-500 mb-4">Rejecting <strong id="rejectInvoiceLabel"></strong>. The supplier will be notified to correct and resubmit.</p>
-            <form method="POST">
+
+            <form
+                method="POST"
+                class="mt-5"
+                onsubmit="return confirm('Reject this supplier invoice?');"
+            >
                 <?php csrf_field(); ?>
-                <input type="hidden" name="reject_invoice" value="1">
-                <input type="hidden" name="invoice_id" id="rejectInvoiceId">
-                <textarea name="reject_reason" rows="3" maxlength="2000" required placeholder="e.g. Amount does not match PO total. Please verify and resubmit."
-                        class="w-full px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors resize-none mb-4"></textarea>
-                <div class="flex gap-3">
-                    <button type="button" onclick="closeRejectModal()"
-                            class="flex-1 border-2 border-gray-100 hover:bg-gray-50 text-gray-600 font-semibold py-2.5 rounded-xl text-sm transition-colors">
+
+                <input
+                    type="hidden"
+                    name="reject_invoice"
+                    value="1"
+                >
+
+                <input
+                    type="hidden"
+                    id="rejectInvoiceId"
+                    name="invoice_id"
+                    value=""
+                >
+
+                <label
+                    class="mb-2 block text-xs font-black uppercase tracking-wide text-gray-500"
+                >
+                    Rejection Reason
+                </label>
+
+                <textarea
+                    name="reject_reason"
+                    rows="4"
+                    maxlength="2000"
+                    required
+                    class="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none focus:border-red-400 focus:ring-4 focus:ring-red-50"
+                    placeholder="Explain the issue clearly for the supplier..."
+                ></textarea>
+
+                <div
+                    class="mt-5 flex gap-3"
+                >
+                    <button
+                        type="button"
+                        onclick="closeRejectModal()"
+                        class="flex-1 rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                    >
                         Cancel
                     </button>
-                    <button type="submit"
-                            class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
+
+                    <button
+                        type="submit"
+                        class="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-black text-white hover:bg-red-700"
+                    >
                         Reject Invoice
                     </button>
                 </div>
@@ -1445,54 +2240,267 @@ foreach ($available_credits as $c) {
         </div>
     </div>
 
-    <script>
-    function openRejectModal(id, number) {
-        document.getElementById('rejectInvoiceId').value = id;
-        document.getElementById('rejectInvoiceLabel').textContent = number;
-        document.getElementById('rejectModal').classList.remove('hidden');
-    }
-    function closeRejectModal() {
-        document.getElementById('rejectModal').classList.add('hidden');
-    }
-    function formatSen(sen) {
-        const whole = Math.floor(sen / 100);
-        const fraction = String(sen % 100)
-            .padStart(2, '0');
+    <!-- Mismatch Override Modal -->
+    <div
+        id="overrideModal"
+        class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 px-5"
+    >
+        <div
+            class="w-full max-w-md rounded-2xl border-4 border-orange-400 bg-white p-6 shadow-2xl"
+        >
+            <div
+                class="flex items-start justify-between gap-4"
+            >
+                <div>
+                    <h3
+                        class="text-lg font-black text-gray-900"
+                    >
+                        Amount Mismatch Override
+                    </h3>
 
-        return `${whole.toLocaleString('en-MY')}.${fraction}`;
+                    <p
+                        class="mt-1 text-xs text-orange-600"
+                    >
+                        Senior admin confirmation required
+                    </p>
+                </div>
+
+                <button
+                    type="button"
+                    onclick="closeOverrideModal()"
+                    class="text-gray-400 hover:text-gray-700"
+                >
+                    ✕
+                </button>
+            </div>
+
+            <div
+                class="mt-5 rounded-xl border border-orange-200 bg-orange-50 p-4"
+            >
+                <div
+                    class="flex items-center justify-between gap-4 text-sm"
+                >
+                    <span class="text-gray-500">
+                        Invoice
+                        <span
+                            id="overrideInvoiceLabel"
+                            class="font-bold"
+                        ></span>
+                    </span>
+
+                    <span
+                        id="overrideInvoiceAmount"
+                        class="font-black text-red-600"
+                    ></span>
+                </div>
+
+                <div
+                    class="mt-2 flex items-center justify-between gap-4 text-sm"
+                >
+                    <span class="text-gray-500">
+                        PO Total
+                    </span>
+
+                    <span
+                        id="overridePoAmount"
+                        class="font-black text-gray-800"
+                    ></span>
+                </div>
+            </div>
+
+            <form
+                method="POST"
+                class="mt-5"
+                onsubmit="return confirm('Proceed with this mismatched supplier payment override?');"
+            >
+                <?php csrf_field(); ?>
+
+                <input
+                    type="hidden"
+                    name="mark_paid_confirm"
+                    value="1"
+                >
+
+                <input
+                    type="hidden"
+                    id="overrideInvoiceId"
+                    name="invoice_id"
+                    value=""
+                >
+
+                <label
+                    class="mb-2 block text-xs font-black uppercase tracking-wide text-gray-500"
+                >
+                    Override Justification
+                </label>
+
+                <textarea
+                    name="override_reason"
+                    rows="4"
+                    maxlength="2000"
+                    required
+                    class="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none focus:border-orange-400 focus:ring-4 focus:ring-orange-50"
+                    placeholder="Document why the mismatched amount is being approved..."
+                ></textarea>
+
+                <div
+                    class="mt-5 flex gap-3"
+                >
+                    <button
+                        type="button"
+                        onclick="closeOverrideModal()"
+                        class="flex-1 rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                    >
+                        Cancel
+                    </button>
+
+                    <button
+                        type="submit"
+                        class="flex-1 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-black text-white hover:bg-orange-700"
+                    >
+                        Confirm Override
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    function moneyFromSen(sen) {
+        return 'RM ' +
+            (
+                Number(sen) / 100
+            ).toLocaleString(
+                'en-MY',
+                {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                }
+            );
+    }
+
+    function openRejectModal(
+        invoiceId,
+        invoiceNumber
+    ) {
+        document.getElementById(
+            'rejectInvoiceId'
+        ).value = invoiceId;
+
+        document.getElementById(
+            'rejectInvoiceLabel'
+        ).textContent = invoiceNumber;
+
+        const modal =
+            document.getElementById(
+                'rejectModal'
+            );
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    function closeRejectModal() {
+        const modal =
+            document.getElementById(
+                'rejectModal'
+            );
+
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
     }
 
     function openOverrideModal(
-        id,
-        number,
+        invoiceId,
+        invoiceNumber,
         invoiceAmountSen,
         poAmountSen
     ) {
         document.getElementById(
             'overrideInvoiceId'
-        ).value = id;
+        ).value = invoiceId;
 
         document.getElementById(
             'overrideInvoiceLabel'
-        ).textContent = number;
+        ).textContent = invoiceNumber;
 
         document.getElementById(
             'overrideInvoiceAmount'
         ).textContent =
-            `RM ${formatSen(invoiceAmountSen)}`;
+            moneyFromSen(
+                invoiceAmountSen
+            );
 
         document.getElementById(
             'overridePoAmount'
         ).textContent =
-            `RM ${formatSen(poAmountSen)}`;
+            moneyFromSen(
+                poAmountSen
+            );
 
-        document.getElementById(
-            'overrideModal'
-        ).classList.remove('hidden');
+        const modal =
+            document.getElementById(
+                'overrideModal'
+            );
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
     }
+
     function closeOverrideModal() {
-        document.getElementById('overrideModal').classList.add('hidden');
+        const modal =
+            document.getElementById(
+                'overrideModal'
+            );
+
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
     }
-</script>
+
+    function showOverrideReason(reason) {
+        alert(
+            'Override Reason:\n\n' +
+            reason
+        );
+    }
+
+    document.addEventListener(
+        'keydown',
+        function (event) {
+            if (event.key === 'Escape') {
+                closeRejectModal();
+                closeOverrideModal();
+            }
+        }
+    );
+
+    document.getElementById(
+        'rejectModal'
+    ).addEventListener(
+        'click',
+        function (event) {
+            if (
+                event.target ===
+                this
+            ) {
+                closeRejectModal();
+            }
+        }
+    );
+
+    document.getElementById(
+        'overrideModal'
+    ).addEventListener(
+        'click',
+        function (event) {
+            if (
+                event.target ===
+                this
+            ) {
+                closeOverrideModal();
+            }
+        }
+    );
+    </script>
 </body>
 </html>

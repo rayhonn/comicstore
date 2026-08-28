@@ -79,17 +79,6 @@ $pending_reviews = (int) $pdo->query("
     WHERE review_status = 'pending'
 ")->fetchColumn();
 
-$pending_account_deletions = 0;
-
-if (is_senior_admin()) {
-    $pending_account_deletions =
-        (int) $pdo->query("
-            SELECT COUNT(*)
-            FROM account_deletion_requests
-            WHERE deletion_request_status = 'pending'
-        ")->fetchColumn();
-}
-
 $pending_supplier_returns = (int) $pdo->query("
     SELECT COUNT(*)
     FROM supplier_returns
@@ -101,6 +90,33 @@ $pending_pr = (int) $pdo->query("
     FROM purchase_requisitions
     WHERE pr_status IN ('pending', 'approved')
 ")->fetchColumn();
+
+$pending_account_deletions = 0;
+$pending_identity_verifications = 0;
+$pending_wallet_withdrawals = 0;
+
+if (is_senior_admin()) {
+    $pending_account_deletions = (int) $pdo->query("
+        SELECT COUNT(*)
+        FROM account_deletion_requests
+        WHERE deletion_request_status = 'pending'
+    ")->fetchColumn();
+
+    $pending_identity_verifications = (int) $pdo->query("
+        SELECT COUNT(*)
+        FROM identity_verification_requests
+        WHERE verification_request_status = 'pending'
+    ")->fetchColumn();
+
+    $pending_wallet_withdrawals = (int) $pdo->query("
+        SELECT COUNT(*)
+        FROM wallet_withdrawal_requests
+        WHERE wallet_withdrawal_status IN (
+            'pending',
+            'approved'
+        )
+    ")->fetchColumn();
+}
 
 $recent_orders = $pdo->query("
     SELECT
@@ -183,11 +199,9 @@ for ($i = 6; $i >= 0; $i--) {
     ");
     $revenue_statement->execute([$date]);
 
-    $revenue_decimal = (string) (
+    $revenue_7days[] = (string) (
         $revenue_statement->fetchColumn() ?: '0.00'
     );
-
-    $revenue_7days[] = $revenue_decimal;
 }
 
 $order_statuses = $pdo->query("
@@ -215,8 +229,7 @@ foreach ($order_statuses as $status_row) {
     $status = (string) $status_row['order_status'];
 
     $status_labels[] = ucfirst($status);
-    $status_counts[] =
-        (int) $status_row['status_count'];
+    $status_counts[] = (int) $status_row['status_count'];
     $status_chart_colors[] =
         $status_color_map[$status] ?? '#94a3b8';
 }
@@ -240,17 +253,14 @@ $task_count =
     $pending_reviews +
     $pending_supplier_returns +
     $pending_pr +
-    $pending_account_deletions;
+    $pending_account_deletions +
+    $pending_identity_verifications +
+    $pending_wallet_withdrawals;
 
 $admin_name =
     $_SESSION['user_first_name'] ??
     $_SESSION['user_name'] ??
     'Admin';
-
-$admin_access_label =
-    is_senior_admin()
-        ? 'Super Admin'
-        : 'Admin';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -273,380 +283,25 @@ $admin_access_label =
                 opacity: 1;
             }
         }
-
-        .sidebar-scrollbar::-webkit-scrollbar {
-            width: 5px;
-        }
-
-        .sidebar-scrollbar::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.16);
-            border-radius: 999px;
-        }
     </style>
 </head>
 <body class="bg-[#f5f6fa] text-gray-800">
 
-    <div
-        id="sidebarOverlay"
-        class="fixed inset-0 bg-black/50 z-30 hidden lg:hidden"
-        onclick="closeSidebar()"
-    ></div>
+    <?php include '../includes/admin_navbar.php'; ?>
 
-    <aside
-        id="adminSidebar"
-        class="fixed inset-y-0 left-0 z-40 w-64 bg-[#17243d] text-white -translate-x-full lg:translate-x-0 transition-transform duration-300 flex flex-col"
-    >
-        <div
-            class="h-20 px-6 flex items-center border-b border-white/10"
-        >
-            <a
-                href="dashboard.php"
-                class="text-xl font-black tracking-wide"
-            >
-                MANGA<span class="text-red-400">VAULT</span>
-                <span
-                    class="block text-[10px] tracking-[0.24em] text-white/40 font-semibold mt-0.5"
-                >
-                    ADMIN PORTAL
-                </span>
-            </a>
-
-            <button
-                type="button"
-                onclick="closeSidebar()"
-                class="lg:hidden ml-auto text-white/60 hover:text-white"
-                aria-label="Close navigation"
-            >
-                ✕
-            </button>
-        </div>
-
-        <nav
-            class="sidebar-scrollbar flex-1 overflow-y-auto px-4 py-5"
-        >
-            <p
-                class="px-3 mb-2 text-[10px] uppercase tracking-[0.18em] font-bold text-white/30"
-            >
-                Overview
-            </p>
-
-            <a
-                href="dashboard.php"
-                class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/12 text-white font-semibold text-sm"
-            >
-                <span class="w-6 text-center">⌂</span>
-                Dashboard
-            </a>
-
-            <a
-                href="reports.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">▥</span>
-                Reports
-            </a>
-
-            <p
-                class="px-3 mt-6 mb-2 text-[10px] uppercase tracking-[0.18em] font-bold text-white/30"
-            >
-                Commerce
-            </p>
-
-            <a
-                href="products.php"
-                class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">▣</span>
-                Products
-                <?php if ($low_stock > 0): ?>
-                <span
-                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center"
-                >
-                    <?= $low_stock ?>
-                </span>
-                <?php endif; ?>
-            </a>
-
-            <a
-                href="orders.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">▤</span>
-                Orders
-                <?php if ($pending_orders > 0): ?>
-                <span
-                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center"
-                >
-                    <?= $pending_orders ?>
-                </span>
-                <?php endif; ?>
-            </a>
-
-            <a
-                href="returns.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">↩</span>
-                Returns
-                <?php if ($pending_returns > 0): ?>
-                <span
-                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center"
-                >
-                    <?= $pending_returns ?>
-                </span>
-                <?php endif; ?>
-            </a>
-
-            <a
-                href="reviews.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">★</span>
-                Reviews
-                <?php if ($pending_reviews > 0): ?>
-                <span
-                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center"
-                >
-                    <?= $pending_reviews ?>
-                </span>
-                <?php endif; ?>
-            </a>
-
-            <a
-                href="users.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">♙</span>
-                Customers
-            </a>
-
-            <?php if (
-                is_senior_admin()
-            ): ?>
-            <a
-                href="account_deletion_requests.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span
-                    class="w-6 text-center"
-                >
-                    ⊘
-                </span>
-
-                Deletion Requests
-
-                <?php if (
-                    $pending_account_deletions >
-                    0
-                ): ?>
-                <span
-                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center"
-                >
-                    <?= $pending_account_deletions ?>
-                </span>
-                <?php endif; ?>
-            </a>
-            <?php endif; ?>
-            <p
-                class="px-3 mt-6 mb-2 text-[10px] uppercase tracking-[0.18em] font-bold text-white/30"
-            >
-                Procurement
-            </p>
-
-            <a
-                href="pr.php"
-                class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">▧</span>
-                Requisitions
-                <?php if ($pending_pr > 0): ?>
-                <span
-                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center"
-                >
-                    <?= $pending_pr ?>
-                </span>
-                <?php endif; ?>
-            </a>
-
-            <a
-                href="rfq.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">▨</span>
-                RFQ
-            </a>
-
-            <a
-                href="purchase_orders.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">▦</span>
-                Purchase Orders
-            </a>
-
-            <a
-                href="suppliers.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">▰</span>
-                Suppliers
-            </a>
-
-            <a
-                href="supplier_invoices.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">▩</span>
-                Supplier Invoices
-            </a>
-
-            <a
-                href="supplier_returns.php"
-                class="mt-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/65 hover:text-white hover:bg-white/10 transition-colors text-sm"
-            >
-                <span class="w-6 text-center">↪</span>
-                Supplier Returns
-                <?php if ($pending_supplier_returns > 0): ?>
-                <span
-                    class="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center"
-                >
-                    <?= $pending_supplier_returns ?>
-                </span>
-                <?php endif; ?>
-            </a>
-
-            <details class="mt-5 group">
-                <summary
-                    class="cursor-pointer list-none flex items-center justify-between px-3 py-2.5 rounded-xl text-white/55 hover:text-white hover:bg-white/10 transition-colors text-sm"
-                >
-                    <span class="flex items-center gap-3">
-                        <span class="w-6 text-center">⚙</span>
-                        Management
-                    </span>
-                    <span
-                        class="text-xs group-open:rotate-180 transition-transform"
-                    >
-                        ▾
-                    </span>
-                </summary>
-
-                <div class="mt-1 ml-9 space-y-1">
-                    <a
-                        href="categories.php"
-                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
-                    >
-                        Categories
-                    </a>
-                    <a
-                        href="genres.php"
-                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
-                    >
-                        Genres
-                    </a>
-                    <a
-                        href="vouchers.php"
-                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
-                    >
-                        Vouchers
-                    </a>
-                    <a
-                        href="tiers.php"
-                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
-                    >
-                        Tier Management
-                    </a>
-                    <a
-                        href="staff.php"
-                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
-                    >
-                        Staff Accounts
-                    </a>
-                    <?php if (is_senior_admin()): ?>
-                    <a
-                        href="admins.php"
-                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
-                    >
-                        Admin Accounts
-                    </a>
-                    <?php endif; ?>
-                    <a
-                        href="faq.php"
-                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
-                    >
-                        FAQ Content
-                    </a>
-                    <a
-                        href="about.php"
-                        class="block px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/10"
-                    >
-                        About Content
-                    </a>
-                </div>
-            </details>
-        </nav>
-
-        <div class="p-4 border-t border-white/10">
-            <div
-                class="rounded-xl bg-white/7 px-3 py-3 mb-3"
-            >
-                <p
-                    class="text-xs font-semibold text-white truncate"
-                >
-                    <?= htmlspecialchars(
-                        (string) $admin_name,
-                        ENT_QUOTES,
-                        'UTF-8'
-                    ) ?>
-                </p>
-                <p class="text-[10px] text-white/35 mt-0.5">
-                    <?= htmlspecialchars(
-                        $admin_access_label,
-                        ENT_QUOTES,
-                        'UTF-8'
-                    ) ?>
-                </p>
-            </div>
-
-            <button
-                type="button"
-                onclick="openSharedLogoutModal()"
-                class="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-white/60 hover:text-white hover:bg-white/10 transition-colors"
-            >
-                Log Out
-            </button>
-        </div>
-    </aside>
-
-    <?php
-    $logout_modal_action = app_path('logout.php');
-    $logout_modal_account_label = 'Admin account';
-    require_once __DIR__ . '/../includes/logout_modal.php';
-    ?>
-
-    <main class="min-h-screen lg:ml-64">
+    <main class="min-h-screen">
         <header
-            class="h-20 px-5 md:px-8 bg-white border-b border-gray-100 flex items-center justify-between sticky top-0 z-20"
+            class="hidden lg:flex h-20 px-8 bg-white border-b border-gray-100 items-center justify-between sticky top-0 z-20"
         >
-            <div class="flex items-center gap-3">
-                <button
-                    type="button"
-                    onclick="openSidebar()"
-                    class="lg:hidden w-10 h-10 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50"
-                    aria-label="Open navigation"
+            <div>
+                <h1
+                    class="text-2xl font-black text-gray-900"
                 >
-                    ☰
-                </button>
-
-                <div>
-                    <h1
-                        class="text-xl md:text-2xl font-black text-gray-900"
-                    >
-                        Dashboard
-                    </h1>
-                    <p class="text-xs text-gray-400 mt-0.5">
-                        Business overview and pending work
-                    </p>
-                </div>
+                    Dashboard
+                </h1>
+                <p class="text-xs text-gray-400 mt-0.5">
+                    Business overview and pending work
+                </p>
             </div>
 
             <div class="text-right">
@@ -678,6 +333,7 @@ $admin_access_label =
                         >
                             Welcome back,
                         </p>
+
                         <h2
                             class="text-2xl md:text-3xl font-black mt-1"
                         >
@@ -687,6 +343,7 @@ $admin_access_label =
                                 'UTF-8'
                             ) ?>
                         </h2>
+
                         <p
                             class="text-sm text-white/55 mt-2 max-w-xl"
                         >
@@ -705,6 +362,7 @@ $admin_access_label =
                         >
                             View Reports
                         </a>
+
                         <a
                             href="add_product.php"
                             class="bg-red-500 hover:bg-red-600 text-white font-bold text-sm px-4 py-2.5 rounded-xl transition-colors"
@@ -730,6 +388,7 @@ $admin_access_label =
                             >
                                 Total Revenue
                             </p>
+
                             <p
                                 class="text-2xl font-black text-gray-900 mt-2"
                             >
@@ -737,6 +396,7 @@ $admin_access_label =
                                     $total_revenue_sen
                                 ) ?>
                             </p>
+
                             <p class="text-xs text-gray-400 mt-1">
                                 This month:
                                 RM <?= moneyFormatSen(
@@ -744,8 +404,9 @@ $admin_access_label =
                                 ) ?>
                             </p>
                         </div>
+
                         <div
-                            class="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl"
+                            class="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm font-black"
                         >
                             RM
                         </div>
@@ -764,6 +425,7 @@ $admin_access_label =
                             >
                                 Confirmed Orders
                             </p>
+
                             <p
                                 class="text-2xl font-black text-gray-900 mt-2"
                             >
@@ -771,6 +433,7 @@ $admin_access_label =
                                     $total_orders
                                 ) ?>
                             </p>
+
                             <p
                                 class="text-xs <?= $pending_orders > 0
                                     ? 'text-amber-600'
@@ -782,6 +445,7 @@ $admin_access_label =
                                 pending processing
                             </p>
                         </div>
+
                         <div
                             class="w-11 h-11 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl"
                         >
@@ -802,6 +466,7 @@ $admin_access_label =
                             >
                                 Active Products
                             </p>
+
                             <p
                                 class="text-2xl font-black text-gray-900 mt-2"
                             >
@@ -809,6 +474,7 @@ $admin_access_label =
                                     $total_products
                                 ) ?>
                             </p>
+
                             <p
                                 class="text-xs <?= $low_stock > 0
                                     ? 'text-red-600'
@@ -820,6 +486,7 @@ $admin_access_label =
                                 low-stock products
                             </p>
                         </div>
+
                         <div
                             class="w-11 h-11 rounded-2xl bg-violet-50 text-violet-600 flex items-center justify-center text-xl"
                         >
@@ -840,6 +507,7 @@ $admin_access_label =
                             >
                                 Customers
                             </p>
+
                             <p
                                 class="text-2xl font-black text-gray-900 mt-2"
                             >
@@ -847,10 +515,12 @@ $admin_access_label =
                                     $total_customers
                                 ) ?>
                             </p>
+
                             <p class="text-xs text-gray-400 mt-1">
                                 Registered customer accounts
                             </p>
                         </div>
+
                         <div
                             class="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl"
                         >
@@ -882,6 +552,7 @@ $admin_access_label =
                                 last 7 days
                             </p>
                         </div>
+
                         <a
                             href="reports.php?report=sales"
                             class="text-xs font-bold text-red-600 hover:text-red-700"
@@ -936,6 +607,7 @@ $admin_access_label =
                                 Latest confirmed customer orders
                             </p>
                         </div>
+
                         <a
                             href="orders.php"
                             class="text-xs font-bold text-red-600 hover:text-red-700"
@@ -960,21 +632,25 @@ $admin_access_label =
                                     >
                                         Order
                                     </th>
+
                                     <th
                                         class="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400"
                                     >
                                         Customer
                                     </th>
+
                                     <th
                                         class="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400"
                                     >
                                         Amount
                                     </th>
+
                                     <th
                                         class="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400"
                                     >
                                         Status
                                     </th>
+
                                     <th
                                         class="px-5 md:px-6 py-3 text-right text-[10px] font-bold uppercase tracking-wide text-gray-400"
                                     >
@@ -982,6 +658,7 @@ $admin_access_label =
                                     </th>
                                 </tr>
                             </thead>
+
                             <tbody>
                                 <?php foreach (
                                     $recent_orders as $order
@@ -990,11 +667,13 @@ $admin_access_label =
                                         (string) $order[
                                             'order_status'
                                         ];
+
                                     $badge_class =
                                         $status_badge_classes[
                                             $order_status
                                         ] ??
                                         'bg-gray-50 text-gray-600 border-gray-200';
+
                                     $order_amount_sen =
                                         moneyDecimalToSen(
                                             (string) $order[
@@ -1024,6 +703,7 @@ $admin_access_label =
                                             ) ?>
                                         </a>
                                     </td>
+
                                     <td
                                         class="px-4 py-4 text-sm text-gray-600 whitespace-nowrap"
                                     >
@@ -1041,6 +721,7 @@ $admin_access_label =
                                             'UTF-8'
                                         ) ?>
                                     </td>
+
                                     <td
                                         class="px-4 py-4 text-sm font-bold text-gray-800 whitespace-nowrap"
                                     >
@@ -1048,6 +729,7 @@ $admin_access_label =
                                             $order_amount_sen
                                         ) ?>
                                     </td>
+
                                     <td class="px-4 py-4">
                                         <span
                                             class="<?= $badge_class ?> inline-flex border px-2.5 py-1 rounded-full text-[10px] font-bold capitalize"
@@ -1059,6 +741,7 @@ $admin_access_label =
                                             ) ?>
                                         </span>
                                     </td>
+
                                     <td
                                         class="px-5 md:px-6 py-4 text-right text-xs text-gray-400 whitespace-nowrap"
                                     >
@@ -1098,6 +781,7 @@ $admin_access_label =
                                     Items requiring attention
                                 </p>
                             </div>
+
                             <span
                                 class="min-w-8 h-8 px-2 rounded-full bg-red-50 text-red-600 text-xs font-black flex items-center justify-center"
                             >
@@ -1124,7 +808,8 @@ $admin_access_label =
                                         'Customer returns',
                                     'count' =>
                                         $pending_returns,
-                                    'href' => 'returns.php',
+                                    'href' =>
+                                        'returns.php',
                                     'icon' => '↩',
                                 ],
                                 [
@@ -1132,14 +817,17 @@ $admin_access_label =
                                         'Reviews to moderate',
                                     'count' =>
                                         $pending_reviews,
-                                    'href' => 'reviews.php',
+                                    'href' =>
+                                        'reviews.php',
                                     'icon' => '★',
                                 ],
                                 [
                                     'label' =>
                                         'Purchase requisitions',
-                                    'count' => $pending_pr,
-                                    'href' => 'pr.php',
+                                    'count' =>
+                                        $pending_pr,
+                                    'href' =>
+                                        'pr.php',
                                     'icon' => '▧',
                                 ],
                                 [
@@ -1152,6 +840,38 @@ $admin_access_label =
                                     'icon' => '↪',
                                 ],
                             ];
+
+                            if (is_senior_admin()) {
+                                $pending_items[] = [
+                                    'label' =>
+                                        'Wallet withdrawals',
+                                    'count' =>
+                                        $pending_wallet_withdrawals,
+                                    'href' =>
+                                        'wallet_withdrawals.php',
+                                    'icon' => '¤',
+                                ];
+
+                                $pending_items[] = [
+                                    'label' =>
+                                        'Identity verification',
+                                    'count' =>
+                                        $pending_identity_verifications,
+                                    'href' =>
+                                        'identity_verification_requests.php',
+                                    'icon' => '◫',
+                                ];
+
+                                $pending_items[] = [
+                                    'label' =>
+                                        'Deletion requests',
+                                    'count' =>
+                                        $pending_account_deletions,
+                                    'href' =>
+                                        'account_deletion_requests.php',
+                                    'icon' => '⊘',
+                                ];
+                            }
                             ?>
 
                             <?php foreach (
@@ -1170,6 +890,7 @@ $admin_access_label =
                                 >
                                     <?= $item['icon'] ?>
                                 </span>
+
                                 <span
                                     class="flex-1 text-sm font-semibold text-gray-700"
                                 >
@@ -1179,6 +900,7 @@ $admin_access_label =
                                         'UTF-8'
                                     ) ?>
                                 </span>
+
                                 <span
                                     class="<?= $item['count'] > 0
                                         ? 'bg-red-50 text-red-600'
@@ -1209,6 +931,7 @@ $admin_access_label =
                                     Highest units sold
                                 </p>
                             </div>
+
                             <a
                                 href="reports.php?report=product_sales"
                                 class="text-xs font-bold text-red-600"
@@ -1286,6 +1009,7 @@ $admin_access_label =
                                             'UTF-8'
                                         ) ?>
                                     </p>
+
                                     <p
                                         class="text-[11px] text-gray-400 mt-0.5"
                                     >
@@ -1329,6 +1053,7 @@ $admin_access_label =
                                     Products to restock
                                 </p>
                             </div>
+
                             <a
                                 href="products.php?filter=low_stock"
                                 class="text-xs font-bold text-red-600"
@@ -1355,6 +1080,7 @@ $admin_access_label =
                                         'UTF-8'
                                     ) ?>
                                 </p>
+
                                 <span
                                     class="text-xs font-black text-red-600 whitespace-nowrap"
                                 >
@@ -1377,30 +1103,6 @@ $admin_access_label =
         src="https://cdn.jsdelivr.net/npm/chart.js"
     ></script>
     <script>
-    function openSidebar() {
-        document
-            .getElementById('adminSidebar')
-            .classList
-            .remove('-translate-x-full');
-
-        document
-            .getElementById('sidebarOverlay')
-            .classList
-            .remove('hidden');
-    }
-
-    function closeSidebar() {
-        document
-            .getElementById('adminSidebar')
-            .classList
-            .add('-translate-x-full');
-
-        document
-            .getElementById('sidebarOverlay')
-            .classList
-            .add('hidden');
-    }
-
     const chartFont = {
         family:
             'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -1474,9 +1176,6 @@ $admin_access_label =
                             font: chartFont,
                             color: '#94a3b8',
                         },
-                        border: {
-                            display: false,
-                        },
                     },
                     y: {
                         beginAtZero: true,
@@ -1487,11 +1186,7 @@ $admin_access_label =
                             font: chartFont,
                             color: '#94a3b8',
                             callback: value =>
-                                'RM ' +
-                                Number(value).toLocaleString(),
-                        },
-                        border: {
-                            display: false,
+                                'RM ' + value,
                         },
                     },
                 },
@@ -1513,10 +1208,18 @@ $admin_access_label =
                 ) ?>,
                 datasets: [{
                     data: <?= json_encode(
-                        $status_counts
+                        $status_counts,
+                        JSON_HEX_TAG |
+                        JSON_HEX_AMP |
+                        JSON_HEX_APOS |
+                        JSON_HEX_QUOT
                     ) ?>,
                     backgroundColor: <?= json_encode(
-                        $status_chart_colors
+                        $status_chart_colors,
+                        JSON_HEX_TAG |
+                        JSON_HEX_AMP |
+                        JSON_HEX_APOS |
+                        JSON_HEX_QUOT
                     ) ?>,
                     borderWidth: 0,
                     hoverOffset: 4,
@@ -1525,16 +1228,14 @@ $admin_access_label =
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                cutout: '67%',
+                cutout: '66%',
                 plugins: {
                     legend: {
                         position: 'bottom',
                         labels: {
                             usePointStyle: true,
-                            pointStyle: 'circle',
-                            boxWidth: 7,
-                            boxHeight: 7,
-                            padding: 14,
+                            boxWidth: 8,
+                            padding: 15,
                             font: chartFont,
                             color: '#64748b',
                         },
