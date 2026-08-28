@@ -2022,7 +2022,26 @@ foreach (
                                     <form
                                         method="POST"
                                         class="mt-1"
-                                        onsubmit="return confirm('Remove this credit note and restore the full invoice payable amount?');"
+                                        data-remove-credit-note="<?= htmlspecialchars(
+                                            (string) (
+                                                $invoice[
+                                                    'return_credit_note_number'
+                                                ] ?? 'Credit Note'
+                                            ),
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        data-remove-invoice="<?= htmlspecialchars(
+                                            (string) $invoice[
+                                                'invoice_number'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        data-restore-amount="RM <?= moneyFormatSen(
+                                            $invoiceAmountSen
+                                        ) ?>"
+                                        onsubmit="return openRemoveCreditModal(this);"
                                     >
                                         <?php csrf_field(); ?>
 
@@ -2602,6 +2621,63 @@ foreach (
         </div>
     </div>
 
+    <!-- Remove Credit Note Modal -->
+    <div
+        id="removeCreditModal"
+        class="fixed inset-0 z-[70] hidden items-center justify-center bg-black/55 px-4"
+        aria-hidden="true"
+    >
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="removeCreditModalTitle"
+            class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+        >
+            <div class="flex items-start gap-3">
+                <div
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-100 text-lg"
+                >
+                    ↩
+                </div>
+
+                <div class="min-w-0 flex-1">
+                    <h3
+                        id="removeCreditModalTitle"
+                        class="text-lg font-black text-gray-900"
+                    >
+                        Remove Credit Note?
+                    </h3>
+
+                    <p
+                        id="removeCreditMessage"
+                        class="mt-1 text-sm leading-5 text-gray-500"
+                    >
+                        —
+                    </p>
+                </div>
+            </div>
+
+            <div class="mt-5 flex gap-3">
+                <button
+                    type="button"
+                    onclick="closeRemoveCreditModal()"
+                    class="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                >
+                    Cancel
+                </button>
+
+                <button
+                    id="removeCreditConfirmButton"
+                    type="button"
+                    onclick="confirmRemoveCredit()"
+                    class="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-black text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                    Remove
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Reject Invoice Modal -->
     <div
         id="rejectModal"
@@ -2643,7 +2719,6 @@ foreach (
             <form
                 method="POST"
                 class="mt-5"
-                onsubmit="return confirm('Reject this supplier invoice?');"
             >
                 <?php csrf_field(); ?>
 
@@ -2768,7 +2843,6 @@ foreach (
             <form
                 method="POST"
                 class="mt-5"
-                onsubmit="return confirm('Proceed with this mismatched supplier payment override?');"
             >
                 <?php csrf_field(); ?>
 
@@ -2825,6 +2899,7 @@ foreach (
     <script>
     let pendingCreditApplyForm = null;
     let pendingPaymentForm = null;
+    let pendingRemoveCreditForm = null;
 
     function openCreditApplyModal(form) {
         pendingCreditApplyForm = form;
@@ -2984,6 +3059,87 @@ foreach (
         form.submit();
     }
 
+    function openRemoveCreditModal(form) {
+        pendingRemoveCreditForm = form;
+
+        const creditNote =
+            form.dataset.removeCreditNote || 'Credit Note';
+        const invoiceNumber =
+            form.dataset.removeInvoice || 'this invoice';
+        const restoreAmount =
+            form.dataset.restoreAmount || '—';
+
+        document.getElementById(
+            'removeCreditMessage'
+        ).textContent =
+            'Remove ' +
+            creditNote +
+            ' from ' +
+            invoiceNumber +
+            '? Full payable will return to ' +
+            restoreAmount +
+            '.';
+
+        const confirmButton =
+            document.getElementById(
+                'removeCreditConfirmButton'
+            );
+
+        confirmButton.disabled = false;
+        confirmButton.textContent = 'Remove';
+
+        const modal =
+            document.getElementById(
+                'removeCreditModal'
+            );
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        modal.setAttribute(
+            'aria-hidden',
+            'false'
+        );
+
+        return false;
+    }
+
+    function closeRemoveCreditModal() {
+        const modal =
+            document.getElementById(
+                'removeCreditModal'
+            );
+
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        modal.setAttribute(
+            'aria-hidden',
+            'true'
+        );
+
+        pendingRemoveCreditForm = null;
+    }
+
+    function confirmRemoveCredit() {
+        if (!pendingRemoveCreditForm) {
+            return;
+        }
+
+        const form =
+            pendingRemoveCreditForm;
+
+        const confirmButton =
+            document.getElementById(
+                'removeCreditConfirmButton'
+            );
+
+        confirmButton.disabled = true;
+        confirmButton.textContent =
+            'Removing...';
+
+        pendingRemoveCreditForm = null;
+        form.submit();
+    }
+
     function moneyFromSen(sen) {
         return 'RM ' +
             (
@@ -3088,6 +3244,7 @@ foreach (
             if (event.key === 'Escape') {
                 closeCreditApplyModal();
                 closePaymentConfirmModal();
+                closeRemoveCreditModal();
                 closeRejectModal();
                 closeOverrideModal();
             }
@@ -3118,6 +3275,20 @@ foreach (
                 this
             ) {
                 closePaymentConfirmModal();
+            }
+        }
+    );
+
+    document.getElementById(
+        'removeCreditModal'
+    ).addEventListener(
+        'click',
+        function (event) {
+            if (
+                event.target ===
+                this
+            ) {
+                closeRemoveCreditModal();
             }
         }
     );
