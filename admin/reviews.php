@@ -78,6 +78,7 @@ $reviews = $pdo->query("
         r.review_comment,
         r.review_status,
         r.review_created_at,
+        r.requestsolution,
         u.user_first_name,
         u.user_last_name,
         u.user_gmail,
@@ -307,6 +308,12 @@ $status_labels = [
                                             'UTF-8'
                                         ) ?>
                                     </span>
+
+                                    <?php if ((int) $review['requestsolution'] === 1) { ?>
+                                        <span class="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-500">
+                                            Request Solution
+                                        </span>
+                                    <?php } ?>
                                 </div>
 
                                 <p

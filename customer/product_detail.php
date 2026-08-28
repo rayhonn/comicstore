@@ -193,6 +193,9 @@ if (
     );
     $commentInput = $_POST['comment'] ?? null;
 
+    $request_solution = 
+        isset($_POST['requestsolution']) ? 1 : 0;
+
     if ($rating === false || $rating === null) {
         $review_error = 'Please select a rating.';
     } elseif (!is_string($commentInput)) {
@@ -222,9 +225,10 @@ if (
                     review_order_id,
                     review_rating,
                     review_comment,
-                    review_status
+                    review_status,
+                    requestsolution
                 )
-                VALUES (?, ?, ?, ?, ?, 'approved')
+                VALUES (?, ?, ?, ?, ?, 'approved', ?)
             ");
             $insertReview->execute([
                 $user_id,
@@ -232,6 +236,7 @@ if (
                 (int) $eligible_order['order_id'],
                 (int) $rating,
                 $comment,
+                $request_solution,
             ]);
 
             $_SESSION['product_review_success'] =
@@ -886,6 +891,16 @@ if ($ebook_status === 'owned') {
                         <textarea name="comment" rows="4" maxlength="2000" required
                                   placeholder="Share your thoughts about this product..."
                                   class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-400 transition-colors bg-white resize-none"></textarea>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <!-- <input type="hidden" name="requestsolution" value="0"> -->
+                            <input type="checkbox" name="requestsolution" value="1" class="w-4 h-4 accent-red-500">
+                            <span class="text-sm font-medium text-gray-500">
+                                Request Solution
+                            </span>
+                        </label>
                     </div>
 
                     <button type="submit"

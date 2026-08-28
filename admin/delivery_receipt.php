@@ -654,31 +654,13 @@ if (
         }
 
         if ($poIsComplete) {
-            $payableTotalStatement = $pdo->prepare("
-                SELECT SUM(
-                    po_item_received_quantity *
-                    po_item_unit_price
-                )
-                FROM po_items
-                WHERE po_item_po_id = ?
-            ");
-            $payableTotalStatement->execute([$poId]);
-            $payableTotalSen = moneyDecimalToSen(
-                (string) (
-                    $payableTotalStatement->fetchColumn()
-                    ?: '0.00'
-                )
-            );
-
             $completePo = $pdo->prepare("
                 UPDATE purchase_orders
-                SET po_status = 'completed',
-                    po_total_amount = ?
+                SET po_status = 'completed'
                 WHERE po_id = ?
                 AND po_status = 'confirmed'
             ");
             $completePo->execute([
-                moneySenToDecimal($payableTotalSen),
                 $poId,
             ]);
 
