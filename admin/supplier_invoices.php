@@ -818,7 +818,9 @@ if (
             s.supplier_address,
             s.supplier_email,
             po.po_number,
-            sr.return_credit_note_number
+            sr.return_credit_note_number,
+            sr.return_number AS credit_return_number,
+            credit_source_po.po_number AS credit_source_po_number
         FROM supplier_invoices si
         JOIN suppliers s
             ON s.supplier_id =
@@ -829,6 +831,9 @@ if (
         LEFT JOIN supplier_returns sr
             ON sr.return_id =
                 si.invoice_credit_note_id
+        LEFT JOIN purchase_orders credit_source_po
+            ON credit_source_po.po_id =
+                sr.return_po_id
         WHERE si.invoice_id = ?
         AND si.invoice_status = 'paid'
     ");
@@ -886,7 +891,7 @@ if (
         $creditRow = "
             <tr style='border-bottom:1px solid #e5e7eb;'>
                 <td style='padding:12px 14px; font-size:13px; color:#047857;'>
-                    Less: Credit Note " .
+                    <strong>Less: Credit Note " .
                     htmlspecialchars(
                         (string) (
                             $invoice[
@@ -896,7 +901,30 @@ if (
                         ENT_QUOTES,
                         'UTF-8'
                     ) .
-                "</td>
+                    "</strong><br>
+                    <span style='font-size:11px;color:#6b7280;'>
+                        Origin: " .
+                        htmlspecialchars(
+                            (string) (
+                                $invoice[
+                                    'credit_source_po_number'
+                                ] ?? '—'
+                            ),
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) .
+                        " / " .
+                        htmlspecialchars(
+                            (string) (
+                                $invoice[
+                                    'credit_return_number'
+                                ] ?? '—'
+                            ),
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) .
+                    "</span>
+                </td>
                 <td style='padding:12px 14px; font-size:13px; text-align:right; color:#047857;'>
                     - RM " .
                     moneyFormatSen(
@@ -1121,7 +1149,9 @@ $invoices = $pdo->query("
         s.supplier_name,
         po.po_number,
         po.po_total_amount,
-        sr.return_credit_note_number
+        sr.return_credit_note_number,
+        sr.return_number AS credit_return_number,
+        credit_source_po.po_number AS credit_source_po_number
     FROM supplier_invoices si
     JOIN suppliers s
         ON s.supplier_id =
@@ -1132,6 +1162,9 @@ $invoices = $pdo->query("
     LEFT JOIN supplier_returns sr
         ON sr.return_id =
             si.invoice_credit_note_id
+    LEFT JOIN purchase_orders credit_source_po
+        ON credit_source_po.po_id =
+            sr.return_po_id
     ORDER BY
         CASE si.invoice_status
             WHEN 'unpaid' THEN 0
@@ -1149,11 +1182,24 @@ $availableCredits = $pdo->query("
         sr.return_credit_note_number,
         sr.return_credit_note_amount,
         source_po.po_supplier_id,
-        source_po.po_number AS source_po_number
+        source_po.po_number AS source_po_number,
+        supplier.supplier_name,
+        (
+            SELECT source_invoice.invoice_number
+            FROM supplier_invoices source_invoice
+            WHERE source_invoice.invoice_po_id =
+                sr.return_po_id
+            AND source_invoice.invoice_status != 'rejected'
+            ORDER BY source_invoice.invoice_id DESC
+            LIMIT 1
+        ) AS source_invoice_number
     FROM supplier_returns sr
     JOIN purchase_orders source_po
         ON source_po.po_id =
             sr.return_po_id
+    JOIN suppliers supplier
+        ON supplier.supplier_id =
+            source_po.po_supplier_id
     WHERE sr.return_status = 'resolved'
     AND sr.return_resolution_type IN (
         'credit_note',
@@ -1413,6 +1459,174 @@ foreach (
             Senior-admin approval is required for any mismatch override.
             <?php endif; ?>
         </div>
+        <?php endif; ?>
+
+        <?php if ($availableCredits): ?>
+        <section
+            class="mb-5 overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm"
+        >
+            <div
+                class="flex flex-col gap-3 border-b border-emerald-100 bg-emerald-50 px-5 py-4 md:flex-row md:items-center md:justify-between"
+            >
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg">💳</span>
+                        <h2
+                            class="text-sm font-black text-emerald-900"
+                        >
+                            Available Supplier Credit
+                        </h2>
+                    </div>
+
+                    <p
+                        class="mt-1 max-w-4xl text-xs leading-5 text-emerald-700"
+                    >
+                        These credit notes came from resolved supplier returns.
+                        The original source PO/invoice remains payable at its full
+                        amount. Apply a credit only to a later matched invoice;
+                        the supplier will see the same credit note reference and
+                        adjusted net payable in their portal and payment receipt.
+                    </p>
+                </div>
+
+                <div
+                    class="shrink-0 rounded-xl border border-emerald-200 bg-white px-4 py-3 text-right"
+                >
+                    <p
+                        class="text-[10px] font-black uppercase tracking-wide text-emerald-500"
+                    >
+                        Credit Available
+                    </p>
+                    <p
+                        class="mt-1 text-lg font-black text-emerald-700"
+                    >
+                        RM
+                        <?= moneyFormatSen(
+                            $availableCreditTotalSen
+                        ) ?>
+                    </p>
+                </div>
+            </div>
+
+            <div
+                class="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2"
+            >
+                <?php foreach (
+                    $availableCredits as $credit
+                ):
+                    $noticeCreditSen =
+                        moneyDecimalToSen(
+                            (string) $credit[
+                                'return_credit_note_amount'
+                            ]
+                        );
+                ?>
+                <div
+                    class="rounded-xl border border-gray-200 bg-gray-50/60 p-4"
+                >
+                    <div
+                        class="flex items-start justify-between gap-4"
+                    >
+                        <div class="min-w-0">
+                            <p
+                                class="text-xs font-bold text-gray-500"
+                            >
+                                <?= htmlspecialchars(
+                                    (string) $credit[
+                                        'supplier_name'
+                                    ],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
+                            </p>
+
+                            <p
+                                class="mt-1 font-mono text-sm font-black text-emerald-700"
+                            >
+                                <?= htmlspecialchars(
+                                    (string) $credit[
+                                        'return_credit_note_number'
+                                    ],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
+                            </p>
+                        </div>
+
+                        <div class="text-right">
+                            <p
+                                class="text-sm font-black text-emerald-700"
+                            >
+                                RM
+                                <?= moneyFormatSen(
+                                    $noticeCreditSen
+                                ) ?>
+                            </p>
+
+                            <span
+                                class="mt-1 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700"
+                            >
+                                UNUSED
+                            </span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="mt-3 grid grid-cols-1 gap-1 text-[11px] leading-5 text-gray-500 sm:grid-cols-2"
+                    >
+                        <p>
+                            Source PO:
+                            <strong class="text-gray-700">
+                                <?= htmlspecialchars(
+                                    (string) $credit[
+                                        'source_po_number'
+                                    ],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
+                            </strong>
+                        </p>
+
+                        <p>
+                            Return:
+                            <strong class="text-gray-700">
+                                <?= htmlspecialchars(
+                                    (string) $credit[
+                                        'return_number'
+                                    ],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
+                            </strong>
+                        </p>
+
+                        <p class="sm:col-span-2">
+                            Source Invoice:
+                            <strong class="text-gray-700">
+                                <?= htmlspecialchars(
+                                    (string) (
+                                        $credit[
+                                            'source_invoice_number'
+                                        ] ?? 'Not submitted yet'
+                                    ),
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
+                            </strong>
+                        </p>
+                    </div>
+
+                    <p
+                        class="mt-3 rounded-lg bg-white px-3 py-2 text-[11px] leading-5 text-gray-500"
+                    >
+                        This is a carried-forward credit. It does not reduce
+                        the source invoice; it can reduce the cash settlement
+                        of another eligible invoice from the same supplier.
+                    </p>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </section>
         <?php endif; ?>
 
         <section
@@ -1775,6 +1989,31 @@ foreach (
                                         ) ?>
                                     </p>
 
+                                    <p
+                                        class="mt-1 text-[10px] leading-4 text-emerald-700/80"
+                                    >
+                                        Origin:
+                                        <?= htmlspecialchars(
+                                            (string) (
+                                                $invoice[
+                                                    'credit_source_po_number'
+                                                ] ?? '—'
+                                            ),
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                        /
+                                        <?= htmlspecialchars(
+                                            (string) (
+                                                $invoice[
+                                                    'credit_return_number'
+                                                ] ?? '—'
+                                            ),
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>
+                                    </p>
+
                                     <?php if (
                                         $invoice[
                                             'invoice_status'
@@ -1839,11 +2078,23 @@ foreach (
                                                 ],
                                                 ENT_QUOTES,
                                                 'UTF-8'
+                                            ) ?> from <?= htmlspecialchars(
+                                                (string) $credit[
+                                                    'source_po_number'
+                                                ],
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?> / <?= htmlspecialchars(
+                                                (string) $credit[
+                                                    'return_number'
+                                                ],
+                                                ENT_QUOTES,
+                                                'UTF-8'
                                             ) ?>? Invoice total stays RM <?= moneyFormatSen(
                                                 $invoiceAmountSen
                                             ) ?> and net payable becomes RM <?= moneyFormatSen(
                                                 $afterCreditSen
-                                            ) ?>.'
+                                            ) ?>. The supplier will see this credit adjustment on the invoice record and payment receipt.'
                                         );"
                                     >
                                         <?php csrf_field(); ?>
@@ -1899,6 +2150,14 @@ foreach (
                                                 <?= htmlspecialchars(
                                                     (string) $credit[
                                                         'source_po_number'
+                                                    ],
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ) ?>
+                                                /
+                                                <?= htmlspecialchars(
+                                                    (string) $credit[
+                                                        'return_number'
                                                     ],
                                                     ENT_QUOTES,
                                                     'UTF-8'
