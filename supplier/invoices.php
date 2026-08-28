@@ -722,7 +722,7 @@ $available_pos =
 
             <div class="mt-4 space-y-3">
                 <?php foreach (
-                    $credit_notes as $credit_note
+                    $credit_notes as $credit_index => $credit_note
                 ):
                     $credit_amount_sen =
                         moneyDecimalToSen(
@@ -737,7 +737,7 @@ $available_pos =
                         ] !== null;
                 ?>
                 <div
-                    class="rounded-xl border <?= $credit_is_used ? 'border-gray-200 bg-gray-50' : 'border-emerald-200 bg-emerald-50/60' ?> p-4"
+                    class="credit-ledger-item <?= $credit_index >= 3 ? 'hidden credit-ledger-extra' : '' ?> rounded-xl border <?= $credit_is_used ? 'border-gray-200 bg-gray-50' : 'border-emerald-200 bg-emerald-50/60' ?> p-4"
                 >
                     <div
                         class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
@@ -858,6 +858,39 @@ $available_pos =
                 </div>
                 <?php endforeach; ?>
             </div>
+
+            <?php if (count($credit_notes) > 3): ?>
+            <div
+                class="mt-4 border-t border-gray-100 pt-4"
+            >
+                <button
+                    type="button"
+                    id="creditLedgerToggle"
+                    onclick="toggleCreditLedger()"
+                    class="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-bold text-gray-600 transition hover:bg-gray-100 hover:text-gray-800"
+                    aria-expanded="false"
+                >
+                    <span id="creditLedgerToggleText">
+                        Show <?= count($credit_notes) - 3 ?> more credit note<?= count($credit_notes) - 3 === 1 ? '' : 's' ?>
+                    </span>
+
+                    <svg
+                        id="creditLedgerToggleIcon"
+                        class="h-4 w-4 transition-transform duration-200"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M19 9l-7 7-7-7"
+                        ></path>
+                    </svg>
+                </button>
+            </div>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
 
@@ -1363,6 +1396,75 @@ $available_pos =
     </div>
 
     <script>
+    function toggleCreditLedger() {
+        const extras =
+            document.querySelectorAll(
+                '.credit-ledger-extra'
+            );
+
+        const button =
+            document.getElementById(
+                'creditLedgerToggle'
+            );
+
+        const label =
+            document.getElementById(
+                'creditLedgerToggleText'
+            );
+
+        const icon =
+            document.getElementById(
+                'creditLedgerToggleIcon'
+            );
+
+        if (
+            extras.length === 0 ||
+            !button ||
+            !label ||
+            !icon
+        ) {
+            return;
+        }
+
+        const isExpanded =
+            button.getAttribute(
+                'aria-expanded'
+            ) === 'true';
+
+        extras.forEach(
+            function (item) {
+                item.classList.toggle(
+                    'hidden',
+                    isExpanded
+                );
+            }
+        );
+
+        button.setAttribute(
+            'aria-expanded',
+            isExpanded
+                ? 'false'
+                : 'true'
+        );
+
+        label.textContent =
+            isExpanded
+                ? 'Show ' +
+                    extras.length +
+                    ' more credit note' +
+                    (
+                        extras.length === 1
+                            ? ''
+                            : 's'
+                    )
+                : 'Show less';
+
+        icon.classList.toggle(
+            'rotate-180',
+            !isExpanded
+        );
+    }
+
     function openModal() {
         document
             .getElementById(
