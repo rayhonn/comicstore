@@ -1234,13 +1234,54 @@ foreach (
         Supplier Invoices - MangaVault Admin
     </title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        html,
+        body {
+            max-width: 100%;
+            overflow-x: hidden;
+        }
+
+        .invoice-table {
+            width: 100%;
+            table-layout: fixed;
+        }
+
+        .invoice-table th,
+        .invoice-table td {
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: normal;
+        }
+
+        .invoice-table button,
+        .invoice-table a {
+            max-width: 100%;
+        }
+
+        .invoice-pill {
+            white-space: nowrap !important;
+            overflow-wrap: normal !important;
+            word-break: keep-all !important;
+            line-height: 1;
+        }
+
+        @media (max-width: 1280px) {
+            .invoice-table th {
+                font-size: 9px;
+            }
+
+            .invoice-table td {
+                font-size: 12px;
+            }
+        }
+    </style>
 </head>
-<body class="bg-[#f5f6fa] min-h-screen">
+<body class="bg-[#f5f6fa] min-h-screen overflow-x-hidden">
 
     <?php include '../includes/admin_navbar.php'; ?>
 
     <main
-        class="mx-auto max-w-[1600px] px-4 py-7 md:px-7"
+        class="mx-auto w-full max-w-[1600px] px-3 py-7 md:px-5"
     >
         <div
             class="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"
@@ -1394,64 +1435,75 @@ foreach (
                 </p>
             </div>
             <?php else: ?>
-            <div class="overflow-x-auto">
+            <div class="w-full overflow-hidden">
                 <table
-                    class="min-w-[1260px] w-full"
+                    class="invoice-table w-full table-fixed"
                 >
+                    <colgroup>
+                        <col style="width:11%">
+                        <col style="width:15%">
+                        <col style="width:10%">
+                        <col style="width:16%">
+                        <col style="width:10%">
+                        <col style="width:9%">
+                        <col style="width:8%">
+                        <col style="width:8%">
+                        <col style="width:13%">
+                    </colgroup>
                     <thead>
                         <tr
                             class="border-b border-gray-200 bg-gray-50"
                         >
                             <th
-                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
+                                class="px-3 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Invoice
                             </th>
 
                             <th
-                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
+                                class="px-3 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Supplier / PO
                             </th>
 
                             <th
-                                class="px-4 py-3 text-right text-[10px] font-black uppercase tracking-wide text-gray-400"
+                                class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Invoice Amount
                             </th>
 
                             <th
-                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
+                                class="px-3 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Credit Note
                             </th>
 
                             <th
-                                class="px-4 py-3 text-right text-[10px] font-black uppercase tracking-wide text-gray-400"
+                                class="px-3 py-3 text-right text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Net Payable
                             </th>
 
                             <th
-                                class="px-4 py-3 text-center text-[10px] font-black uppercase tracking-wide text-gray-400"
+                                class="px-3 py-3 text-center text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Match
                             </th>
 
                             <th
-                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
+                                class="px-3 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Due
                             </th>
 
                             <th
-                                class="px-4 py-3 text-center text-[10px] font-black uppercase tracking-wide text-gray-400"
+                                class="px-3 py-3 text-center text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Status
                             </th>
 
                             <th
-                                class="px-4 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
+                                class="px-3 py-3 text-left text-[10px] font-black uppercase tracking-wide text-gray-400"
                             >
                                 Action
                             </th>
@@ -1582,7 +1634,7 @@ foreach (
                         <tr
                             class="border-b border-gray-100 align-top hover:bg-gray-50/60"
                         >
-                            <td class="px-4 py-4">
+                            <td class="px-3 py-4">
                                 <p
                                     class="whitespace-nowrap text-sm font-black text-gray-900"
                                 >
@@ -1606,7 +1658,7 @@ foreach (
                                     )
                                 ): ?>
                                 <p
-                                    class="mt-1 max-w-[180px] text-xs leading-5 text-red-500"
+                                    class="mt-1 text-xs leading-4 text-red-500 break-words"
                                 >
                                     <?= htmlspecialchars(
                                         (string) $invoice[
@@ -1648,9 +1700,9 @@ foreach (
                                 <?php endif; ?>
                             </td>
 
-                            <td class="px-4 py-4">
+                            <td class="px-3 py-4">
                                 <p
-                                    class="max-w-[200px] text-sm font-semibold text-gray-700"
+                                    class="text-sm font-semibold leading-5 text-gray-700 break-words"
                                 >
                                     <?= htmlspecialchars(
                                         (string) $invoice[
@@ -1662,7 +1714,7 @@ foreach (
                                 </p>
 
                                 <p
-                                    class="mt-1 whitespace-nowrap text-xs text-gray-400"
+                                    class="mt-1 text-xs leading-4 text-gray-400 break-words"
                                 >
                                     <?= htmlspecialchars(
                                         (string) (
@@ -1681,7 +1733,7 @@ foreach (
                             </td>
 
                             <td
-                                class="px-4 py-4 text-right"
+                                class="px-3 py-4 text-right"
                             >
                                 <p
                                     class="whitespace-nowrap text-sm font-black text-gray-900"
@@ -1693,12 +1745,12 @@ foreach (
                                 </p>
                             </td>
 
-                            <td class="px-4 py-4">
+                            <td class="px-3 py-4">
                                 <?php if (
                                     $creditAppliedSen > 0
                                 ): ?>
                                 <div
-                                    class="min-w-[170px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2"
+                                    class="w-full max-w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2"
                                 >
                                     <p
                                         class="font-mono text-xs font-black text-emerald-700"
@@ -1762,7 +1814,7 @@ foreach (
                                     $eligibleCredits
                                 ): ?>
                                 <div
-                                    class="min-w-[190px] space-y-2"
+                                    class="w-full min-w-0 space-y-2"
                                 >
                                     <?php foreach (
                                         $eligibleCredits as $option
@@ -1820,7 +1872,7 @@ foreach (
 
                                         <button
                                             type="submit"
-                                            class="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-left transition hover:bg-emerald-50"
+                                            class="w-full min-w-0 rounded-lg border border-emerald-200 bg-white px-2.5 py-2 text-left transition hover:bg-emerald-50"
                                         >
                                             <span
                                                 class="block font-mono text-[11px] font-black text-emerald-700"
@@ -1875,7 +1927,7 @@ foreach (
                             </td>
 
                             <td
-                                class="px-4 py-4 text-right"
+                                class="px-3 py-4 text-right"
                             >
                                 <p
                                     class="whitespace-nowrap text-sm font-black <?= $creditAppliedSen > 0 ? 'text-emerald-700' : 'text-gray-900' ?>"
@@ -1902,7 +1954,7 @@ foreach (
                             </td>
 
                             <td
-                                class="px-4 py-4 text-center"
+                                class="px-3 py-4 text-center"
                             >
                                 <?php if (
                                     (int) $invoice[
@@ -1910,7 +1962,7 @@ foreach (
                                     ] === 1
                                 ): ?>
                                 <span
-                                    class="inline-flex whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-black text-red-600"
+                                    class="invoice-pill inline-flex max-w-full items-center justify-center rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-black text-red-600"
                                     title="PO Total: RM <?= moneyFormatSen(
                                         $poTotalSen
                                     ) ?>"
@@ -1919,7 +1971,7 @@ foreach (
                                 </span>
                                 <?php else: ?>
                                 <span
-                                    class="inline-flex whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700"
+                                    class="invoice-pill inline-flex max-w-full items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700"
                                 >
                                     Matched
                                 </span>
@@ -1927,7 +1979,7 @@ foreach (
                             </td>
 
                             <td
-                                class="px-4 py-4 text-sm whitespace-nowrap <?= $isOverdue ? 'font-bold text-red-500' : 'text-gray-500' ?>"
+                                class="px-3 py-4 text-sm leading-5 <?= $isOverdue ? 'font-bold text-red-500' : 'text-gray-500' ?>"
                             >
                                 <?= !empty(
                                     $invoice[
@@ -1956,10 +2008,10 @@ foreach (
                             </td>
 
                             <td
-                                class="px-4 py-4 text-center"
+                                class="px-3 py-4 text-center"
                             >
                                 <span
-                                    class="<?= $statusClass ?> inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black capitalize"
+                                    class="<?= $statusClass ?> invoice-pill inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-[11px] font-black capitalize"
                                 >
                                     <?= htmlspecialchars(
                                         (string) $invoice[
@@ -1971,14 +2023,14 @@ foreach (
                                 </span>
                             </td>
 
-                            <td class="px-4 py-4">
+                            <td class="px-3 py-4">
                                 <?php if (
                                     $invoice[
                                         'invoice_status'
                                     ] === 'unpaid'
                                 ): ?>
                                 <div
-                                    class="min-w-[200px] space-y-2"
+                                    class="w-full min-w-0 space-y-2"
                                 >
                                     <?php if (
                                         (int) $invoice[
@@ -2009,7 +2061,7 @@ foreach (
 
                                         <button
                                             type="submit"
-                                            class="w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white transition hover:bg-emerald-700"
+                                            class="w-full min-w-0 rounded-lg bg-emerald-600 px-2 py-2 text-[11px] font-black leading-tight text-white transition hover:bg-emerald-700"
                                         >
                                             <?= $creditAppliedSen > 0
                                                 ? 'Pay Net Amount'
@@ -2045,7 +2097,7 @@ foreach (
                                             <?= $invoiceAmountSen ?>,
                                             <?= $poTotalSen ?>
                                         )'
-                                        class="w-full rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-black text-orange-700 transition hover:bg-orange-100"
+                                        class="w-full min-w-0 rounded-lg border border-orange-200 bg-orange-50 px-2 py-2 text-[11px] font-black leading-tight text-orange-700 transition hover:bg-orange-100"
                                     >
                                         Pay Invoice Total
                                         · RM
@@ -2078,7 +2130,7 @@ foreach (
                                                 JSON_HEX_QUOT
                                             ) ?>
                                         )'
-                                        class="w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-black text-red-600 transition hover:bg-red-50"
+                                        class="w-full min-w-0 rounded-lg border border-red-200 bg-white px-2 py-2 text-[11px] font-black leading-tight text-red-600 transition hover:bg-red-50"
                                     >
                                         Reject Invoice
                                     </button>
@@ -2092,9 +2144,10 @@ foreach (
                                     href="?download_receipt=<?= (int) $invoice[
                                         'invoice_id'
                                     ] ?>"
-                                    class="inline-flex whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-100"
+                                    class="inline-flex w-full min-w-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-2 py-2 text-center text-[11px] font-black leading-tight text-blue-700 hover:bg-blue-100"
+                                    title="Download Payment Receipt PDF"
                                 >
-                                    Download Receipt
+                                    Receipt PDF
                                 </a>
                                 <?php else: ?>
                                 <span
