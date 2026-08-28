@@ -2071,31 +2071,53 @@ foreach (
                                     ?>
                                     <form
                                         method="POST"
-                                        onsubmit="return confirm(
-                                            'Apply <?= htmlspecialchars(
-                                                (string) $credit[
-                                                    'return_credit_note_number'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?> from <?= htmlspecialchars(
-                                                (string) $credit[
-                                                    'source_po_number'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?> / <?= htmlspecialchars(
-                                                (string) $credit[
-                                                    'return_number'
-                                                ],
-                                                ENT_QUOTES,
-                                                'UTF-8'
-                                            ) ?>? Invoice total stays RM <?= moneyFormatSen(
-                                                $invoiceAmountSen
-                                            ) ?> and net payable becomes RM <?= moneyFormatSen(
-                                                $afterCreditSen
-                                            ) ?>. The supplier will see this credit adjustment on the invoice record and payment receipt.'
-                                        );"
+                                        data-credit-note="<?= htmlspecialchars(
+                                            (string) $credit[
+                                                'return_credit_note_number'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        data-source-po="<?= htmlspecialchars(
+                                            (string) $credit[
+                                                'source_po_number'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        data-return-number="<?= htmlspecialchars(
+                                            (string) $credit[
+                                                'return_number'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        data-invoice-number="<?= htmlspecialchars(
+                                            (string) $invoice[
+                                                'invoice_number'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        data-supplier-name="<?= htmlspecialchars(
+                                            (string) $invoice[
+                                                'supplier_name'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        data-invoice-amount="RM <?= moneyFormatSen(
+                                            $invoiceAmountSen
+                                        ) ?>"
+                                        data-credit-amount="RM <?= moneyFormatSen(
+                                            $option[
+                                                'amount_sen'
+                                            ]
+                                        ) ?>"
+                                        data-net-payable="RM <?= moneyFormatSen(
+                                            $afterCreditSen
+                                        ) ?>"
+                                        onsubmit="return openCreditApplyModal(this);"
                                     >
                                         <?php csrf_field(); ?>
 
@@ -2298,9 +2320,17 @@ foreach (
                                     ): ?>
                                     <form
                                         method="POST"
-                                        onsubmit="return confirm('Confirm supplier payment of RM <?= moneyFormatSen(
+                                        data-payment-amount="RM <?= moneyFormatSen(
                                             $netPayableSen
-                                        ) ?>?');"
+                                        ) ?>"
+                                        data-payment-invoice="<?= htmlspecialchars(
+                                            (string) $invoice[
+                                                'invoice_number'
+                                            ],
+                                            ENT_QUOTES,
+                                            'UTF-8'
+                                        ) ?>"
+                                        onsubmit="return openPaymentConfirmModal(this);"
                                     >
                                         <?php csrf_field(); ?>
 
@@ -2456,6 +2486,121 @@ foreach (
             </div>
         </section>
     </main>
+
+
+    <!-- Apply Credit Note Modal -->
+    <div
+        id="creditApplyModal"
+        class="fixed inset-0 z-[70] hidden items-center justify-center bg-black/55 px-4"
+        aria-hidden="true"
+    >
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="creditApplyModalTitle"
+            class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+        >
+            <div class="flex items-start gap-3">
+                <div
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-lg"
+                >
+                    💳
+                </div>
+
+                <div class="min-w-0 flex-1">
+                    <h3
+                        id="creditApplyModalTitle"
+                        class="text-lg font-black text-gray-900"
+                    >
+                        Apply Credit Note?
+                    </h3>
+
+                    <p
+                        id="creditApplyMessage"
+                        class="mt-1 text-sm leading-5 text-gray-500"
+                    >
+                        —
+                    </p>
+                </div>
+            </div>
+
+            <div class="mt-5 flex gap-3">
+                <button
+                    type="button"
+                    onclick="closeCreditApplyModal()"
+                    class="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                >
+                    Cancel
+                </button>
+
+                <button
+                    id="creditApplyConfirmButton"
+                    type="button"
+                    onclick="confirmCreditApplication()"
+                    class="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                    Apply
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Supplier Payment Modal -->
+    <div
+        id="paymentConfirmModal"
+        class="fixed inset-0 z-[70] hidden items-center justify-center bg-black/55 px-4"
+        aria-hidden="true"
+    >
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="paymentConfirmModalTitle"
+            class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+        >
+            <div class="flex items-start gap-3">
+                <div
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-lg"
+                >
+                    💰
+                </div>
+
+                <div class="min-w-0 flex-1">
+                    <h3
+                        id="paymentConfirmModalTitle"
+                        class="text-lg font-black text-gray-900"
+                    >
+                        Confirm Payment?
+                    </h3>
+
+                    <p
+                        id="paymentConfirmMessage"
+                        class="mt-1 text-sm leading-5 text-gray-500"
+                    >
+                        —
+                    </p>
+                </div>
+            </div>
+
+            <div class="mt-5 flex gap-3">
+                <button
+                    type="button"
+                    onclick="closePaymentConfirmModal()"
+                    class="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                >
+                    Cancel
+                </button>
+
+                <button
+                    id="paymentConfirmButton"
+                    type="button"
+                    onclick="confirmSupplierPayment()"
+                    class="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                    Confirm
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Reject Invoice Modal -->
     <div
@@ -2678,6 +2823,167 @@ foreach (
     </div>
 
     <script>
+    let pendingCreditApplyForm = null;
+    let pendingPaymentForm = null;
+
+    function openCreditApplyModal(form) {
+        pendingCreditApplyForm = form;
+
+        const creditNote =
+            form.dataset.creditNote || 'Credit Note';
+        const invoiceNumber =
+            form.dataset.invoiceNumber || 'this invoice';
+        const netPayable =
+            form.dataset.netPayable || '—';
+
+        document.getElementById(
+            'creditApplyMessage'
+        ).textContent =
+            'Apply ' +
+            creditNote +
+            ' to ' +
+            invoiceNumber +
+            '? Net payable will be ' +
+            netPayable +
+            '.';
+
+        const confirmButton =
+            document.getElementById(
+                'creditApplyConfirmButton'
+            );
+
+        confirmButton.disabled = false;
+        confirmButton.textContent = 'Apply';
+
+        const modal =
+            document.getElementById(
+                'creditApplyModal'
+            );
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        modal.setAttribute(
+            'aria-hidden',
+            'false'
+        );
+
+        return false;
+    }
+
+    function closeCreditApplyModal() {
+        const modal =
+            document.getElementById(
+                'creditApplyModal'
+            );
+
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        modal.setAttribute(
+            'aria-hidden',
+            'true'
+        );
+
+        pendingCreditApplyForm = null;
+    }
+
+    function confirmCreditApplication() {
+        if (!pendingCreditApplyForm) {
+            return;
+        }
+
+        const form =
+            pendingCreditApplyForm;
+
+        const confirmButton =
+            document.getElementById(
+                'creditApplyConfirmButton'
+            );
+
+        confirmButton.disabled = true;
+        confirmButton.textContent =
+            'Applying...';
+
+        pendingCreditApplyForm = null;
+        form.submit();
+    }
+
+    function openPaymentConfirmModal(form) {
+        pendingPaymentForm = form;
+
+        const invoiceNumber =
+            form.dataset.paymentInvoice || 'this invoice';
+        const paymentAmount =
+            form.dataset.paymentAmount || '—';
+
+        document.getElementById(
+            'paymentConfirmMessage'
+        ).textContent =
+            'Confirm supplier payment of ' +
+            paymentAmount +
+            ' for ' +
+            invoiceNumber +
+            '?';
+
+        const confirmButton =
+            document.getElementById(
+                'paymentConfirmButton'
+            );
+
+        confirmButton.disabled = false;
+        confirmButton.textContent = 'Confirm';
+
+        const modal =
+            document.getElementById(
+                'paymentConfirmModal'
+            );
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        modal.setAttribute(
+            'aria-hidden',
+            'false'
+        );
+
+        return false;
+    }
+
+    function closePaymentConfirmModal() {
+        const modal =
+            document.getElementById(
+                'paymentConfirmModal'
+            );
+
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        modal.setAttribute(
+            'aria-hidden',
+            'true'
+        );
+
+        pendingPaymentForm = null;
+    }
+
+    function confirmSupplierPayment() {
+        if (!pendingPaymentForm) {
+            return;
+        }
+
+        const form =
+            pendingPaymentForm;
+
+        const confirmButton =
+            document.getElementById(
+                'paymentConfirmButton'
+            );
+
+        confirmButton.disabled = true;
+        confirmButton.textContent =
+            'Processing...';
+
+        pendingPaymentForm = null;
+        form.submit();
+    }
+
     function moneyFromSen(sen) {
         return 'RM ' +
             (
@@ -2780,8 +3086,38 @@ foreach (
         'keydown',
         function (event) {
             if (event.key === 'Escape') {
+                closeCreditApplyModal();
+                closePaymentConfirmModal();
                 closeRejectModal();
                 closeOverrideModal();
+            }
+        }
+    );
+
+    document.getElementById(
+        'creditApplyModal'
+    ).addEventListener(
+        'click',
+        function (event) {
+            if (
+                event.target ===
+                this
+            ) {
+                closeCreditApplyModal();
+            }
+        }
+    );
+
+    document.getElementById(
+        'paymentConfirmModal'
+    ).addEventListener(
+        'click',
+        function (event) {
+            if (
+                event.target ===
+                this
+            ) {
+                closePaymentConfirmModal();
             }
         }
     );
